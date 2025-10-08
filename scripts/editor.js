@@ -39,6 +39,26 @@ export function initializeEditor() {
         { id: 'slate', name: 'Gris pizarra', className: 'floating-note-style-slate' }
       ];
 
+      const NOTE_TYPES = {
+        FLOATING: 'floating',
+        MARGIN: 'margin',
+        INLINE: 'inline',
+        FOOTNOTE: 'footnote'
+      };
+
+      const NOTE_CATEGORIES = {
+        IMPORTANT: { icon: '⚠️', color: '#dc3545', label: 'Importante' },
+        PEARL: { icon: '💎', color: '#6f42c1', label: 'Perla clínica' },
+        REMEMBER: { icon: '🔔', color: '#fd7e14', label: 'Recordar' },
+        QUESTION: { icon: '❓', color: '#0dcaf0', label: 'Duda' },
+        REFERENCE: { icon: '📚', color: '#198754', label: 'Referencia' },
+        TODO: { icon: '☑️', color: '#6c757d', label: 'Por hacer' },
+        PERSONAL: { icon: '✍️', color: '#0d6efd', label: 'Personal' }
+      };
+
+      const NOTE_PRIORITY_CYCLE = ['normal', 'high', 'low'];
+      const DEFAULT_NOTE_CATEGORY = 'PERSONAL';
+
       let floatingNotesHidden = false;
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
@@ -48,6 +68,11 @@ export function initializeEditor() {
       const FLOATING_NOTE_MIN_HEIGHT = 140;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
+      const notesRegistry = new Map();
+      const noteAnchors = new Map();
+      const noteConnectorPaths = new Map();
+      let activeNoteLinkMenu = null;
+      let notesViewController = null;
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -109,11 +134,27 @@ export function initializeEditor() {
       const modalOverlay = document.getElementById('modalOverlay');
       const modalContent = document.getElementById('modalContent');
       const floatingNotesLayer = document.getElementById('floatingNotesLayer');
+      const noteConnectorLayer = document.getElementById('noteConnectorLayer');
       const addFloatingNoteBtn = document.getElementById('addFloatingNoteBtn');
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
+      const notesViewBtn = document.getElementById('notesViewBtn');
+      const notesViewCount = document.getElementById('notesViewCount');
+      const notesViewPanel = document.getElementById('notesViewPanel');
+      const notesViewClose = document.getElementById('notesViewClose');
+      const noteCategoryFilter = document.getElementById('noteCategoryFilter');
+      const notePriorityFilter = document.getElementById('notePriorityFilter');
+      const notesSortBy = document.getElementById('notesSortBy');
+      const notesSearchInput = document.getElementById('notesSearchInput');
+      const notesListContainer = document.getElementById('notesListContainer');
+      const notesStats = document.getElementById('notesStats');
+      const exportNotesBtn = document.getElementById('exportNotesBtn');
+      const printNotesBtn = document.getElementById('printNotesBtn');
+      const clearReviewedBtn = document.getElementById('clearReviewedBtn');
+      const notesViewScopeButtons = notesViewPanel ? Array.from(notesViewPanel.querySelectorAll('.scope-btn')) : [];
 
       if (typeof ResizeObserver === 'function') {
         floatingNoteResizeObserver = new ResizeObserver((entries) => {
+          let updated = false;
           entries.forEach((entry) => {
             const target = entry.target;
             if (!(target instanceof HTMLElement) || !target.classList.contains('floating-note')) {
@@ -123,7 +164,11 @@ export function initializeEditor() {
             const currentLeft = Number.parseFloat(target.dataset.left || target.style.left || '0');
             const currentTop = Number.parseFloat(target.dataset.top || target.style.top || '0');
             positionFloatingNote(target, currentLeft, currentTop);
+            updated = true;
           });
+          if (updated) {
+            refreshNoteConnections();
+          }
         });
       }
 
@@ -3253,12 +3298,13 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu();
         } else {
           clampAllFloatingNotes();
+          refreshNoteConnections();
         }
       }
 
       function setFloatingNotesEditable(editable) {
         if (!floatingNotesLayer) return;
-        const bodies = floatingNotesLayer.querySelectorAll('.floating-note-body');
+        const bodies = floatingNotesLayer.querySelectorAll('.floating-note-body, .note-body');
         bodies.forEach(body => {
           body.contentEditable = editable ? 'true' : 'false';
         });
@@ -3290,6 +3336,7 @@ export function initializeEditor() {
         const newLeft = event.clientX - layerRect.left - state.offsetX;
         const newTop = event.clientY - layerRect.top - state.offsetY;
         positionFloatingNote(state.note, newLeft, newTop);
+        refreshNoteConnections();
         event.preventDefault();
       }
 
@@ -3318,6 +3365,15 @@ export function initializeEditor() {
         if (floatingNoteResizeObserver) {
           floatingNoteResizeObserver.disconnect();
         }
+        notesRegistry.clear();
+        noteAnchors.clear();
+        noteConnectorPaths.clear();
+        if (noteConnectorLayer) {
+          noteConnectorLayer.innerHTML = '';
+        }
+        document.querySelectorAll('.note-anchor').forEach(anchor => anchor.remove());
+        updateNotesBadgeCount();
+        refreshNotesViewIfOpen();
       }
 
       function clampAllFloatingNotes() {
@@ -3333,10 +3389,499 @@ export function initializeEditor() {
         });
       }
 
+      function getNoteCategoryInfo(categoryKey) {
+        const normalized = typeof categoryKey === 'string' ? categoryKey.toUpperCase() : '';
+        return NOTE_CATEGORIES[normalized] || NOTE_CATEGORIES[DEFAULT_NOTE_CATEGORY] || NOTE_CATEGORIES.PERSONAL;
+      }
+
+      function getNoteData(note) {
+        if (!note) return null;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return null;
+        let data = notesRegistry.get(noteId);
+        if (!data) {
+          const bodyHtml = note.querySelector('.note-body')?.innerHTML || note.querySelector('.floating-note-body')?.innerHTML || '';
+          const tagsAttr = note.dataset.tags ? note.dataset.tags.split(',').map(tag => tag.trim()).filter(Boolean) : [];
+          data = {
+            id: noteId,
+            type: note.dataset.noteType || NOTE_TYPES.FLOATING,
+            category: note.dataset.category || DEFAULT_NOTE_CATEGORY,
+            content: bodyHtml,
+            linkedTo: note.dataset.linkedTo || null,
+            topicId: note.dataset.topicId || null,
+            sectionId: note.dataset.sectionId || null,
+            tags: tagsAttr,
+            priority: note.dataset.priority || 'normal',
+            createdAt: note.dataset.createdAt || new Date().toISOString(),
+            updatedAt: note.dataset.updatedAt || new Date().toISOString(),
+            reviewed: note.dataset.reviewed === 'true',
+            reviewCount: Number.parseInt(note.dataset.reviewCount || '0', 10) || 0,
+            lastReviewed: note.dataset.lastReviewed || null
+          };
+          notesRegistry.set(noteId, data);
+        }
+        return data;
+      }
+
+      function updateNoteData(note, updates = {}) {
+        if (!note) return null;
+        const current = { ...getNoteData(note) };
+        if (!current.id) return null;
+        const next = { ...current, ...updates };
+        notesRegistry.set(next.id, next);
+        note.dataset.noteType = next.type;
+        note.dataset.category = next.category;
+        note.dataset.priority = next.priority;
+        note.dataset.linkedTo = next.linkedTo || '';
+        note.dataset.sectionId = next.sectionId || '';
+        note.dataset.topicId = next.topicId || '';
+        note.dataset.createdAt = next.createdAt || '';
+        note.dataset.updatedAt = next.updatedAt || '';
+        note.dataset.reviewed = next.reviewed ? 'true' : 'false';
+        note.dataset.reviewCount = String(next.reviewCount || 0);
+        note.dataset.lastReviewed = next.lastReviewed || '';
+        note.dataset.tags = Array.isArray(next.tags) ? next.tags.join(',') : '';
+        return next;
+      }
+
+      function updateNotesBadgeCount() {
+        if (!notesViewCount) return;
+        notesViewCount.textContent = String(notesRegistry.size || 0);
+      }
+
+      function refreshNotesViewIfOpen() {
+        if (notesViewPanel?.classList.contains('open') && notesViewController) {
+          notesViewController.render();
+        }
+      }
+
+      function ensureNoteCategoryOptions() {
+        if (!noteCategoryFilter) return;
+        const existingValues = new Set(Array.from(noteCategoryFilter.options || []).map(opt => opt.value));
+        Object.entries(NOTE_CATEGORIES).forEach(([key, info]) => {
+          if (existingValues.has(key)) return;
+          const option = document.createElement('option');
+          option.value = key;
+          option.textContent = `${info.icon} ${info.label}`;
+          noteCategoryFilter.appendChild(option);
+        });
+      }
+
+      function parseTagInput(value = '') {
+        return value.split(',').map(tag => tag.trim()).filter(Boolean);
+      }
+
+      function stripHtml(html = '') {
+        const temp = document.createElement('div');
+        temp.innerHTML = html;
+        return temp.textContent || temp.innerText || '';
+      }
+
+      function escapeHtml(str = '') {
+        return str
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function escapeRegExp(str = '') {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+
+      function getActiveSectionId() {
+        const page = getCurrentPage();
+        return currentSectionId || page?.dataset.sectionId || null;
+      }
+
+      function getActiveTopicId() {
+        const page = getCurrentPage();
+        return page?.dataset.topicId || null;
+      }
+
+      function getSectionNameById(sectionId) {
+        if (!sectionId) return 'Sin sección';
+        const section = sections.find(sec => (sec.id && sec.id === sectionId) || sec.temas?.some(t => t.page?.dataset.sectionId === sectionId));
+        if (section?.nombre) return section.nombre;
+        const page = pages.find(p => p.dataset.sectionId === sectionId);
+        return page?.dataset.sectionName || 'Sin sección';
+      }
+
+      function getTopicTitleById(topicId) {
+        if (!topicId) return 'Sin tema';
+        const page = pages.find(p => p.dataset.topicId === topicId);
+        if (page) {
+          const heading = page.querySelector('h1, h2, h3');
+          if (heading) {
+            return heading.textContent.trim();
+          }
+        }
+        const sectionTopic = sections.flatMap(sec => sec.temas || []).find(t => t.id === topicId || t.page?.dataset.topicId === topicId);
+        if (sectionTopic?.nombre) return sectionTopic.nombre;
+        const fallback = document.querySelector(`[data-topic-id="${CSS.escape(topicId)}"] h1`);
+        return (fallback?.textContent || 'Tema').trim();
+      }
+
+      function formatRelativeTime(isoString) {
+        if (!isoString) return '';
+        const target = new Date(isoString);
+        if (Number.isNaN(target.getTime())) return '';
+        const now = new Date();
+        const diffMs = now - target;
+        const diffMinutes = Math.floor(diffMs / 60000);
+        if (diffMinutes < 1) return 'Hace instantes';
+        if (diffMinutes < 60) return `Hace ${diffMinutes} min`;
+        const diffHours = Math.floor(diffMinutes / 60);
+        if (diffHours < 24) return `Hace ${diffHours} h`;
+        const diffDays = Math.floor(diffHours / 24);
+        if (diffDays === 1) return 'Hace 1 día';
+        if (diffDays < 7) return `Hace ${diffDays} días`;
+        return target.toLocaleDateString();
+      }
+
+      function updateConnectorViewport() {
+        if (!noteConnectorLayer) return;
+        const width = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+        const height = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+        noteConnectorLayer.setAttribute('width', String(width));
+        noteConnectorLayer.setAttribute('height', String(height));
+        noteConnectorLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      }
+
+      function refreshNoteConnections() {
+        if (!noteConnectorLayer) return;
+        updateConnectorViewport();
+        noteConnectorLayer.innerHTML = '';
+        notesRegistry.forEach(data => {
+          if (!data.linkedTo) return;
+          const anchorEntry = noteAnchors.get(data.linkedTo);
+          if (!anchorEntry?.element) return;
+          const note = floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${CSS.escape(data.id)}"]`);
+          if (!note) return;
+          const anchorRect = anchorEntry.element.getBoundingClientRect();
+          const noteRect = note.getBoundingClientRect();
+          const layerRect = noteConnectorLayer.getBoundingClientRect();
+          const startX = anchorRect.left + anchorRect.width / 2;
+          const startY = anchorRect.top + anchorRect.height / 2;
+          const endX = noteRect.left;
+          const endY = noteRect.top + noteRect.height / 2;
+          const ctrlX = (startX + endX) / 2;
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const colorInfo = getNoteCategoryInfo(data.category);
+          path.setAttribute('d', `M ${startX - layerRect.left} ${startY - layerRect.top} C ${ctrlX - layerRect.left} ${startY - layerRect.top} ${ctrlX - layerRect.left} ${endY - layerRect.top} ${endX - layerRect.left} ${endY - layerRect.top}`);
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', colorInfo.color || 'rgba(13,110,253,0.4)');
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('stroke-linecap', 'round');
+          noteConnectorLayer.appendChild(path);
+          noteConnectorPaths.set(data.id, path);
+        });
+      }
+
+      function refreshNoteMeta(note) {
+        const data = getNoteData(note);
+        if (!data) return;
+        const metaDate = note.querySelector('.note-date');
+        const reviewStatus = note.querySelector('.note-review-status');
+        if (metaDate) {
+          metaDate.textContent = formatRelativeTime(data.updatedAt);
+        }
+        if (reviewStatus) {
+          const statusIcon = data.reviewed ? '📚' : '📖';
+          reviewStatus.textContent = `${statusIcon} ${data.reviewCount || 0}`;
+        }
+      }
+
+      function updateNoteCategoryDisplay(note, categoryKey) {
+        const info = getNoteCategoryInfo(categoryKey);
+        const icon = note.querySelector('.note-icon');
+        const label = note.querySelector('.note-label');
+        if (icon) icon.textContent = info.icon;
+        if (label) label.textContent = info.label;
+        note.style.setProperty('--note-accent', info.color || '#0d6efd');
+        const typeBadge = note.querySelector('.note-type-badge');
+        if (typeBadge) {
+          const data = getNoteData(note);
+          if (data?.type && data.type !== NOTE_TYPES.FLOATING) {
+            const typeIcons = {
+              [NOTE_TYPES.MARGIN]: '💭',
+              [NOTE_TYPES.INLINE]: '🔗',
+              [NOTE_TYPES.FOOTNOTE]: '📝'
+            };
+            const typeLabels = {
+              [NOTE_TYPES.MARGIN]: 'Margen',
+              [NOTE_TYPES.INLINE]: 'Inline',
+              [NOTE_TYPES.FOOTNOTE]: 'Nota al pie'
+            };
+            typeBadge.textContent = `${typeIcons[data.type] || '📝'} ${typeLabels[data.type] || ''}`.trim();
+            typeBadge.hidden = false;
+          } else {
+            typeBadge.hidden = true;
+          }
+        }
+      }
+
+      function updatePriorityButton(note) {
+        const button = note.querySelector('.note-priority');
+        const data = getNoteData(note);
+        if (!button || !data) return;
+        const titles = {
+          low: 'Prioridad baja',
+          normal: 'Prioridad normal',
+          high: 'Prioridad alta'
+        };
+        const icons = {
+          low: '⬇️',
+          normal: '⭐',
+          high: '🔥'
+        };
+        const priority = data.priority || 'normal';
+        button.textContent = icons[priority] || '⭐';
+        button.title = titles[priority] || 'Prioridad';
+      }
+
+      function renderNoteTags(note) {
+        const data = getNoteData(note);
+        if (!data) return;
+        const tagsContainer = note.querySelector('.note-tags');
+        if (!tagsContainer) return;
+        const tagElements = data.tags?.map(tag => {
+          const span = document.createElement('span');
+          span.className = 'tag';
+          span.textContent = `#${tag.replace(/^#/, '')}`;
+          return span;
+        }) || [];
+        tagsContainer.querySelectorAll('.tag').forEach(tagEl => tagEl.remove());
+        tagElements.forEach(el => tagsContainer.appendChild(el));
+      }
+
+      function setNoteCategory(note, categoryKey) {
+        const data = updateNoteData(note, { category: categoryKey, updatedAt: new Date().toISOString() });
+        updateNoteCategoryDisplay(note, data.category);
+        if (data.linkedTo) {
+          const anchorEntry = noteAnchors.get(data.linkedTo);
+          if (anchorEntry?.element) {
+            const info = getNoteCategoryInfo(data.category);
+            anchorEntry.element.dataset.category = data.category;
+            anchorEntry.element.dataset.icon = info.icon;
+          }
+        }
+        refreshNotesViewIfOpen();
+        updateNotesBadgeCount();
+        refreshNoteConnections();
+      }
+
+      function setNotePriority(note, priority) {
+        const normalized = NOTE_PRIORITY_CYCLE.includes(priority) ? priority : 'normal';
+        updateNoteData(note, { priority: normalized, updatedAt: new Date().toISOString() });
+        updatePriorityButton(note);
+        refreshNotesViewIfOpen();
+        updateNotesBadgeCount();
+      }
+
+      function cycleNotePriority(note) {
+        const data = getNoteData(note);
+        const current = data?.priority || 'normal';
+        const index = NOTE_PRIORITY_CYCLE.indexOf(current);
+        const next = NOTE_PRIORITY_CYCLE[(index + 1) % NOTE_PRIORITY_CYCLE.length];
+        setNotePriority(note, next);
+      }
+
+      function setNoteTags(note, tags) {
+        const normalized = Array.isArray(tags) ? tags.map(tag => tag.replace(/^#/, '').trim()).filter(Boolean) : [];
+        updateNoteData(note, { tags: normalized, updatedAt: new Date().toISOString() });
+        renderNoteTags(note);
+        refreshNotesViewIfOpen();
+      }
+
+      function toggleNoteReviewed(note) {
+        const data = getNoteData(note);
+        if (!data) return;
+        const reviewed = !data.reviewed;
+        const reviewCount = reviewed ? (data.reviewCount || 0) + 1 : data.reviewCount || 0;
+        updateNoteData(note, {
+          reviewed,
+          reviewCount,
+          lastReviewed: reviewed ? new Date().toISOString() : null,
+          updatedAt: new Date().toISOString()
+        });
+        refreshNoteMeta(note);
+        refreshNotesViewIfOpen();
+      }
+
+      function unlinkNoteAnchor(note) {
+        const data = getNoteData(note);
+        if (!data?.linkedTo) return;
+        const entry = noteAnchors.get(data.linkedTo);
+        if (entry?.element?.parentElement) {
+          entry.element.remove();
+        }
+        noteAnchors.delete(data.linkedTo);
+        noteConnectorPaths.delete(data.id);
+        updateNoteData(note, { linkedTo: null, type: NOTE_TYPES.FLOATING });
+        note.classList.remove('note-type-margin', 'note-type-inline', 'note-type-footnote');
+        refreshNoteConnections();
+        updateNoteCategoryDisplay(note, getNoteData(note)?.category || DEFAULT_NOTE_CATEGORY);
+      }
+
+      function deleteNoteElement(note) {
+        if (!note) return;
+        unlinkNoteAnchor(note);
+        const noteId = note.dataset.noteId || '';
+        if (floatingNoteResizeObserver) {
+          try {
+            floatingNoteResizeObserver.unobserve(note);
+          } catch (err) {
+            // ignore
+          }
+        }
+        notesRegistry.delete(noteId);
+        note.remove();
+        updateNotesBadgeCount();
+        refreshNotesViewIfOpen();
+        refreshNoteConnections();
+      }
+
+      function setNoteType(note, type) {
+        const normalized = Object.values(NOTE_TYPES).includes(type) ? type : NOTE_TYPES.FLOATING;
+        note.classList.toggle('note-type-margin', normalized === NOTE_TYPES.MARGIN);
+        note.classList.toggle('note-type-inline', normalized === NOTE_TYPES.INLINE);
+        note.classList.toggle('note-type-footnote', normalized === NOTE_TYPES.FOOTNOTE);
+        const data = updateNoteData(note, { type: normalized, updatedAt: new Date().toISOString() });
+        updateNoteCategoryDisplay(note, data.category);
+        refreshNotesViewIfOpen();
+        refreshNoteConnections();
+      }
+
+      function positionAnchoredNote(note) {
+        const data = getNoteData(note);
+        if (!data?.linkedTo) return;
+        const anchorEntry = noteAnchors.get(data.linkedTo);
+        if (!anchorEntry?.element || !floatingNotesLayer) return;
+        const anchorRect = anchorEntry.element.getBoundingClientRect();
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const preferredLeft = anchorRect.right - layerRect.left + 40;
+        const preferredTop = anchorRect.top - layerRect.top - (note.offsetHeight / 2);
+        positionFloatingNote(note, preferredLeft, preferredTop);
+        refreshNoteConnections();
+      }
+
+      function handleAnchorClick(event) {
+        const noteId = event.currentTarget?.dataset.noteId;
+        if (!noteId) return;
+        const note = floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${CSS.escape(noteId)}"]`);
+        if (!note) return;
+        note.classList.add('highlighted');
+        setTimeout(() => note.classList.remove('highlighted'), 1200);
+        note.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function linkNoteToSelection(note, type = NOTE_TYPES.INLINE) {
+        if (!note) return;
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          alert('Selecciona un fragmento de texto para anclar la nota.');
+          return;
+        }
+        const range = selection.getRangeAt(0).cloneRange();
+        range.collapse(false);
+        const anchorId = generateUniqueId('note-anchor');
+        const anchor = document.createElement('span');
+        anchor.className = 'note-anchor';
+        anchor.dataset.noteId = getNoteData(note)?.id || '';
+        anchor.dataset.anchorId = anchorId;
+        const category = getNoteData(note)?.category || DEFAULT_NOTE_CATEGORY;
+        const info = getNoteCategoryInfo(category);
+        anchor.dataset.category = category;
+        anchor.dataset.icon = info.icon;
+        anchor.title = 'Nota vinculada';
+        anchor.tabIndex = 0;
+        anchor.addEventListener('click', handleAnchorClick);
+        range.insertNode(anchor);
+        noteAnchors.set(anchorId, { element: anchor, noteId: note.dataset.noteId });
+        updateNoteData(note, { linkedTo: anchorId, type, updatedAt: new Date().toISOString() });
+        setNoteType(note, type);
+        positionAnchoredNote(note);
+        refreshNoteConnections();
+        selection.removeAllRanges();
+      }
+
+      function createNoteLinkMenu(note, trigger) {
+        const menu = document.createElement('div');
+        menu.className = 'note-link-menu';
+        const options = [
+          { type: NOTE_TYPES.MARGIN, label: 'Anclar al margen', icon: '💭' },
+          { type: NOTE_TYPES.INLINE, label: 'Anclar en línea', icon: '🔗' },
+          { type: NOTE_TYPES.FOOTNOTE, label: 'Crear nota al pie', icon: '📝' }
+        ];
+        options.forEach(opt => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.innerHTML = `<span>${opt.icon}</span> <span>${opt.label}</span>`;
+          btn.addEventListener('click', () => {
+            linkNoteToSelection(note, opt.type);
+            closeNoteLinkMenu();
+          });
+          menu.appendChild(btn);
+        });
+
+        const unlinkBtn = document.createElement('button');
+        unlinkBtn.type = 'button';
+        unlinkBtn.innerHTML = '<span>❌</span> <span>Quitar anclaje</span>';
+        unlinkBtn.addEventListener('click', () => {
+          unlinkNoteAnchor(note);
+          closeNoteLinkMenu();
+        });
+        menu.appendChild(unlinkBtn);
+
+        trigger.parentElement?.appendChild(menu);
+        return menu;
+      }
+
+      function closeNoteLinkMenu(menu = null) {
+        const target = menu || activeNoteLinkMenu;
+        if (!target) return;
+        target.classList.remove('show');
+        if (target.parentElement && target.parentElement.contains(target)) {
+          target.parentElement.removeChild(target);
+        }
+        if (!menu) {
+          activeNoteLinkMenu = null;
+        }
+      }
+
+      function openNoteLinkMenu(note, trigger) {
+        if (activeNoteLinkMenu) {
+          closeNoteLinkMenu(activeNoteLinkMenu);
+          activeNoteLinkMenu = null;
+        }
+        const menu = createNoteLinkMenu(note, trigger);
+        activeNoteLinkMenu = menu;
+        requestAnimationFrame(() => {
+          menu.classList.add('show');
+        });
+      }
+
+      function createFlashcardFromNote(note, button) {
+        const data = getNoteData(note);
+        if (!data) return;
+        if (button) {
+          const original = button.textContent;
+          button.textContent = '✅';
+          setTimeout(() => {
+            button.textContent = original;
+          }, 1500);
+        }
+        console.info('Flashcard generada a partir de la nota:', data);
+      }
+
       function createFloatingNote(data = {}) {
         if (!floatingNotesLayer) return null;
+        ensureNoteCategoryOptions();
+
         const note = document.createElement('div');
-        note.className = 'floating-note';
+        note.className = 'floating-note enhanced-note';
 
         let noteId = data.id ? String(data.id).trim() : '';
         if (!noteId) {
@@ -3350,16 +3895,57 @@ export function initializeEditor() {
         applyFloatingNoteStyle(note, styleId);
 
         const header = document.createElement('div');
-        header.className = 'floating-note-header';
+        header.className = 'note-header';
+
+        const categoryWrap = document.createElement('div');
+        categoryWrap.className = 'note-category';
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'note-icon';
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'note-label';
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'note-type-badge';
+        typeBadge.hidden = true;
+
+        categoryWrap.appendChild(iconSpan);
+        categoryWrap.appendChild(labelSpan);
+        categoryWrap.appendChild(typeBadge);
+        categoryWrap.title = 'Haz clic para cambiar la categoría';
+        categoryWrap.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const categories = Object.keys(NOTE_CATEGORIES);
+          const current = (getNoteData(note)?.category || DEFAULT_NOTE_CATEGORY).toUpperCase();
+          const currentIndex = categories.indexOf(current);
+          const nextCategory = categories[(currentIndex + 1) % categories.length];
+          setNoteCategory(note, nextCategory);
+        });
 
         const actions = document.createElement('div');
-        actions.className = 'floating-note-actions';
+        actions.className = 'note-actions';
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.title = 'Eliminar nota';
-        deleteBtn.textContent = '✖️';
-        deleteBtn.setAttribute('aria-label', 'Eliminar nota');
+        const priorityBtn = document.createElement('button');
+        priorityBtn.type = 'button';
+        priorityBtn.className = 'note-priority';
+        priorityBtn.title = 'Prioridad';
+
+        const linkBtn = document.createElement('button');
+        linkBtn.type = 'button';
+        linkBtn.className = 'note-link';
+        linkBtn.title = 'Anclar al texto';
+        linkBtn.textContent = '🔗';
+
+        const flashcardBtn = document.createElement('button');
+        flashcardBtn.type = 'button';
+        flashcardBtn.className = 'note-flashcard';
+        flashcardBtn.title = 'Crear flashcard';
+        flashcardBtn.textContent = '🎴';
+
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.className = 'note-menu';
+        menuBtn.title = 'Más opciones';
+        menuBtn.textContent = '⋮';
 
         const styleMenu = document.createElement('div');
         styleMenu.className = 'floating-note-style-menu';
@@ -3396,64 +3982,150 @@ export function initializeEditor() {
         });
         styleMenu.appendChild(resetSizeBtn);
 
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = 'Eliminar nota';
         deleteBtn.addEventListener('click', (event) => {
           event.stopPropagation();
-          if (floatingNoteResizeObserver) {
-            try {
-              floatingNoteResizeObserver.unobserve(note);
-            } catch (err) {
-              // ignore observer errors
-            }
-          }
-          if (activeFloatingNoteStyleMenu === styleMenu) {
+          closeFloatingNoteStyleMenu(styleMenu);
+          deleteNoteElement(note);
+        });
+        styleMenu.appendChild(deleteBtn);
+
+        menuBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (styleMenu.classList.contains('show')) {
             closeFloatingNoteStyleMenu(styleMenu);
+          } else {
+            syncFloatingNoteStyleMenu(styleMenu, note.dataset.style || 'default');
+            closeFloatingNoteStyleMenu();
+            styleMenu.classList.add('show');
+            styleMenu.setAttribute('aria-hidden', 'false');
+            activeFloatingNoteStyleMenu = styleMenu;
           }
-          note.remove();
         });
 
-        actions.appendChild(deleteBtn);
+        actions.appendChild(priorityBtn);
+        actions.appendChild(linkBtn);
+        actions.appendChild(flashcardBtn);
+        actions.appendChild(menuBtn);
         actions.appendChild(styleMenu);
 
+        header.appendChild(categoryWrap);
         header.appendChild(actions);
 
-        header.addEventListener('pointerdown', (event) => {
-          if (event.button !== 0) return;
-          if (event.detail > 1) return;
-          if (event.target.closest('button') || event.target.closest('.floating-note-style-menu')) return;
-          closeFloatingNoteStyleMenu(styleMenu);
-          startFloatingNoteDrag(note, event);
-        });
-
-        header.addEventListener('click', (event) => {
-          if (event.detail === 2) {
-            event.preventDefault();
-            event.stopPropagation();
-            bringNoteToFront(note);
-            if (styleMenu.classList.contains('show')) {
-              closeFloatingNoteStyleMenu(styleMenu);
-            } else {
-              syncFloatingNoteStyleMenu(styleMenu, note.dataset.style || 'default');
-              openFloatingNoteStyleMenu(styleMenu);
-            }
-          }
-        });
-
         const body = document.createElement('div');
-        body.className = 'floating-note-body';
+        body.className = 'note-body';
         body.spellcheck = true;
         body.contentEditable = isEditMode ? 'true' : 'false';
-        if (typeof data.html === 'string') {
-          body.innerHTML = data.html;
-        } else {
-          body.innerHTML = '';
-        }
+        body.innerHTML = typeof data.html === 'string' ? data.html : (data.content || '');
         body.addEventListener('focus', () => {
           bringNoteToFront(note);
         });
+        body.addEventListener('input', () => {
+          const updatedAt = new Date().toISOString();
+          updateNoteData(note, { content: body.innerHTML, updatedAt });
+          refreshNoteMeta(note);
+          refreshNotesViewIfOpen();
+        });
+
+        const footer = document.createElement('div');
+        footer.className = 'note-footer';
+
+        const tagsRow = document.createElement('div');
+        tagsRow.className = 'note-tags';
+
+        const tagsInput = document.createElement('input');
+        tagsInput.type = 'text';
+        tagsInput.className = 'note-tag-input';
+        tagsInput.placeholder = 'Etiquetas (usa comas)';
+
+        const metaRow = document.createElement('div');
+        metaRow.className = 'note-meta';
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'note-date';
+        const reviewStatus = document.createElement('span');
+        reviewStatus.className = 'note-review-status';
+        const reviewBtn = document.createElement('button');
+        reviewBtn.type = 'button';
+        reviewBtn.className = 'note-review-toggle';
+        reviewBtn.textContent = '✓ Revisada';
+
+        metaRow.appendChild(dateSpan);
+        metaRow.appendChild(reviewStatus);
+        metaRow.appendChild(reviewBtn);
+
+        footer.appendChild(tagsRow);
+        footer.appendChild(tagsInput);
+        footer.appendChild(metaRow);
 
         note.appendChild(header);
         note.appendChild(body);
+        note.appendChild(footer);
         floatingNotesLayer.appendChild(note);
+
+        const initialTags = Array.isArray(data.tags)
+          ? data.tags
+          : parseTagInput(typeof data.tags === 'string' ? data.tags : '');
+        const initialPriority = NOTE_PRIORITY_CYCLE.includes(data.priority) ? data.priority : 'normal';
+        const normalizedCategory = data.category && NOTE_CATEGORIES[data.category.toUpperCase()]
+          ? data.category.toUpperCase()
+          : DEFAULT_NOTE_CATEGORY;
+        const initialData = updateNoteData(note, {
+          id: noteId,
+          style: styleId,
+          type: data.type && Object.values(NOTE_TYPES).includes(data.type) ? data.type : NOTE_TYPES.FLOATING,
+          category: normalizedCategory,
+          content: body.innerHTML,
+          linkedTo: data.linkedTo || null,
+          topicId: data.topicId || null,
+          sectionId: data.sectionId || null,
+          tags: initialTags,
+          priority: initialPriority,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+          reviewed: !!data.reviewed,
+          reviewCount: Number.isFinite(data.reviewCount) ? data.reviewCount : 0,
+          lastReviewed: data.lastReviewed || null
+        });
+
+        tagsInput.value = initialData.tags.join(', ');
+        tagsInput.addEventListener('change', () => {
+          setNoteTags(note, parseTagInput(tagsInput.value));
+        });
+
+        reviewBtn.addEventListener('click', () => {
+          toggleNoteReviewed(note);
+        });
+
+        priorityBtn.addEventListener('click', () => {
+          cycleNotePriority(note);
+        });
+
+        linkBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openNoteLinkMenu(note, linkBtn);
+        });
+
+        flashcardBtn.addEventListener('click', () => {
+          createFlashcardFromNote(note, flashcardBtn);
+        });
+
+        header.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0 || event.detail > 1) return;
+          if (event.target.closest('.note-actions') || event.target.closest('.note-category')) return;
+          closeFloatingNoteStyleMenu();
+          startFloatingNoteDrag(note, event);
+        });
+
+        note.addEventListener('pointerdown', (event) => {
+          if (event.target.closest('.floating-note-style-menu') || event.target.closest('.note-link-menu')) {
+            return;
+          }
+          bringNoteToFront(note);
+          closeFloatingNoteStyleMenu();
+          closeNoteLinkMenu();
+        });
 
         if (floatingNoteResizeObserver) {
           try {
@@ -3472,14 +4144,10 @@ export function initializeEditor() {
         }
 
         syncFloatingNoteStyleMenu(styleMenu, note.dataset.style || 'default');
-
-        note.addEventListener('pointerdown', (event) => {
-          if (event.target.closest('.floating-note-style-menu')) {
-            return;
-          }
-          bringNoteToFront(note);
-          closeFloatingNoteStyleMenu();
-        });
+        updateNoteCategoryDisplay(note, initialData.category);
+        updatePriorityButton(note);
+        renderNoteTags(note);
+        refreshNoteMeta(note);
 
         const parsedLeft = Number.parseFloat(data.left);
         const parsedTop = Number.parseFloat(data.top);
@@ -3492,9 +4160,26 @@ export function initializeEditor() {
         positionFloatingNote(note, initialLeft, initialTop);
         bringNoteToFront(note);
 
+        if (initialData.linkedTo) {
+          const existingAnchor = document.querySelector(`.note-anchor[data-anchor-id="${CSS.escape(initialData.linkedTo)}"]`);
+          if (existingAnchor) {
+            existingAnchor.dataset.noteId = noteId;
+            existingAnchor.dataset.category = initialData.category;
+            existingAnchor.dataset.icon = getNoteCategoryInfo(initialData.category).icon;
+            existingAnchor.addEventListener('click', handleAnchorClick);
+            noteAnchors.set(initialData.linkedTo, { element: existingAnchor, noteId });
+            setNoteType(note, initialData.type || NOTE_TYPES.FLOATING);
+            positionAnchoredNote(note);
+          }
+        }
+
         if (data.focus !== false && isEditMode) {
           setTimeout(() => body.focus(), 0);
         }
+
+        updateNotesBadgeCount();
+        refreshNotesViewIfOpen();
+        refreshNoteConnections();
 
         return note;
       }
@@ -3507,16 +4192,29 @@ export function initializeEditor() {
             createFloatingNote({
               id: noteData.id,
               style: noteData.style,
-              html: typeof noteData.html === 'string' ? noteData.html : '',
+              html: typeof noteData.html === 'string' ? noteData.html : noteData.content,
               left: noteData.left,
               top: noteData.top,
               width: noteData.width,
               height: noteData.height,
+              type: noteData.type,
+              category: noteData.category,
+              priority: noteData.priority,
+              tags: noteData.tags,
+              linkedTo: noteData.linkedTo,
+              topicId: noteData.topicId,
+              sectionId: noteData.sectionId,
+              createdAt: noteData.createdAt,
+              updatedAt: noteData.updatedAt,
+              reviewed: noteData.reviewed,
+              reviewCount: noteData.reviewCount,
+              lastReviewed: noteData.lastReviewed,
               focus: false
             });
           });
         }
         setFloatingNotesVisibility(hidden);
+        refreshNoteConnections();
       }
 
       window.addEventListener('pointermove', handleFloatingNotePointerMove);
@@ -3525,11 +4223,318 @@ export function initializeEditor() {
         if (!floatingNoteResizeObserver && floatingNotesLayer) {
           floatingNotesLayer.querySelectorAll('.floating-note').forEach(updateFloatingNoteSizeDataset);
         }
+        refreshNoteConnections();
       });
       window.addEventListener('pointercancel', endFloatingNoteDrag);
-      window.addEventListener('resize', clampAllFloatingNotes);
+      window.addEventListener('resize', () => {
+        clampAllFloatingNotes();
+        refreshNoteConnections();
+      });
+      window.addEventListener('scroll', () => {
+        refreshNoteConnections();
+      });
 
       refreshToggleNotesButton();
+
+      document.addEventListener('click', (event) => {
+        if (event.target.closest('.note-link') || event.target.closest('.note-link-menu')) {
+          return;
+        }
+        closeNoteLinkMenu();
+      });
+
+      class NotesViewController {
+        constructor() {
+          this.panel = notesViewPanel;
+          this.container = notesListContainer;
+          this.statsElement = notesStats;
+          this.currentScope = 'all';
+          this.filters = {
+            category: '',
+            priority: '',
+            search: ''
+          };
+          this.sortBy = 'recent';
+          this.viewMode = 'list';
+        }
+
+        open(scope = 'all') {
+          this.currentScope = scope;
+          this.render();
+          if (this.panel) {
+            this.panel.classList.add('open');
+            this.panel.setAttribute('aria-hidden', 'false');
+          }
+        }
+
+        close() {
+          if (this.panel) {
+            this.panel.classList.remove('open');
+            this.panel.setAttribute('aria-hidden', 'true');
+          }
+        }
+
+        getAllNotes() {
+          return Array.from(notesRegistry.values());
+        }
+
+        getFilteredNotes() {
+          let notes = this.getAllNotes();
+
+          if (this.currentScope === 'section') {
+            const activeSection = getActiveSectionId();
+            if (activeSection) {
+              notes = notes.filter(note => note.sectionId === activeSection);
+            }
+          } else if (this.currentScope === 'topic') {
+            const activeTopic = getActiveTopicId();
+            if (activeTopic) {
+              notes = notes.filter(note => note.topicId === activeTopic);
+            }
+          }
+
+          if (this.filters.category) {
+            notes = notes.filter(note => (note.category || DEFAULT_NOTE_CATEGORY) === this.filters.category);
+          }
+
+          if (this.filters.priority) {
+            notes = notes.filter(note => (note.priority || 'normal') === this.filters.priority);
+          }
+
+          if (this.filters.search) {
+            const term = this.filters.search.toLowerCase();
+            notes = notes.filter(note => {
+              const text = stripHtml(note.content || '').toLowerCase();
+              const tagMatch = Array.isArray(note.tags) && note.tags.some(tag => tag.toLowerCase().includes(term));
+              return text.includes(term) || tagMatch;
+            });
+          }
+
+          return this.sortNotes(notes);
+        }
+
+        sortNotes(notes) {
+          const sorted = [...notes];
+          switch (this.sortBy) {
+            case 'oldest':
+              sorted.sort((a, b) => new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0));
+              break;
+            case 'priority': {
+              const weight = { high: 0, normal: 1, low: 2 };
+              sorted.sort((a, b) => (weight[a.priority || 'normal'] ?? 1) - (weight[b.priority || 'normal'] ?? 1));
+              break;
+            }
+            case 'category':
+              sorted.sort((a, b) => {
+                const infoA = getNoteCategoryInfo(a.category);
+                const infoB = getNoteCategoryInfo(b.category);
+                return infoA.label.localeCompare(infoB.label);
+              });
+              break;
+            case 'topic':
+              sorted.sort((a, b) => getTopicTitleById(a.topicId).localeCompare(getTopicTitleById(b.topicId)));
+              break;
+            case 'unreviewed':
+              sorted.sort((a, b) => (a.reviewed === b.reviewed ? 0 : a.reviewed ? 1 : -1));
+              break;
+            case 'recent':
+            default:
+              sorted.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+          }
+          return sorted;
+        }
+
+        highlightSearch(text) {
+          const safe = escapeHtml(text || '');
+          if (!this.filters.search) return safe;
+          const pattern = new RegExp(escapeRegExp(this.filters.search), 'ig');
+          return safe.replace(pattern, match => `<mark>${match}</mark>`);
+        }
+
+        createNoteItem(noteData) {
+          const item = document.createElement('div');
+          item.className = 'note-list-item';
+          item.dataset.noteId = noteData.id;
+
+          const categoryInfo = getNoteCategoryInfo(noteData.category);
+          const contentText = stripHtml(noteData.content || '').trim();
+          const snippet = contentText.length > 240 ? `${contentText.slice(0, 240)}…` : contentText;
+          const topicTitle = getTopicTitleById(noteData.topicId);
+
+          item.innerHTML = `
+            <div class="note-item-header">
+              <span class="note-category-badge">${categoryInfo.icon} ${categoryInfo.label}</span>
+              ${noteData.priority === 'high' ? '<span class="note-priority-badge high">⭐</span>' : ''}
+              ${noteData.reviewed ? '<span class="note-reviewed-badge">✓</span>' : ''}
+            </div>
+            <div class="note-item-content">${this.highlightSearch(snippet)}</div>
+            <div class="note-item-context">
+              <span class="note-topic" data-topic-id="${noteData.topicId || ''}">📄 ${escapeHtml(topicTitle)}</span>
+              ${Array.isArray(noteData.tags) && noteData.tags.length ? `
+                <span class="note-tags">
+                  ${noteData.tags.map(tag => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}
+                </span>
+              ` : ''}
+            </div>
+            <div class="note-item-footer">
+              <span class="note-date">${formatRelativeTime(noteData.updatedAt)}</span>
+              <div class="note-item-actions">
+                <button class="note-goto" title="Ir a la nota">🔗</button>
+                <button class="note-flashcard-create" title="Crear flashcard">🎴</button>
+                <button class="note-mark-reviewed" title="Marcar revisada">${noteData.reviewed ? '↺' : '✓'}</button>
+              </div>
+            </div>
+          `;
+
+          item.querySelector('.note-goto')?.addEventListener('click', () => this.goToNote(noteData));
+          item.querySelector('.note-flashcard-create')?.addEventListener('click', () => this.createFlashcard(noteData));
+          item.querySelector('.note-mark-reviewed')?.addEventListener('click', () => this.toggleReviewed(noteData));
+
+          return item;
+        }
+
+        updateStats(notes) {
+          if (!this.statsElement) return;
+          const totalEl = this.statsElement.querySelector('[data-stat="total"]');
+          const pendingEl = this.statsElement.querySelector('[data-stat="pending"]');
+          const priorityEl = this.statsElement.querySelector('[data-stat="priority"]');
+          if (totalEl) totalEl.textContent = String(notesRegistry.size || 0);
+          if (pendingEl) pendingEl.textContent = String(Array.from(notesRegistry.values()).filter(n => !n.reviewed).length);
+          if (priorityEl) priorityEl.textContent = String(Array.from(notesRegistry.values()).filter(n => n.priority === 'high').length);
+        }
+
+        render() {
+          if (!this.container) return;
+          const notes = this.getFilteredNotes();
+          this.container.innerHTML = '';
+          if (!notes.length) {
+            const empty = document.createElement('div');
+            empty.className = 'note-empty';
+            empty.textContent = 'No hay notas para mostrar.';
+            this.container.appendChild(empty);
+          } else {
+            notes.forEach(note => {
+              this.container.appendChild(this.createNoteItem(note));
+            });
+          }
+          this.updateStats(notes);
+        }
+
+        getNoteElementById(noteId) {
+          return floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${CSS.escape(noteId)}"]`) || null;
+        }
+
+        goToNote(noteData) {
+          const noteEl = this.getNoteElementById(noteData.id);
+          if (!noteEl) return;
+          this.close();
+          bringNoteToFront(noteEl);
+          noteEl.classList.add('pulse-highlight');
+          setTimeout(() => noteEl.classList.remove('pulse-highlight'), 2000);
+          noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        toggleReviewed(noteData) {
+          const noteEl = this.getNoteElementById(noteData.id);
+          if (!noteEl) return;
+          toggleNoteReviewed(noteEl);
+          this.render();
+        }
+
+        createFlashcard(noteData) {
+          const noteEl = this.getNoteElementById(noteData.id);
+          if (!noteEl) return;
+          createFlashcardFromNote(noteEl);
+        }
+
+        clearReviewedNotes() {
+          Array.from(notesRegistry.values()).forEach(note => {
+            if (note.reviewed) {
+              const noteEl = this.getNoteElementById(note.id);
+              if (noteEl) {
+                deleteNoteElement(noteEl);
+              }
+            }
+          });
+          this.render();
+        }
+
+        notesToMarkdown(notes) {
+          let md = `# Mis Notas\n\n`; 
+          md += `Exportado: ${new Date().toLocaleString()}\n\n`;
+          notes.forEach(note => {
+            const info = getNoteCategoryInfo(note.category);
+            md += `## ${info.icon} ${info.label}\n\n`;
+            md += `**Tema:** ${getTopicTitleById(note.topicId)}\n\n`;
+            md += `${stripHtml(note.content || '')}\n\n`;
+            if (Array.isArray(note.tags) && note.tags.length) {
+              md += `*Tags:* ${note.tags.map(tag => `#${tag}`).join(', ')}\n\n`;
+            }
+            md += `---\n\n`;
+          });
+          return md;
+        }
+
+        exportNotes() {
+          const notes = this.getFilteredNotes();
+          const markdown = this.notesToMarkdown(notes);
+          const filename = `notas-${new Date().toISOString().slice(0,10)}.md`;
+          downloadTextFile(markdown, filename, 'text/markdown;charset=utf-8');
+        }
+      }
+
+      ensureNoteCategoryOptions();
+      notesViewController = new NotesViewController();
+      notesViewController.render();
+
+      notesViewBtn?.addEventListener('click', () => {
+        notesViewScopeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.scope === 'all'));
+        notesViewController.open('all');
+      });
+
+      notesViewClose?.addEventListener('click', () => {
+        notesViewController.close();
+      });
+
+      notesViewScopeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          notesViewScopeButtons.forEach(other => other.classList.toggle('active', other === btn));
+          const scope = btn.dataset.scope || 'all';
+          notesViewController.open(scope);
+        });
+      });
+
+      noteCategoryFilter?.addEventListener('change', (event) => {
+        notesViewController.filters.category = event.target.value || '';
+        notesViewController.render();
+      });
+
+      notePriorityFilter?.addEventListener('change', (event) => {
+        notesViewController.filters.priority = event.target.value || '';
+        notesViewController.render();
+      });
+
+      notesSortBy?.addEventListener('change', (event) => {
+        notesViewController.sortBy = event.target.value || 'recent';
+        notesViewController.render();
+      });
+
+      notesSearchInput?.addEventListener('input', (event) => {
+        notesViewController.filters.search = event.target.value.trim();
+        notesViewController.render();
+      });
+
+      exportNotesBtn?.addEventListener('click', () => {
+        notesViewController.exportNotes();
+      });
+
+      printNotesBtn?.addEventListener('click', () => {
+        window.print();
+      });
+
+      clearReviewedBtn?.addEventListener('click', () => {
+        notesViewController.clearReviewedNotes();
+      });
 
       addFloatingNoteBtn?.addEventListener('click', () => {
         if (!floatingNotesLayer) return;
@@ -5218,7 +6223,8 @@ ${inlineStyles}
           noteId = generateUniqueId('floating-note');
           note.dataset.noteId = noteId;
         }
-        const body = note.querySelector('.floating-note-body');
+        const body = note.querySelector('.note-body, .floating-note-body');
+        const noteData = getNoteData(note) || {};
         const left = Number.parseFloat(note.dataset.left || note.style.left || '0');
         const top = Number.parseFloat(note.dataset.top || note.style.top || '0');
         const width = Number.parseFloat(note.dataset.width || note.style.width || (note.getBoundingClientRect().width || note.offsetWidth || '').toString());
@@ -5226,9 +6232,22 @@ ${inlineStyles}
         const noteExport = {
           id: noteId,
           html: body ? body.innerHTML : '',
-          style: note.dataset.style || 'default',
+          content: noteData.content || (body ? body.innerHTML : ''),
+          style: note.dataset.style || noteData.style || 'default',
           left: Number.isFinite(left) ? left : 0,
-          top: Number.isFinite(top) ? top : 0
+          top: Number.isFinite(top) ? top : 0,
+          type: noteData.type || NOTE_TYPES.FLOATING,
+          category: noteData.category || DEFAULT_NOTE_CATEGORY,
+          priority: noteData.priority || 'normal',
+          tags: Array.isArray(noteData.tags) ? noteData.tags : [],
+          linkedTo: noteData.linkedTo || null,
+          topicId: noteData.topicId || null,
+          sectionId: noteData.sectionId || null,
+          createdAt: noteData.createdAt || null,
+          updatedAt: noteData.updatedAt || null,
+          reviewed: !!noteData.reviewed,
+          reviewCount: noteData.reviewCount || 0,
+          lastReviewed: noteData.lastReviewed || null
         };
         if (Number.isFinite(width) && width > 0) {
           noteExport.width = width;
@@ -5321,6 +6340,18 @@ ${inlineStyles}
 
   function downloadJsonFile(data, filename) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadTextFile(content, filename, mimeType = 'text/plain;charset=utf-8') {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
