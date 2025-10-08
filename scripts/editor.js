@@ -280,7 +280,12 @@ export function initializeEditor() {
         const createdAt = options.createdAt ? String(options.createdAt) : nowIso;
         const updatedAt = options.updatedAt ? String(options.updatedAt) : nowIso;
 
-        const title = typeof options.title === 'string' ? options.title.trim() : '';
+        let title = null;
+        if (typeof options.title === 'string') {
+          title = options.title.trim();
+        } else if (options.title === null) {
+          title = null;
+        }
 
         return {
           id,
@@ -331,7 +336,11 @@ export function initializeEditor() {
             } else if (key === 'reviewCount') {
               merged.reviewCount = Number.isFinite(overrides.reviewCount) ? Number(overrides.reviewCount) : merged.reviewCount;
             } else if (key === 'title') {
-              merged.title = typeof overrides.title === 'string' ? overrides.title.trim() : '';
+              if (typeof overrides.title === 'string') {
+                merged.title = overrides.title.trim();
+              } else if (overrides.title === null) {
+                merged.title = null;
+              }
             } else if (key === 'left' || key === 'top' || key === 'width' || key === 'height') {
               merged[key] = Number.isFinite(overrides[key]) ? Number(overrides[key]) : merged[key];
             } else if (overrides[key] !== undefined) {
@@ -356,6 +365,13 @@ export function initializeEditor() {
           scheduleNotesViewRefresh();
         }
         return next;
+      }
+
+      function getNoteDisplayTitle(title, fallback = '') {
+        if (title === null || title === undefined) {
+          return fallback;
+        }
+        return title;
       }
 
       function removeNoteData(noteId) {
@@ -3585,9 +3601,21 @@ export function initializeEditor() {
           ? data.html
           : (typeof metaSource.html === 'string' ? metaSource.html : '');
 
-        const initialTitle = typeof data.title === 'string'
-          ? data.title.trim()
-          : (typeof metaSource.title === 'string' ? metaSource.title.trim() : '');
+        const initialTitle = (() => {
+          if (typeof data.title === 'string') {
+            return data.title.trim();
+          }
+          if (data.title === null) {
+            return null;
+          }
+          if (typeof metaSource.title === 'string') {
+            return metaSource.title.trim();
+          }
+          if (metaSource.title === null) {
+            return null;
+          }
+          return null;
+        })();
 
         const topicId = data.topicId || metaSource.topicId || currentPageRef?.dataset.topicId || null;
         const sectionId = data.sectionId || metaSource.sectionId || currentSectionId || currentPageRef?.dataset.sectionId || null;
@@ -3769,8 +3797,9 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu(optionsMenu);
           const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
           const categoryInfo = getNoteCategoryInfo(currentData.category);
-          const existingTitle = currentData.title || '';
-          const proposed = window.prompt('Título de la nota', existingTitle || categoryInfo.label);
+          const hasCustomTitle = currentData.title !== null && currentData.title !== undefined;
+          const promptDefault = hasCustomTitle ? currentData.title : categoryInfo.label;
+          const proposed = window.prompt('Título de la nota', promptDefault);
           if (proposed === null) {
             return;
           }
@@ -3823,8 +3852,13 @@ export function initializeEditor() {
         }
 
         const defaultOffset = (floatingNoteCreationOffset += 40);
-        const fallbackLeft = 40 + (defaultOffset % 120);
-        const fallbackTop = 40 + (defaultOffset % 160);
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const layerPageLeft = layerRect.left + window.scrollX;
+        const layerPageTop = layerRect.top + window.scrollY;
+        const baseViewportLeft = window.scrollX + 80 + (defaultOffset % 160);
+        const baseViewportTop = window.scrollY + 120 + (defaultOffset % 240);
+        const fallbackLeft = Math.max(0, baseViewportLeft - layerPageLeft);
+        const fallbackTop = Math.max(0, baseViewportTop - layerPageTop);
         const initialLeft = Number.isFinite(noteData.left) ? noteData.left : (Number.isFinite(parsedLeft) ? parsedLeft : fallbackLeft);
         const initialTop = Number.isFinite(noteData.top) ? noteData.top : (Number.isFinite(parsedTop) ? parsedTop : fallbackTop);
 
@@ -4153,10 +4187,13 @@ export function initializeEditor() {
           ui.categoryIcon.textContent = categoryInfo.icon;
         }
         if (ui.categoryLabel) {
-          const displayTitle = noteData.title ? noteData.title : categoryInfo.label;
-          ui.categoryLabel.textContent = displayTitle;
+          const hasCustomTitle = noteData.title !== null && noteData.title !== undefined;
+          const displayTitle = getNoteDisplayTitle(noteData.title, categoryInfo.label);
+          ui.categoryLabel.textContent = displayTitle || '';
           if (ui.categoryWrap) {
-            ui.categoryWrap.title = noteData.title ? 'Haz clic para renombrar' : `Haz clic para personalizar: ${categoryInfo.label}`;
+            ui.categoryWrap.title = hasCustomTitle
+              ? 'Haz clic para renombrar'
+              : `Haz clic para personalizar: ${categoryInfo.label}`;
           }
         }
         if (ui.priorityBtn) {
@@ -4566,10 +4603,12 @@ export function initializeEditor() {
           const header = document.createElement('div');
           header.className = 'note-item-header';
           const categoryInfo = getNoteCategoryInfo(note.category);
-          const displayTitle = note.title ? note.title : categoryInfo.label;
+          const displayTitle = getNoteDisplayTitle(note.title, categoryInfo.label);
           const categoryBadge = document.createElement('span');
           categoryBadge.className = 'note-category-badge';
-          categoryBadge.textContent = `${categoryInfo.icon} ${displayTitle}`;
+          categoryBadge.textContent = displayTitle
+            ? `${categoryInfo.icon} ${displayTitle}`
+            : categoryInfo.icon;
           header.appendChild(categoryBadge);
 
           if (note.priority === 'high') {
@@ -4715,8 +4754,9 @@ export function initializeEditor() {
             md += `## ${group.title || 'Sin sección'}\n\n`;
             group.notes.forEach(note => {
               const category = getNoteCategoryInfo(note.category);
-              const displayTitle = note.title ? note.title : category.label;
-              md += `### ${category.icon} ${displayTitle}\n\n`;
+              const displayTitle = getNoteDisplayTitle(note.title, category.label);
+              const titleLine = displayTitle ? `${category.icon} ${displayTitle}` : category.icon;
+              md += `### ${titleLine}\n\n`;
               md += `**Tema:** ${this.getTopicTitle(note.topicId) || 'Sin tema'}\n\n`;
               md += `${getNotePlainTextFromHtml(note.html || note.content || '')}\n\n`;
               if (note.tags && note.tags.length) {
@@ -4736,9 +4776,10 @@ export function initializeEditor() {
           const styleHref = styles ? styles.href : '';
           const content = notes.map(note => {
             const category = getNoteCategoryInfo(note.category);
-            const displayTitle = note.title ? note.title : category.label;
+            const displayTitle = getNoteDisplayTitle(note.title, category.label);
+            const heading = displayTitle ? `${category.icon} ${displayTitle}` : category.icon;
             const tags = (note.tags || []).map(tag => `#${tag}`).join(', ');
-            return `<article><h3>${category.icon} ${displayTitle}</h3><p><strong>${this.getTopicTitle(note.topicId) || 'Sin tema'}</strong></p><p>${note.html || note.content || ''}</p><p>${tags}</p></article>`;
+            return `<article><h3>${heading}</h3><p><strong>${this.getTopicTitle(note.topicId) || 'Sin tema'}</strong></p><p>${note.html || note.content || ''}</p><p>${tags}</p></article>`;
           }).join('');
           printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Notas</title>${styleHref ? `<link rel="stylesheet" href="${styleHref}">` : ''}</head><body>${content}</body></html>`);
           printWindow.document.close();
