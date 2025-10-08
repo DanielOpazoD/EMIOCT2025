@@ -23,6 +23,11 @@
       </div>
       <button class="topbar-btn" id="tocBtn" title="Tabla de contenidos"><span>📑</span> <span class="topbar-btn-label">Índice</span></button>
       <button class="topbar-btn" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
+      <button class="topbar-btn" id="notesViewBtn" title="Vista de notas">
+        <span>📝</span>
+        <span class="topbar-btn-label">Notas</span>
+        <span class="badge" id="notesViewCount">0</span>
+      </button>
       <button class="topbar-btn" id="statsBtn" title="Estadísticas"><span>📊</span> <span class="topbar-btn-label">Stats</span></button>
       <button class="topbar-btn" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
       <button class="topbar-btn" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
@@ -434,6 +439,72 @@
   </aside>
 
   <div id="floatingNotesLayer" class="floating-notes-layer"></div>
+  <svg id="noteConnectorLayer" class="note-connector-layer" aria-hidden="true"></svg>
+
+  <aside id="notesViewPanel" class="notes-view-panel" aria-hidden="true">
+    <div class="notes-view-header">
+      <h3>📝 Mis Notas</h3>
+      <button class="panel-close" id="notesViewClose">×</button>
+    </div>
+
+    <div class="notes-view-controls">
+      <div class="notes-scope-selector">
+        <button class="scope-btn active" data-scope="all">Todas</button>
+        <button class="scope-btn" data-scope="section">Sección actual</button>
+        <button class="scope-btn" data-scope="topic">Tema actual</button>
+      </div>
+      <div class="notes-filters">
+        <select id="noteCategoryFilter">
+          <option value="">Todas las categorías</option>
+        </select>
+        <select id="notePriorityFilter">
+          <option value="">Todas las prioridades</option>
+          <option value="high">Alta</option>
+          <option value="normal">Normal</option>
+          <option value="low">Baja</option>
+        </select>
+        <select id="notesSortBy">
+          <option value="recent">Más recientes</option>
+          <option value="oldest">Más antiguas</option>
+          <option value="priority">Por prioridad</option>
+          <option value="category">Por categoría</option>
+          <option value="topic">Por tema</option>
+          <option value="unreviewed">Sin revisar</option>
+        </select>
+      </div>
+      <div class="notes-search">
+        <input type="search" placeholder="Buscar en notas…" id="notesSearchInput" />
+      </div>
+      <div class="notes-view-modes">
+        <button class="view-mode-btn active" data-mode="list" title="Lista">≡</button>
+        <button class="view-mode-btn" data-mode="grid" title="Cuadrícula">▦</button>
+        <button class="view-mode-btn" data-mode="timeline" title="Línea temporal">─</button>
+      </div>
+    </div>
+
+    <div class="notes-stats" id="notesStats">
+      <div class="stat-item">
+        <span class="stat-value" data-stat="total">0</span>
+        <span class="stat-label">Total</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" data-stat="pending">0</span>
+        <span class="stat-label">Sin revisar</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" data-stat="priority">0</span>
+        <span class="stat-label">Prioritarias</span>
+      </div>
+    </div>
+
+    <div class="notes-list" id="notesListContainer"></div>
+
+    <div class="notes-bulk-actions">
+      <button id="exportNotesBtn">📤 Exportar</button>
+      <button id="printNotesBtn">🖨️ Imprimir</button>
+      <button id="clearReviewedBtn">✓ Limpiar revisadas</button>
+    </div>
+  </aside>
 
   <!-- Contenido mágico -->
   <div class="magic-content-container" style="display:none"></div>
