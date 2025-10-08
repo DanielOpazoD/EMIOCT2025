@@ -2481,6 +2481,42 @@ body.magic-open .magic-view {
   border-bottom: 1px solid #e5e7eb
 }
 
+.magic-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.magic-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.95rem;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
+}
+
+.magic-back:hover,
+.magic-back:focus {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #1d4ed8;
+  outline: none;
+}
+
+.magic-back:disabled {
+  opacity: 0.55;
+  cursor: default;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #9ca3af;
+}
+
 .magic-close {
   background: transparent;
   border: none;
@@ -2594,9 +2630,9 @@ body.reading-mode .floating-notes-layer {
 }
 
 .floating-note-style-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   display: none;
   flex-direction: column;
   gap: 4px;
@@ -2606,7 +2642,9 @@ body.reading-mode .floating-notes-layer {
   border-radius: 8px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.25);
   min-width: 180px;
-  z-index: 20;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  z-index: 5200;
 }
 
 .note-options-menu {
@@ -2719,10 +2757,21 @@ body.reading-mode .floating-notes-layer {
   gap: 6px;
   font-weight: 600;
   font-size: 0.9rem;
+  cursor: pointer;
 }
 
 .enhanced-note .note-category .note-icon {
   font-size: 1rem;
+}
+
+.enhanced-note .note-category .note-label {
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.2s ease;
+}
+
+.enhanced-note .note-category:hover .note-label,
+.enhanced-note .note-category:focus .note-label {
+  border-bottom-color: rgba(15, 23, 42, 0.25);
 }
 
 .enhanced-note .note-body {
