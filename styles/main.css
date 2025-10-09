@@ -1965,6 +1965,16 @@ body.panel-filter-active .panel-topic-count {
   border-left: 3px solid var(--theme-primary);
 }
 
+.section-item.active > .section-header {
+  border-left: 4px solid var(--theme-primary);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.02));
+  color: var(--theme-primary);
+}
+
+.section-item.active .section-name {
+  color: var(--theme-primary);
+}
+
 .section-toggle {
   font-size: 0.857rem;
   transition: transform 0.2s;
@@ -2170,6 +2180,10 @@ body.panel-filter-active .panel-topic-count {
   page-break-after: always;
   overflow-wrap: break-word;
   position: relative;
+}
+
+.page.page-hidden-by-section {
+  display: none;
 }
 
 .page[contenteditable="true"] {

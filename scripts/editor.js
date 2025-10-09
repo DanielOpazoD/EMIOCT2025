@@ -140,6 +140,7 @@ export function initializeEditor() {
       let sectionThemes = new Map();
       let currentSectionId = '';
       let currentPageRef = null;
+      let visibleSectionId = '';
       let panelFilterTerm = '';
       let panelFilterNormalized = '';
       
@@ -343,6 +344,76 @@ export function initializeEditor() {
         specialtySpan.textContent = sectionName;
       }
 
+      const normalizeSectionId = (value) => (value || '').trim();
+
+      function getVisibleSectionId() {
+        return normalizeSectionId(visibleSectionId);
+      }
+
+      function refreshSectionVisibility({ force = false } = {}) {
+        const activeId = getVisibleSectionId();
+        const showAll = !activeId;
+        document.body.classList.toggle('section-locked-view', !showAll);
+        if (!showAll) {
+          document.body.dataset.visibleSectionId = activeId;
+        } else {
+          delete document.body.dataset.visibleSectionId;
+        }
+
+        pages.forEach((page) => {
+          const pageSectionId = normalizeSectionId(page.dataset.sectionId || 'seccion-default');
+          const shouldShow = showAll || pageSectionId === activeId;
+          const isHidden = page.classList.contains('page-hidden-by-section');
+          if (force || isHidden === shouldShow) {
+            page.classList.toggle('page-hidden-by-section', !shouldShow);
+            page.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+          }
+        });
+
+        scheduleFloatingNotesViewportRefresh();
+      }
+
+      function updateSectionsPanelActiveState() {
+        if (!sectionsContainer) return;
+        const activeId = getVisibleSectionId();
+        sectionsContainer.querySelectorAll('.section-item').forEach((item) => {
+          const itemId = normalizeSectionId(item.dataset.sectionId || '');
+          const isActive = Boolean(activeId) && itemId === activeId;
+          item.classList.toggle('active', isActive);
+          item.setAttribute('aria-current', isActive ? 'true' : 'false');
+        });
+      }
+
+      function ensureVisibleSection({ force = false } = {}) {
+        const availableIds = sections.map((section) => normalizeSectionId(section.id));
+        let targetId = getVisibleSectionId();
+        if (availableIds.length === 0) {
+          targetId = '';
+        } else if (!targetId || !availableIds.includes(targetId)) {
+          targetId = availableIds[0];
+        }
+        if (visibleSectionId !== targetId) {
+          visibleSectionId = targetId;
+          force = true;
+        }
+        refreshSectionVisibility({ force });
+        updateSectionsPanelActiveState();
+      }
+
+      function setVisibleSection(sectionId, { force = false } = {}) {
+        const normalizedId = normalizeSectionId(sectionId);
+        if (!normalizedId) {
+          ensureVisibleSection({ force });
+          return;
+        }
+        if (visibleSectionId !== normalizedId) {
+          visibleSectionId = normalizedId;
+          force = true;
+        }
+        refreshSectionVisibility({ force });
+        updateSectionsPanelActiveState();
+      }
+
       function setActivePage(page) {
         if (!page) {
           closeTopicNotesPopover();
@@ -354,6 +425,7 @@ export function initializeEditor() {
           invalidateActiveTopicViewportState();
           refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
+          ensureVisibleSection({ force: true });
           return;
         }
         const nextTopicId = page.dataset.topicId || '';
@@ -365,6 +437,7 @@ export function initializeEditor() {
         currentSectionId = sectionId;
         const themeClass = getPageTheme(page);
         sectionThemes.set(sectionId, themeClass);
+        setVisibleSection(sectionId);
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
         syncBodyTheme(themeClass);
@@ -1265,6 +1338,7 @@ export function initializeEditor() {
         if (Math.abs(nextZoom - prevZoom) < 0.0001) {
           return;
         }
+        floatingNotesViewportRelaxedMatching = true;
         scheduleFloatingNotesViewportRefresh();
       }
 
@@ -3161,6 +3235,7 @@ export function initializeEditor() {
 
         sectionThemes = newThemeMap;
         sections = Array.from(sectionMap.values());
+        ensureVisibleSection({ force: true });
       }
 
       pages.forEach(p => {
@@ -7109,6 +7184,7 @@ export function initializeEditor() {
 
           const sectionDiv = document.createElement('div');
           sectionDiv.className = 'section-item';
+          sectionDiv.dataset.sectionId = section.id || '';
           if (section.collapsed) sectionDiv.classList.add('collapsed');
           if (sectionMatch) sectionDiv.classList.add('matches-filter');
 
@@ -7118,7 +7194,8 @@ export function initializeEditor() {
           const toggle = document.createElement('span');
           toggle.className = 'section-toggle';
           toggle.textContent = '▼';
-          toggle.addEventListener('click', () => {
+          toggle.addEventListener('click', (event) => {
+            event.stopPropagation();
             section.collapsed = !section.collapsed;
             sectionDiv.classList.toggle('collapsed');
           });
@@ -7126,9 +7203,27 @@ export function initializeEditor() {
           const nameSpan = document.createElement('span');
           nameSpan.className = 'section-name';
           nameSpan.textContent = section.nombre;
-          nameSpan.addEventListener('click', () => {
-            section.collapsed = !section.collapsed;
-            sectionDiv.classList.toggle('collapsed');
+
+          const focusSection = () => {
+            if (section.collapsed) {
+              section.collapsed = false;
+              sectionDiv.classList.remove('collapsed');
+            }
+            const firstTopic = section.temas.find((tema) => tema?.page && tema.page.isConnected);
+            closeMagicView();
+            closePanel();
+            if (firstTopic?.page) {
+              setActivePage(firstTopic.page);
+              scrollPageIntoViewWithOffset(firstTopic.page, 'auto');
+            } else {
+              setVisibleSection(section.id, { force: true });
+            }
+          };
+
+          nameSpan.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            focusSection();
           });
 
           const countSpan = document.createElement('span');
@@ -7303,6 +7398,7 @@ export function initializeEditor() {
             panelTopicCount.title = `${visibleLabel} visibles de ${totalLabel}`;
           }
         }
+        updateSectionsPanelActiveState();
         refreshTopicNoteIndicators();
       }
 
@@ -7543,7 +7639,31 @@ export function initializeEditor() {
       }
 
       function printCurrentTopic() {
+        const temporarilyShown = [];
+        pages.forEach((page) => {
+          if (page.classList.contains('page-hidden-by-section')) {
+            temporarilyShown.push(page);
+            page.classList.remove('page-hidden-by-section');
+            page.dataset.prevSectionHidden = 'true';
+            page.setAttribute('aria-hidden', 'false');
+          }
+        });
+
+        const restoreSectionVisibility = () => {
+          temporarilyShown.forEach((page) => {
+            if (page.dataset.prevSectionHidden === 'true') {
+              page.classList.add('page-hidden-by-section');
+              page.setAttribute('aria-hidden', 'true');
+              delete page.dataset.prevSectionHidden;
+            }
+          });
+          ensureVisibleSection({ force: true });
+          window.removeEventListener('afterprint', restoreSectionVisibility);
+        };
+
+        window.addEventListener('afterprint', restoreSectionVisibility);
         window.print();
+        setTimeout(restoreSectionVisibility, 1200);
       }
 
       editPanelBtn?.addEventListener('click', togglePanelEditMode);
