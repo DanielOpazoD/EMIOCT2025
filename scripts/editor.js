@@ -34,6 +34,7 @@ export function initializeEditor() {
       let allSectionsExpanded = true;
       let savedSelection = null;
       let tableMenuAPI = null;
+      let cachedToolbarHeight = 0;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -49,12 +50,17 @@ export function initializeEditor() {
       const IMAGE_RESIZE_STEP = 0.1;
 
       const NOTE_STYLE_PRESETS = [
-        { id: 'default', name: 'Post-it amarillo', className: 'floating-note-style-default' },
-        { id: 'sky', name: 'Azul cielo', className: 'floating-note-style-sky' },
-        { id: 'mint', name: 'Verde menta', className: 'floating-note-style-mint' },
-        { id: 'rose', name: 'Rosa suave', className: 'floating-note-style-rose' },
-        { id: 'lilac', name: 'Lavanda', className: 'floating-note-style-lilac' },
-        { id: 'slate', name: 'Gris pizarra', className: 'floating-note-style-slate' }
+        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
+        { id: 'blank', name: 'Blanca', shortName: 'Blanca', className: 'floating-note-style-blank' },
+        { id: 'sky', name: 'Cielo', shortName: 'Cielo', className: 'floating-note-style-sky' },
+        { id: 'mint', name: 'Menta', shortName: 'Menta', className: 'floating-note-style-mint' },
+        { id: 'rose', name: 'Pétalo', shortName: 'Pétalo', className: 'floating-note-style-rose' },
+        { id: 'lilac', name: 'Lavanda', shortName: 'Lavanda', className: 'floating-note-style-lilac' },
+        { id: 'slate', name: 'Pizarra', shortName: 'Pizarra', className: 'floating-note-style-slate' },
+        { id: 'citrus', name: 'Cítrica', shortName: 'Cítrica', className: 'floating-note-style-citrus' },
+        { id: 'midnight', name: 'Nocturna', shortName: 'Nocturna', className: 'floating-note-style-midnight' },
+        { id: 'dawn', name: 'Aurora', shortName: 'Aurora', className: 'floating-note-style-dawn' },
+        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' }
       ];
 
       const NOTE_ICON_SYMBOLS = [
@@ -63,6 +69,10 @@ export function initializeEditor() {
         '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
         '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
         '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
+      ];
+
+      const NOTE_BORDER_COLORS = [
+        '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
       let floatingNotesHidden = false;
@@ -371,6 +381,75 @@ export function initializeEditor() {
         specialtySpan.dataset.documentTitle = trimmed;
       }
 
+      function measureToolbarHeight() {
+        if (!editToolbar) {
+          return cachedToolbarHeight || 0;
+        }
+
+        if (editToolbar.classList.contains('show')) {
+          const height = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || 0;
+          if (height) {
+            cachedToolbarHeight = height;
+          }
+          return height;
+        }
+
+        if (cachedToolbarHeight) {
+          return cachedToolbarHeight;
+        }
+
+        const previousDisplay = editToolbar.style.display;
+        const previousVisibility = editToolbar.style.visibility;
+        const previousPointerEvents = editToolbar.style.pointerEvents;
+
+        editToolbar.style.visibility = 'hidden';
+        editToolbar.style.pointerEvents = 'none';
+        editToolbar.style.display = 'flex';
+
+        const measured = editToolbar.getBoundingClientRect().height || editToolbar.scrollHeight || 0;
+
+        if (previousDisplay) {
+          editToolbar.style.display = previousDisplay;
+        } else {
+          editToolbar.style.removeProperty('display');
+        }
+
+        if (previousVisibility) {
+          editToolbar.style.visibility = previousVisibility;
+        } else {
+          editToolbar.style.removeProperty('visibility');
+        }
+
+        if (previousPointerEvents) {
+          editToolbar.style.pointerEvents = previousPointerEvents;
+        } else {
+          editToolbar.style.removeProperty('pointer-events');
+        }
+
+        cachedToolbarHeight = measured || 64;
+        return cachedToolbarHeight;
+      }
+
+      function getToolbarOffset() {
+        const topbarHeight = topbar ? (topbar.getBoundingClientRect().height || topbar.offsetHeight || 0) : 0;
+        let toolbarHeight = measureToolbarHeight();
+        if (!toolbarHeight) {
+          toolbarHeight = cachedToolbarHeight || 64;
+        }
+
+        const padding = 24;
+        return topbarHeight + toolbarHeight + padding;
+      }
+
+      function scrollPageIntoViewWithOffset(pageElement, behavior = 'smooth') {
+        if (!pageElement) return;
+        const offset = getToolbarOffset();
+        const rect = pageElement.getBoundingClientRect();
+        const targetTop = rect.top + window.scrollY;
+        const scrollTop = Math.max(targetTop - offset, 0);
+        window.scrollTo({ top: scrollTop, behavior });
+      }
+
       initPalette(templateBgPalette, templateBackgroundPaletteColors, color => applyTemplateBackground(color));
       initPalette(templateTextPalette, templateTextPaletteColors, color => applyTemplateTextColor(color));
       initPalette(templateBorderPalette, templateBorderPaletteColors, color => applyTemplateBorderColor(color));
@@ -417,10 +496,23 @@ export function initializeEditor() {
       const tableBorderResetBtn = document.querySelector('[data-border-reset]');
       const tableResizeOverlay = document.getElementById('tableResizeOverlay');
 
-      const pastelColors = [
-        '#FFB6C1', '#FFD1DC', '#FFC8DD', '#E7C6FF', '#C8B6FF', '#B4D4FF', '#AEC6CF', '#B2DFDB',
-        '#C5E1A5', '#FFF9C4', '#FFE082', '#FFCCBC', '#D7CCC8', '#F5F5F5', '#CFD8DC', '#E1BEE7'
+      const highlightColors = [
+        '#f59aa5', '#f6a475', '#f5ba62', '#f6cf59', '#d6e36f', '#9fd48d', '#6fcdc9', '#7fb6eb',
+        '#a59bf4', '#e19ad2', '#f0a9a4', '#d3a978', '#b2c1cf', '#8fa6f1', '#c19fe6', '#b58b74',
+        '#e2a3c3', '#f0b88f', '#f4d48a', '#c3df92', '#7fc4ab', '#66a9c9', '#7c90d4', '#dea1c8',
+        '#ed957f', '#f3c07a', '#f7dfa1', '#acd78b', '#6bbfa3', '#5aa8c5', '#8793d9', '#eaaccf'
       ];
+
+      const textAccentColors = [
+        '#1f2937', '#0f172a', '#334155', '#0b7285', '#9d174d', '#a16207', '#0f766e', '#000000'
+      ];
+
+      const textColors = [
+        ...highlightColors,
+        ...textAccentColors
+      ];
+
+      let copiedFormat = null;
 
       const tableResizers = new WeakMap();
 
@@ -630,7 +722,7 @@ export function initializeEditor() {
         io.observe(clone);
         initializeSections();
         buildSectionsPanel();
-        clone.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scrollPageIntoViewWithOffset(clone);
         return clone;
       }
 
@@ -3378,7 +3470,10 @@ export function initializeEditor() {
         note.dataset.style = preset?.id || 'default';
         const noteId = note.dataset.noteId;
         if (noteId) {
-          updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
+          const updated = updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
+          applyFloatingNoteBorderColor(note, updated?.borderColor || null, { persist: false });
+        } else {
+          applyFloatingNoteBorderColor(note, note.dataset.borderColor || null, { persist: false });
         }
         const menu = note.querySelector('.floating-note-style-menu');
         if (menu) {
@@ -3387,6 +3482,22 @@ export function initializeEditor() {
           if (noteData) {
             syncNoteOptionsMenu(menu, noteData);
           }
+        }
+      }
+
+      function applyFloatingNoteBorderColor(note, color, { persist = true } = {}) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        const normalized = typeof color === 'string' ? color.trim() : '';
+        if (normalized) {
+          note.style.borderColor = normalized;
+          note.dataset.borderColor = normalized;
+        } else {
+          note.style.borderColor = '';
+          delete note.dataset.borderColor;
+        }
+        if (persist && noteId) {
+          updateNoteData(noteId, { borderColor: normalized || null }, { silent: true });
         }
       }
 
@@ -3786,6 +3897,9 @@ export function initializeEditor() {
         const updatedAt = data.updatedAt || metaSource.updatedAt || null;
         const linkedTo = data.linkedTo || metaSource.linkedTo || null;
         const anchorId = data.anchorId || metaSource.anchorId || null;
+        const incomingBorderColor = typeof data.borderColor === 'string' ? data.borderColor.trim() : '';
+        const metaBorderColor = typeof metaSource.borderColor === 'string' ? metaSource.borderColor.trim() : '';
+        const borderColor = incomingBorderColor || metaBorderColor || null;
         const parsedLeft = Number.parseFloat(data.left ?? metaSource.left);
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
@@ -3815,6 +3929,7 @@ export function initializeEditor() {
           sectionId,
           linkedTo,
           anchorId,
+          borderColor,
           reviewed,
           reviewCount,
           lastReviewed,
@@ -3833,6 +3948,7 @@ export function initializeEditor() {
           currentPageIndex: incomingPageIndex
         });
         notesRegistry.set(noteId, noteData);
+        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
 
         const header = document.createElement('div');
         header.className = 'note-header floating-note-header';
@@ -4166,43 +4282,64 @@ export function initializeEditor() {
         menu.setAttribute('aria-hidden', 'true');
         menu.setAttribute('aria-label', 'Opciones de nota');
 
+        const quickWrapper = document.createElement('div');
+        quickWrapper.className = 'note-menu-quick';
+
         const categorySection = document.createElement('div');
-        categorySection.className = 'note-menu-section';
+        categorySection.className = 'note-menu-section note-menu-categories';
         const categoryTitle = document.createElement('div');
         categoryTitle.className = 'note-menu-title';
-        categoryTitle.textContent = 'Categoría';
+        categoryTitle.textContent = '🏷️';
         categorySection.appendChild(categoryTitle);
+        const categoryGrid = document.createElement('div');
+        categoryGrid.className = 'note-menu-category-grid';
         Object.entries(NOTE_CATEGORIES).forEach(([key, info]) => {
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.dataset.categoryId = key;
-          btn.textContent = `${info.icon} ${info.label}`;
+          btn.className = 'note-category-btn';
+          btn.textContent = info.icon;
+          btn.title = info.label;
+          btn.setAttribute('aria-label', info.label);
           btn.addEventListener('click', (event) => {
             event.stopPropagation();
             setNoteCategory(note, key);
             syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
             closeFloatingNoteStyleMenu(menu);
           });
-          categorySection.appendChild(btn);
+          categoryGrid.appendChild(btn);
         });
-        menu.appendChild(categorySection);
-
-        const divider1 = document.createElement('div');
-        divider1.className = 'note-menu-divider';
-        menu.appendChild(divider1);
+        categorySection.appendChild(categoryGrid);
+        quickWrapper.appendChild(categorySection);
 
         const styleSection = document.createElement('div');
-        styleSection.className = 'note-menu-section';
+        styleSection.className = 'note-menu-section note-menu-styles';
         const styleTitle = document.createElement('div');
         styleTitle.className = 'note-menu-title';
-        styleTitle.textContent = 'Estilo';
+        styleTitle.textContent = '🎨';
         styleSection.appendChild(styleTitle);
 
+        const styleGrid = document.createElement('div');
+        styleGrid.className = 'note-menu-style-grid';
         NOTE_STYLE_PRESETS.forEach(preset => {
           const optionBtn = document.createElement('button');
           optionBtn.type = 'button';
           optionBtn.dataset.styleId = preset.id;
-          optionBtn.textContent = preset.name;
+          optionBtn.className = 'note-style-btn';
+          optionBtn.title = preset.name;
+          optionBtn.setAttribute('aria-label', preset.name);
+
+          const preview = document.createElement('span');
+          preview.className = 'note-style-preview';
+          if (preset.className) {
+            preview.classList.add(preset.className);
+          }
+
+          const label = document.createElement('span');
+          label.className = 'note-style-label';
+          label.textContent = preset.shortName || preset.name;
+
+          optionBtn.append(preview, label);
           optionBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             applyFloatingNoteStyle(note, preset.id);
@@ -4213,13 +4350,14 @@ export function initializeEditor() {
             syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
             closeFloatingNoteStyleMenu(menu);
           });
-          styleSection.appendChild(optionBtn);
+          styleGrid.appendChild(optionBtn);
         });
+        styleSection.appendChild(styleGrid);
 
         const resetSizeBtn = document.createElement('button');
         resetSizeBtn.type = 'button';
         resetSizeBtn.className = 'floating-note-reset-size';
-        resetSizeBtn.textContent = 'Restablecer tamaño';
+        resetSizeBtn.textContent = 'Tamaño original';
         resetSizeBtn.addEventListener('click', (event) => {
           event.stopPropagation();
           resetFloatingNoteSize(note);
@@ -4227,17 +4365,61 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
         styleSection.appendChild(resetSizeBtn);
-        menu.appendChild(styleSection);
 
-        const divider2 = document.createElement('div');
-        divider2.className = 'note-menu-divider';
-        menu.appendChild(divider2);
+        quickWrapper.appendChild(styleSection);
+        menu.appendChild(quickWrapper);
+
+        menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
+
+        const borderSection = document.createElement('div');
+        borderSection.className = 'note-menu-section note-border-section';
+        const borderTitle = document.createElement('div');
+        borderTitle.className = 'note-menu-title';
+        borderTitle.textContent = '⬒';
+        borderSection.appendChild(borderTitle);
+
+        const borderSwatches = document.createElement('div');
+        borderSwatches.className = 'note-border-swatches';
+        NOTE_BORDER_COLORS.forEach(color => {
+          const swatchBtn = document.createElement('button');
+          swatchBtn.type = 'button';
+          swatchBtn.dataset.borderColor = color;
+          swatchBtn.className = 'note-border-swatch';
+          swatchBtn.title = `Borde ${color}`;
+          swatchBtn.setAttribute('aria-label', `Aplicar borde ${color}`);
+          swatchBtn.style.setProperty('--swatch-color', color);
+          swatchBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            applyFloatingNoteBorderColor(note, color);
+            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+            closeFloatingNoteStyleMenu(menu);
+          });
+          borderSwatches.appendChild(swatchBtn);
+        });
+        borderSection.appendChild(borderSwatches);
+
+        const borderResetBtn = document.createElement('button');
+        borderResetBtn.type = 'button';
+        borderResetBtn.dataset.action = 'reset-border';
+        borderResetBtn.className = 'note-border-reset';
+        borderResetBtn.textContent = 'Sin borde';
+        borderResetBtn.setAttribute('aria-label', 'Quitar borde personalizado');
+        borderResetBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          applyFloatingNoteBorderColor(note, null);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+        borderSection.appendChild(borderResetBtn);
+        menu.appendChild(borderSection);
+
+        menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
 
         const actionsSection = document.createElement('div');
-        actionsSection.className = 'note-menu-section';
+        actionsSection.className = 'note-menu-section note-menu-actions';
         const actionsTitle = document.createElement('div');
         actionsTitle.className = 'note-menu-title';
-        actionsTitle.textContent = 'Acciones';
+        actionsTitle.textContent = '⚙️';
         actionsSection.appendChild(actionsTitle);
 
         const inlineActions = document.createElement('div');
@@ -4267,18 +4449,6 @@ export function initializeEditor() {
         inlineActions.append(tagsBtn, reviewBtn);
         actionsSection.appendChild(inlineActions);
 
-        const clearAnchorBtn = document.createElement('button');
-        clearAnchorBtn.type = 'button';
-        clearAnchorBtn.dataset.action = 'clear-anchor';
-        clearAnchorBtn.textContent = '🔓 Quitar anclaje';
-        clearAnchorBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          clearNoteAnchor(note);
-          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-          closeFloatingNoteStyleMenu(menu);
-        });
-        actionsSection.appendChild(clearAnchorBtn);
-
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.className = 'note-menu-danger';
@@ -4298,15 +4468,22 @@ export function initializeEditor() {
         if (!menu || !noteData) return;
         syncFloatingNoteStyleMenu(menu, noteData.style || 'default');
         menu.querySelectorAll('button[data-category-id]').forEach(button => {
-          button.classList.toggle('active', button.dataset.categoryId === noteData.category);
+          const isActive = button.dataset.categoryId === noteData.category;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
+        menu.querySelectorAll('button[data-border-color]').forEach(button => {
+          const isActive = (noteData.borderColor || null) === (button.dataset.borderColor || null);
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+        const borderResetBtn = menu.querySelector('button[data-action="reset-border"]');
+        if (borderResetBtn) {
+          borderResetBtn.disabled = !noteData.borderColor;
+        }
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
-        }
-        const clearAnchorBtn = menu.querySelector('button[data-action="clear-anchor"]');
-        if (clearAnchorBtn) {
-          clearAnchorBtn.disabled = !noteData.anchorId;
         }
       }
 
@@ -4583,6 +4760,7 @@ export function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
+        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -4600,15 +4778,18 @@ export function initializeEditor() {
           ui.categoryIcon.textContent = categoryInfo.icon;
         }
         if (ui.categoryLabel) {
-          const hasCustomTitle = noteData.title !== null && noteData.title !== undefined;
-          const displayTitle = getNoteDisplayTitle(noteData.title, categoryInfo.label);
+          const displayTitle = getNoteDisplayTitle(noteData.title, '');
+          const hasCustomTitle = displayTitle.length > 0;
           if (ui.categoryLabel.dataset.editing !== 'true') {
-            ui.categoryLabel.textContent = displayTitle || '';
+            ui.categoryLabel.textContent = displayTitle;
+            ui.categoryLabel.classList.toggle('note-label-empty', !hasCustomTitle);
           }
           if (ui.categoryWrap) {
-            ui.categoryWrap.title = hasCustomTitle
-              ? 'Haz clic para editar el título'
-              : `Haz clic para personalizar el título: ${categoryInfo.label}`;
+            const tooltip = hasCustomTitle
+              ? `Título: ${displayTitle}`
+              : `Haz clic para nombrar la nota (${categoryInfo.label})`;
+            ui.categoryWrap.title = tooltip;
+            ui.categoryWrap.setAttribute('aria-label', tooltip);
             ui.categoryWrap.dataset.editableTitle = ui.categoryLabel?.contentEditable === 'true' ? 'true' : 'false';
           }
         }
@@ -4698,6 +4879,7 @@ export function initializeEditor() {
               type: noteData.type,
               anchorId: noteData.anchorId,
               linkedTo: noteData.linkedTo,
+              borderColor: noteData.borderColor,
               pages: Array.isArray(noteData.pages) ? noteData.pages : undefined,
               currentPageIndex: Number.isInteger(noteData.currentPageIndex) ? noteData.currentPageIndex : undefined,
               pageOffsetLeft: noteData.pageOffsetLeft,
@@ -4721,6 +4903,7 @@ export function initializeEditor() {
           this.searchInput = document.getElementById('notesSearchInput');
           this.viewModeButtons = Array.from((this.panel?.querySelectorAll('.view-mode-btn')) || []);
           this.scopeButtons = Array.from((this.panel?.querySelectorAll('.scope-btn')) || []);
+          this.deleteToggle = document.getElementById('notesDeleteToggle');
           this.stats = {
             total: this.panel?.querySelector('[data-stat="total"]') || null,
             unreviewed: this.panel?.querySelector('[data-stat="unreviewed"]') || null,
@@ -4729,6 +4912,7 @@ export function initializeEditor() {
           this.countBadge = this.panel?.querySelector('.badge') || null;
           this.currentScope = 'all';
           this.viewMode = 'list';
+          this.deleteEnabled = false;
           this.filters = {
             category: '',
             priority: '',
@@ -4784,6 +4968,11 @@ export function initializeEditor() {
             });
           });
 
+          this.deleteToggle?.addEventListener('click', () => {
+            this.deleteEnabled = !this.deleteEnabled;
+            this.render();
+          });
+
           this.panel?.querySelector('[data-action="close-notes"]')?.addEventListener('click', () => {
             this.close();
           });
@@ -4818,6 +5007,10 @@ export function initializeEditor() {
         }
 
         close() {
+          if (this.deleteEnabled) {
+            this.deleteEnabled = false;
+            this.render();
+          }
           this.panel?.classList.remove('open');
         }
 
@@ -4918,6 +5111,18 @@ export function initializeEditor() {
 
         render() {
           if (!this.container) return;
+          if (this.panel) {
+            this.panel.classList.toggle('delete-mode', this.deleteEnabled);
+          }
+          if (this.deleteToggle) {
+            this.deleteToggle.classList.toggle('active', this.deleteEnabled);
+            this.deleteToggle.setAttribute('aria-pressed', this.deleteEnabled ? 'true' : 'false');
+            const baseTitle = this.deleteToggle.dataset.baseTitle || this.deleteToggle.title || 'Eliminar notas individualmente';
+            if (!this.deleteToggle.dataset.baseTitle) {
+              this.deleteToggle.dataset.baseTitle = baseTitle;
+            }
+            this.deleteToggle.title = this.deleteEnabled ? 'Desactivar eliminación individual' : baseTitle;
+          }
           const notes = this.getFilteredNotes();
           this.container.innerHTML = '';
 
@@ -4983,12 +5188,17 @@ export function initializeEditor() {
           const header = document.createElement('div');
           header.className = 'note-item-header';
           const categoryInfo = getNoteCategoryInfo(note.category);
-          const displayTitle = getNoteDisplayTitle(note.title, categoryInfo.label);
+          const displayTitle = getNoteDisplayTitle(note.title, '');
           const categoryBadge = document.createElement('span');
           categoryBadge.className = 'note-category-badge';
           categoryBadge.textContent = displayTitle
             ? `${categoryInfo.icon} ${displayTitle}`
             : categoryInfo.icon;
+          const badgeLabel = displayTitle
+            ? `${categoryInfo.label}: ${displayTitle}`
+            : categoryInfo.label;
+          categoryBadge.title = badgeLabel;
+          categoryBadge.setAttribute('aria-label', badgeLabel);
           header.appendChild(categoryBadge);
 
           if (note.priority === 'high') {
@@ -5065,6 +5275,19 @@ export function initializeEditor() {
           reviewBtn.addEventListener('click', () => this.toggleReviewed(note));
           actions.appendChild(reviewBtn);
 
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'note-delete';
+          deleteBtn.title = this.deleteEnabled ? 'Eliminar nota' : 'Activa el modo de eliminación para borrar';
+          deleteBtn.textContent = '🗑️';
+          deleteBtn.disabled = !this.deleteEnabled;
+          deleteBtn.tabIndex = this.deleteEnabled ? 0 : -1;
+          deleteBtn.setAttribute('aria-hidden', this.deleteEnabled ? 'false' : 'true');
+          deleteBtn.addEventListener('click', () => {
+            if (!this.deleteEnabled) return;
+            this.deleteNote(note);
+          });
+          actions.appendChild(deleteBtn);
+
           footer.appendChild(actions);
           item.appendChild(footer);
 
@@ -5090,7 +5313,9 @@ export function initializeEditor() {
             setTimeout(() => element.classList.remove('pulse-highlight'), 1600);
           } else if (note.topicId) {
             const page = findPageByTopicId(note.topicId);
-            page?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (page) {
+              scrollPageIntoViewWithOffset(page);
+            }
           }
         }
 
@@ -5105,6 +5330,22 @@ export function initializeEditor() {
               lastReviewed: !note.reviewed ? new Date().toISOString() : null
             });
             notesRegistry.set(note.id, updated, { silent: true });
+          }
+          this.render();
+        }
+
+        deleteNote(note) {
+          if (!note || !this.deleteEnabled) return;
+          if (!confirm('¿Eliminar esta nota?')) {
+            return;
+          }
+          const element = note.element;
+          if (element) {
+            deleteFloatingNote(element);
+          } else {
+            removeNoteAnchor(note.id);
+            removeNoteData(note.id);
+            scheduleNotesViewRefresh();
           }
           this.render();
         }
@@ -5134,7 +5375,7 @@ export function initializeEditor() {
             md += `## ${group.title || 'Sin sección'}\n\n`;
             group.notes.forEach(note => {
               const category = getNoteCategoryInfo(note.category);
-              const displayTitle = getNoteDisplayTitle(note.title, category.label);
+              const displayTitle = getNoteDisplayTitle(note.title, '');
               const titleLine = displayTitle ? `${category.icon} ${displayTitle}` : category.icon;
               md += `### ${titleLine}\n\n`;
               md += `**Tema:** ${this.getTopicTitle(note.topicId) || 'Sin tema'}\n\n`;
@@ -5156,7 +5397,7 @@ export function initializeEditor() {
           const styleHref = styles ? styles.href : '';
           const content = notes.map(note => {
             const category = getNoteCategoryInfo(note.category);
-            const displayTitle = getNoteDisplayTitle(note.title, category.label);
+            const displayTitle = getNoteDisplayTitle(note.title, '');
             const heading = displayTitle ? `${category.icon} ${displayTitle}` : category.icon;
             const tags = (note.tags || []).map(tag => `#${tag}`).join(', ');
             return `<article><h3>${heading}</h3><p><strong>${this.getTopicTitle(note.topicId) || 'Sin tema'}</strong></p><p>${note.html || note.content || ''}</p><p>${tags}</p></article>`;
@@ -5477,13 +5718,13 @@ export function initializeEditor() {
       });
 
       /* === PALETAS DE COLOR MEJORADAS === */
-      function createColorPalette(paletteId, isHighlight) {
+      function createColorPalette(paletteId, colors, isHighlight) {
         const palette = document.getElementById(paletteId);
         if (!palette) return;
 
         palette.innerHTML = '';
-        
-        pastelColors.forEach(color => {
+
+        colors.forEach(color => {
           const swatch = document.createElement('div');
           swatch.className = 'color-swatch';
           swatch.style.backgroundColor = color;
@@ -5577,8 +5818,8 @@ export function initializeEditor() {
         savedSelection = null;
       }
 
-      createColorPalette('highlightPalette', true);
-      createColorPalette('textColorPalette', false);
+      createColorPalette('highlightPalette', highlightColors, true);
+      createColorPalette('textColorPalette', textColors, false);
 
       document.getElementById('highlightBtn')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -5600,7 +5841,7 @@ export function initializeEditor() {
 
       document.getElementById('textColorBtn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        
+
         if (!saveCurrentSelection()) {
           alert('Por favor, selecciona el texto al que deseas cambiar el color');
           return;
@@ -5611,9 +5852,102 @@ export function initializeEditor() {
         
         textColorPalette.style.left = btnRect.left + 'px';
         textColorPalette.style.top = (btnRect.bottom + 5) + 'px';
-        
+
         highlightPalette.classList.remove('show');
         textColorPalette.classList.add('show');
+      });
+
+      function copySelectedFormat() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!range || range.collapsed) {
+          return false;
+        }
+
+        let element = range.startContainer.nodeType === Node.TEXT_NODE
+          ? range.startContainer.parentElement
+          : range.startContainer;
+
+        if (element && element.nodeType === Node.ELEMENT_NODE && !element.isContentEditable) {
+          element = element.closest('[contenteditable="true"]');
+        }
+
+        if (!element) {
+          return false;
+        }
+
+        const computed = window.getComputedStyle(element);
+        copiedFormat = {
+          fontFamily: computed.fontFamily,
+          fontSize: computed.fontSize,
+          fontWeight: computed.fontWeight,
+          fontStyle: computed.fontStyle,
+          textDecoration: computed.textDecoration,
+          color: computed.color,
+          backgroundColor: computed.backgroundColor
+        };
+
+        const btn = document.getElementById('copyFormatBtn');
+        if (btn) {
+          btn.style.background = '#90ee90';
+          setTimeout(() => {
+            btn.style.background = '';
+          }, 1000);
+        }
+
+        return true;
+      }
+
+      function applyCopiedFormat() {
+        if (!copiedFormat) {
+          alert('Primero copia un formato');
+          return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!range || range.collapsed) {
+          return false;
+        }
+
+        const span = document.createElement('span');
+        span.style.fontFamily = copiedFormat.fontFamily;
+        span.style.fontSize = copiedFormat.fontSize;
+        span.style.fontWeight = copiedFormat.fontWeight;
+        span.style.fontStyle = copiedFormat.fontStyle;
+        span.style.textDecoration = copiedFormat.textDecoration;
+        span.style.color = copiedFormat.color;
+        span.style.backgroundColor = copiedFormat.backgroundColor;
+
+        try {
+          range.surroundContents(span);
+        } catch (error) {
+          const fragment = range.extractContents();
+          span.appendChild(fragment);
+          range.insertNode(span);
+        }
+
+        const selectionRange = document.createRange();
+        selectionRange.selectNodeContents(span);
+        selection.removeAllRanges();
+        selection.addRange(selectionRange);
+        return true;
+      }
+
+      document.getElementById('copyFormatBtn')?.addEventListener('click', () => {
+        copySelectedFormat();
+      });
+
+      document.getElementById('pasteFormatBtn')?.addEventListener('click', () => {
+        applyCopiedFormat();
       });
 
       document.addEventListener('click', (e) => {
@@ -5998,7 +6332,7 @@ export function initializeEditor() {
         const targetPage = activeMagicPage;
         closeMagicView();
         if (targetPage && document.contains(targetPage)) {
-          targetPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          scrollPageIntoViewWithOffset(targetPage);
           targetPage.classList.add('pulse-highlight');
           setTimeout(() => targetPage.classList.remove('pulse-highlight'), 1600);
         }
@@ -6194,7 +6528,7 @@ export function initializeEditor() {
               closeMagicView();
               closePanel();
               setActivePage(tema.page);
-              tema.page.scrollIntoView({ behavior: 'auto', block: 'start' });
+              scrollPageIntoViewWithOffset(tema.page, 'auto');
             };
 
             btnMain.addEventListener('click', openTopic);
@@ -6373,7 +6707,7 @@ export function initializeEditor() {
         const finalTitle = response.trim() || defaultTitle;
         const page = createTopicPageForSection(section, finalTitle);
         if (page) {
-          page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          scrollPageIntoViewWithOffset(page);
         }
       }
 
@@ -6607,6 +6941,7 @@ export function initializeEditor() {
           if (magicPage) magicPage.contentEditable = 'true';
           setFloatingNotesEditable(true);
           editToolbar.classList.add('show');
+          cachedToolbarHeight = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || cachedToolbarHeight || 56;
           editBtn.classList.add('active');
           editBtn.textContent = '✏️';
           saveHtmlBtn.style.display = 'inline-block';
@@ -6631,9 +6966,118 @@ export function initializeEditor() {
       function execCmd(command, value = null) {
         document.execCommand(command, false, value);
       }
-      
+
+      function captureIndentTargets() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return new Map();
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!range) {
+          return new Map();
+        }
+
+        const seen = new Set();
+        const targets = new Map();
+        const intersects = typeof range.intersectsNode === 'function'
+          ? (node) => range.intersectsNode(node)
+          : (node) => {
+              const nodeRange = document.createRange();
+              nodeRange.selectNodeContents(node);
+              const before = range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
+              const after = range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0;
+              return !(before || after);
+            };
+
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode(node) {
+              if (!(node instanceof HTMLElement)) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (!node.isContentEditable) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (!intersects(node)) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (node.closest('li, ul, ol')) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              const display = window.getComputedStyle(node).display;
+              if (display === 'block' || display === 'flex' || display === 'grid' || display === 'table') {
+                return NodeFilter.FILTER_ACCEPT;
+              }
+              return NodeFilter.FILTER_SKIP;
+            }
+          }
+        );
+
+        while (walker.nextNode()) {
+          seen.add(walker.currentNode);
+        }
+
+        [range.startContainer, range.endContainer].forEach((node) => {
+          let element = node instanceof HTMLElement ? node : node.parentElement;
+          while (element && element instanceof HTMLElement && element.isContentEditable) {
+            const display = window.getComputedStyle(element).display;
+            if (display !== 'inline') {
+              break;
+            }
+            element = element.parentElement;
+          }
+          if (element instanceof HTMLElement) {
+            seen.add(element);
+          }
+        });
+
+        seen.forEach((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return;
+          }
+          if (!element.isContentEditable) {
+            return;
+          }
+          if (element.closest('li, ul, ol')) {
+            return;
+          }
+          const computed = window.getComputedStyle(element);
+          const margin = parseFloat(element.style.marginLeft || computed.marginLeft || '0') || 0;
+          targets.set(element, margin);
+        });
+
+        return targets;
+      }
+
+      function applyIndentSnapshot(targets, delta) {
+        targets.forEach((previousMargin, element) => {
+          if (!(element instanceof HTMLElement) || !element.isConnected) {
+            return;
+          }
+          let newMargin = previousMargin + delta;
+          if (newMargin <= 0) {
+            element.style.marginLeft = '';
+          } else {
+            element.style.marginLeft = `${Math.round(newMargin)}px`;
+          }
+        });
+      }
+
+      function handleIndentCommand(command) {
+        const targets = captureIndentTargets();
+        execCmd(command);
+        if (targets.size === 0) {
+          return;
+        }
+        const delta = command === 'indent' ? 10 : -10;
+        applyIndentSnapshot(targets, delta);
+      }
+
       editBtn?.addEventListener('click', toggleEditMode);
-      
+
       document.getElementById('undoBtn')?.addEventListener('click', () => execCmd('undo'));
       document.getElementById('redoBtn')?.addEventListener('click', () => execCmd('redo'));
       
@@ -6650,8 +7094,8 @@ export function initializeEditor() {
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
       document.getElementById('insertUlBtn')?.addEventListener('click', () => execCmd('insertUnorderedList'));
       document.getElementById('insertOlBtn')?.addEventListener('click', () => execCmd('insertOrderedList'));
-      document.getElementById('indentBtn')?.addEventListener('click', () => execCmd('indent'));
-      document.getElementById('outdentBtn')?.addEventListener('click', () => execCmd('outdent'));
+      document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
+      document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
       insertIconBtn?.addEventListener('pointerdown', () => {
         saveCurrentSelection();
@@ -7012,6 +7456,18 @@ ${inlineStyles}
           e.preventDefault();
           execCmd('redo');
           break;
+        case 'c':
+          if (e.shiftKey) {
+            e.preventDefault();
+            copySelectedFormat();
+          }
+          break;
+        case 'v':
+          if (e.shiftKey) {
+            e.preventDefault();
+            applyCopiedFormat();
+          }
+          break;
       }
     }
   });
@@ -7186,6 +7642,7 @@ ${inlineStyles}
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
+          noteExport.borderColor = noteData.borderColor || null;
           noteExport.topicId = noteData.topicId || null;
           noteExport.sectionId = noteData.sectionId || null;
           noteExport.type = noteData.type || NOTE_TYPES.FLOATING;

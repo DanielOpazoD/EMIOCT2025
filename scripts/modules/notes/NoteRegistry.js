@@ -123,6 +123,9 @@ export function createEnhancedNote(options = {}) {
     type,
     category,
     style: (options.style && String(options.style)) || 'default',
+    borderColor: (typeof options.borderColor === 'string' && options.borderColor.trim())
+      ? options.borderColor.trim()
+      : null,
     title,
     content: typeof options.content === 'string' ? options.content : '',
     html: typeof options.html === 'string' ? options.html : '',
