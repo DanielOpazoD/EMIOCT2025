@@ -66,6 +66,11 @@ export function initializeEditor() {
       const FLOATING_NOTE_MIN_HEIGHT = 140;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
+      let pendingFloatingNoteViewportRefresh = false;
+      let documentHorizontalShift = 0;
+      const DOCUMENT_SHIFT_STEP = 80;
+      const DOCUMENT_SHIFT_MIN = -1500;
+      const DOCUMENT_SHIFT_MAX = 1500;
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -322,6 +327,8 @@ export function initializeEditor() {
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
+          refreshFloatingNotesTopicVisibility();
+          scheduleFloatingNotesViewportRefresh();
           return;
         }
         currentPageRef = page;
@@ -332,6 +339,8 @@ export function initializeEditor() {
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
         syncBodyTheme(themeClass);
+        refreshFloatingNotesTopicVisibility();
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function setSectionTheme(sectionId, themeClass) {
@@ -368,6 +377,8 @@ export function initializeEditor() {
       const zoomInBtn = document.getElementById('zoomInBtn');
       const zoomOutBtn = document.getElementById('zoomOutBtn');
       const zoomValue = document.getElementById('zoomValue');
+      const shiftLeftBtn = document.getElementById('shiftLeftBtn');
+      const shiftRightBtn = document.getElementById('shiftRightBtn');
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
@@ -632,7 +643,21 @@ export function initializeEditor() {
         const previousZoom = currentZoom || 1;
         const newZoom = Math.max(0.5, Math.min(2, level));
         const scrollElement = document.scrollingElement || document.documentElement || document.body;
-        const viewportCenter = scrollElement ? scrollElement.scrollTop + window.innerHeight / 2 : null;
+        const pageRef = getCurrentPage();
+
+        let pageScrollState = null;
+        if (scrollElement && pageRef && pageRef.isConnected) {
+          const scrollTop = scrollElement.scrollTop;
+          const pageRect = pageRef.getBoundingClientRect();
+          const pageTop = pageRect.top + scrollTop;
+          const pageHeight = pageRect.height || 1;
+          const rawOffset = scrollTop - pageTop;
+          const clampedOffset = Math.min(Math.max(rawOffset, 0), pageHeight);
+          pageScrollState = {
+            page: pageRef,
+            ratio: pageHeight > 0 ? clampedOffset / pageHeight : 0
+          };
+        }
 
         currentZoom = newZoom;
         document.documentElement.style.setProperty('--zoom-level', currentZoom);
@@ -642,21 +667,71 @@ export function initializeEditor() {
         if (!skipRemember && !isMagicViewActive) {
           lastRegularZoom = currentZoom;
         }
-        if (scrollElement && viewportCenter !== null && Math.abs(currentZoom - previousZoom) >= 0.0001) {
-          const scaleFactor = currentZoom / previousZoom;
-          const targetCenter = viewportCenter * scaleFactor;
-          const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
-          scrollElement.scrollTo({ top: desiredTop });
+
+        if (Math.abs(currentZoom - previousZoom) >= 0.0001) {
+          adjustFloatingNotesForZoom(previousZoom, currentZoom);
+
+          if (scrollElement) {
+            if (pageScrollState) {
+              requestAnimationFrame(() => {
+                const { page, ratio } = pageScrollState;
+                if (!page || !page.isConnected) return;
+                const updatedRect = page.getBoundingClientRect();
+                const updatedTop = updatedRect.top + scrollElement.scrollTop;
+                const updatedHeight = updatedRect.height || 1;
+                const targetTop = updatedTop + (updatedHeight * (Number.isFinite(ratio) ? ratio : 0));
+                scrollElement.scrollTo({ top: targetTop });
+              });
+            } else {
+              const viewportCenter = scrollElement.scrollTop + window.innerHeight / 2;
+              const scaleFactor = currentZoom / previousZoom;
+              const targetCenter = viewportCenter * scaleFactor;
+              const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
+              scrollElement.scrollTo({ top: desiredTop });
+            }
+          }
         }
+
         syncMagicZoom();
+      }
+
+      function adjustFloatingNotesForZoom(prevZoom, nextZoom) {
+        if (!floatingNotesLayer) return;
+        if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
+        if (!Number.isFinite(nextZoom) || nextZoom <= 0) return;
+        if (Math.abs(nextZoom - prevZoom) < 0.0001) {
+          return;
+        }
+        scheduleFloatingNotesViewportRefresh();
+      }
+
+      function applyDocumentShift() {
+        document.documentElement.style.setProperty('--document-horizontal-shift', `${documentHorizontalShift}px`);
+      }
+
+      function adjustDocumentShift(delta) {
+        const nextValue = Math.min(
+          DOCUMENT_SHIFT_MAX,
+          Math.max(DOCUMENT_SHIFT_MIN, documentHorizontalShift + delta)
+        );
+        if (nextValue === documentHorizontalShift) {
+          return;
+        }
+        documentHorizontalShift = nextValue;
+        applyDocumentShift();
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function updateZoom(delta) {
         applyZoom(currentZoom + delta);
       }
 
+      applyDocumentShift();
+
       zoomInBtn?.addEventListener('click', () => updateZoom(0.1));
       zoomOutBtn?.addEventListener('click', () => updateZoom(-0.1));
+      shiftLeftBtn?.addEventListener('click', () => adjustDocumentShift(-DOCUMENT_SHIFT_STEP));
+      shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
       function saveCurrentSelection() {
@@ -3242,6 +3317,62 @@ export function initializeEditor() {
         }
       }
 
+      function resolveNoteTopicId(note) {
+        if (!note) return '';
+        const datasetTopicId = (note.dataset.topicId || '').trim();
+        if (datasetTopicId) {
+          return datasetTopicId;
+        }
+        const noteId = note.dataset.noteId;
+        if (noteId) {
+          const noteData = notesRegistry.get(noteId);
+          if (noteData?.topicId) {
+            const topicValue = String(noteData.topicId).trim();
+            note.dataset.topicId = topicValue;
+            return topicValue;
+          }
+        }
+        return '';
+      }
+
+      function applyFloatingNoteTopicVisibility(note) {
+        if (!note) return;
+        const currentTopic = getCurrentTopicId();
+        const noteTopicId = resolveNoteTopicId(note);
+        const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+        if (!shouldShow && floatingNoteDragState.note === note) {
+          endFloatingNoteDrag();
+        }
+        const activeMenuNoteId = activeFloatingNoteStyleMenu?.dataset?.noteId;
+        if (!shouldShow && activeMenuNoteId && activeMenuNoteId === note.dataset.noteId) {
+          closeFloatingNoteStyleMenu();
+        }
+        note.hidden = !shouldShow;
+        note.style.display = shouldShow ? '' : 'none';
+        note.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+        note.classList.toggle('floating-note-visible', shouldShow);
+      }
+
+      function refreshFloatingNotesTopicVisibility() {
+        if (!floatingNotesLayer) return;
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(applyFloatingNoteTopicVisibility);
+      }
+
+      function scheduleFloatingNotesViewportRefresh() {
+        if (pendingFloatingNoteViewportRefresh) return;
+        pendingFloatingNoteViewportRefresh = true;
+        requestAnimationFrame(() => {
+          pendingFloatingNoteViewportRefresh = false;
+          refreshFloatingNotesTopicVisibility();
+        });
+      }
+
+      function resolveFloatingNoteInitialPosition(noteData, fallbackLeft, fallbackTop) {
+        const left = Number.isFinite(noteData?.left) ? noteData.left : fallbackLeft;
+        const top = Number.isFinite(noteData?.top) ? noteData.top : fallbackTop;
+        return { left, top };
+      }
+
       function syncFloatingNoteStyleMenu(menu, styleId) {
         if (!menu) return;
         menu.querySelectorAll('button[data-style-id]').forEach(button => {
@@ -3366,30 +3497,19 @@ export function initializeEditor() {
 
       function clampNotePosition(note, left, top) {
         if (!floatingNotesLayer) {
-          return { left: left || 0, top: top || 0 };
+          return {
+            left: Number.isFinite(left) ? left : 0,
+            top: Number.isFinite(top) ? top : 0
+          };
         }
         const layerRect = floatingNotesLayer.getBoundingClientRect();
-        const computedStyle = window.getComputedStyle(floatingNotesLayer);
-        const topOffset = Number.parseFloat(computedStyle.top || '0') || 0;
-        const docEl = document.documentElement;
-        const bodyEl = document.body;
-        const docScrollWidth = Math.max(
-          layerRect.width,
-          docEl?.scrollWidth || 0,
-          bodyEl?.scrollWidth || 0,
-          docEl?.clientWidth || 0
-        );
-        const docScrollHeight = Math.max(
-          layerRect.height,
-          docEl?.scrollHeight || 0,
-          bodyEl?.scrollHeight || 0,
-          docEl?.clientHeight || 0
-        );
-        const layerWidth = docScrollWidth;
-        const layerHeight = Math.max(0, docScrollHeight - topOffset);
+        const viewportWidth = window.innerWidth || layerRect.width || 0;
+        const viewportHeight = window.innerHeight || (layerRect.height + layerRect.top) || 0;
+        const layerWidth = layerRect.width || viewportWidth;
+        const layerHeight = layerRect.height || Math.max(0, viewportHeight - layerRect.top);
         const noteRect = note.getBoundingClientRect();
-        const noteWidth = note.offsetWidth || noteRect.width || 240;
-        const noteHeight = note.offsetHeight || noteRect.height || 140;
+        const noteWidth = note.offsetWidth || noteRect.width || FLOATING_NOTE_DEFAULT_WIDTH;
+        const noteHeight = note.offsetHeight || noteRect.height || FLOATING_NOTE_MIN_HEIGHT;
         const maxLeft = Math.max(0, layerWidth - noteWidth);
         const maxTop = Math.max(0, layerHeight - noteHeight);
         const clampedLeft = Math.min(Math.max(Number.isFinite(left) ? left : 0, 0), maxLeft);
@@ -3397,17 +3517,22 @@ export function initializeEditor() {
         return { left: clampedLeft, top: clampedTop };
       }
 
-      function positionFloatingNote(note, left, top) {
+      function positionFloatingNote(note, left, top, options = {}) {
         if (!note) return;
+        const { skipClamp = false } = options;
         const applyPosition = () => {
-          const coords = clampNotePosition(note, left, top);
-          note.style.left = `${coords.left}px`;
-          note.style.top = `${coords.top}px`;
-          note.dataset.left = String(coords.left);
-          note.dataset.top = String(coords.top);
+          const coords = skipClamp
+            ? { left: Number.isFinite(left) ? left : 0, top: Number.isFinite(top) ? top : 0 }
+            : clampNotePosition(note, left, top);
+          const finalLeft = Number.isFinite(coords.left) ? coords.left : 0;
+          const finalTop = Number.isFinite(coords.top) ? coords.top : 0;
+          note.style.left = `${finalLeft}px`;
+          note.style.top = `${finalTop}px`;
+          note.dataset.left = String(finalLeft);
+          note.dataset.top = String(finalTop);
           const noteId = note.dataset.noteId;
           if (noteId) {
-            updateNoteData(noteId, { left: coords.left, top: coords.top }, { silent: true });
+            updateNoteData(noteId, { left: finalLeft, top: finalTop }, { silent: true });
           }
         };
 
@@ -3434,6 +3559,7 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu();
         } else {
           clampAllFloatingNotes();
+          scheduleFloatingNotesViewportRefresh();
         }
       }
 
@@ -3510,11 +3636,7 @@ export function initializeEditor() {
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           const left = Number.parseFloat(note.dataset.left || note.style.left || '0');
           const top = Number.parseFloat(note.dataset.top || note.style.top || '0');
-          const coords = clampNotePosition(note, left, top);
-          note.style.left = `${coords.left}px`;
-          note.style.top = `${coords.top}px`;
-          note.dataset.left = String(coords.left);
-          note.dataset.top = String(coords.top);
+          positionFloatingNote(note, left, top);
         });
       }
 
@@ -3577,6 +3699,10 @@ export function initializeEditor() {
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
         const parsedHeight = Number.parseFloat(data.height ?? metaSource.height);
+        const parsedPageOffsetLeft = Number.parseFloat(data.pageOffsetLeft ?? metaSource.pageOffsetLeft);
+        const parsedPageOffsetTop = Number.parseFloat(data.pageOffsetTop ?? metaSource.pageOffsetTop);
+        const parsedRelativeLeft = Number.parseFloat(data.relativeLeft ?? metaSource.relativeLeft);
+        const parsedRelativeTop = Number.parseFloat(data.relativeTop ?? metaSource.relativeTop);
 
         const noteData = ensureNoteData(noteId, {
           id: noteId,
@@ -3601,6 +3727,10 @@ export function initializeEditor() {
           top: Number.isFinite(parsedTop) ? parsedTop : null,
           width: Number.isFinite(parsedWidth) ? parsedWidth : null,
           height: Number.isFinite(parsedHeight) ? parsedHeight : null,
+          pageOffsetLeft: Number.isFinite(parsedPageOffsetLeft) ? parsedPageOffsetLeft : null,
+          pageOffsetTop: Number.isFinite(parsedPageOffsetTop) ? parsedPageOffsetTop : null,
+          relativeLeft: Number.isFinite(parsedRelativeLeft) ? parsedRelativeLeft : null,
+          relativeTop: Number.isFinite(parsedRelativeTop) ? parsedRelativeTop : null,
           element: note
         });
         notesRegistry.set(noteId, noteData);
@@ -3792,10 +3922,9 @@ export function initializeEditor() {
         const baseViewportTop = window.scrollY + 120 + (defaultOffset % 240);
         const fallbackLeft = Math.max(0, baseViewportLeft - layerPageLeft);
         const fallbackTop = Math.max(0, baseViewportTop - layerPageTop);
-        const initialLeft = Number.isFinite(noteData.left) ? noteData.left : (Number.isFinite(parsedLeft) ? parsedLeft : fallbackLeft);
-        const initialTop = Number.isFinite(noteData.top) ? noteData.top : (Number.isFinite(parsedTop) ? parsedTop : fallbackTop);
+        const initialPosition = resolveFloatingNoteInitialPosition(noteData, fallbackLeft, fallbackTop);
 
-        positionFloatingNote(note, initialLeft, initialTop);
+        positionFloatingNote(note, initialPosition.left, initialPosition.top);
         bringNoteToFront(note);
 
         syncNoteElementMeta(note, noteData);
@@ -3806,6 +3935,7 @@ export function initializeEditor() {
         }
 
         scheduleNotesViewRefresh();
+        scheduleFloatingNotesViewportRefresh();
         return note;
       }
 
@@ -4158,6 +4288,8 @@ export function initializeEditor() {
         if (ui.optionsMenu) {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
+
+        applyFloatingNoteTopicVisibility(note);
       }
 
       function formatDateTime(isoString) {
@@ -4211,11 +4343,16 @@ export function initializeEditor() {
               sectionId: noteData.sectionId,
               type: noteData.type,
               anchorId: noteData.anchorId,
-              linkedTo: noteData.linkedTo
+              linkedTo: noteData.linkedTo,
+              pageOffsetLeft: noteData.pageOffsetLeft,
+              pageOffsetTop: noteData.pageOffsetTop,
+              relativeLeft: noteData.relativeLeft,
+              relativeTop: noteData.relativeTop
             });
           });
         }
         setFloatingNotesVisibility(hidden);
+        scheduleFloatingNotesViewportRefresh();
       }
 
       class NotesViewController {
@@ -4706,7 +4843,13 @@ export function initializeEditor() {
         }
       });
       window.addEventListener('pointercancel', endFloatingNoteDrag);
-      window.addEventListener('resize', clampAllFloatingNotes);
+      window.addEventListener('resize', () => {
+        clampAllFloatingNotes();
+        scheduleFloatingNotesViewportRefresh();
+      });
+      window.addEventListener('scroll', () => {
+        scheduleFloatingNotesViewportRefresh();
+      }, { passive: true });
 
       refreshToggleNotesButton();
 
@@ -5684,7 +5827,8 @@ export function initializeEditor() {
               if (!tema.page || !tema.page.isConnected) return;
               closeMagicView();
               closePanel();
-              tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              setActivePage(tema.page);
+              tema.page.scrollIntoView({ behavior: 'auto', block: 'start' });
             };
 
             btnMain.addEventListener('click', openTopic);
@@ -6556,6 +6700,18 @@ ${inlineStyles}
           noteExport.linkedTo = noteData.linkedTo || null;
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
+          if (Number.isFinite(noteData.pageOffsetLeft)) {
+            noteExport.pageOffsetLeft = noteData.pageOffsetLeft;
+          }
+          if (Number.isFinite(noteData.pageOffsetTop)) {
+            noteExport.pageOffsetTop = noteData.pageOffsetTop;
+          }
+          if (Number.isFinite(noteData.relativeLeft)) {
+            noteExport.relativeLeft = noteData.relativeLeft;
+          }
+          if (Number.isFinite(noteData.relativeTop)) {
+            noteExport.relativeTop = noteData.relativeTop;
+          }
           noteExport.meta = { ...noteData, element: undefined };
           delete noteExport.meta.element;
         }

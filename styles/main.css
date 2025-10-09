@@ -6,6 +6,7 @@
   --base-font-size: 10.5px;
   --zoom-level: 1;
   --topbar-height: 36px;
+  --document-horizontal-shift: 0px;
   font-size: calc(var(--base-font-size) * var(--zoom-level));
 }
 
@@ -560,6 +561,11 @@ body.reading-mode .reading-mode-exit {
   gap: 6px;
 }
 
+.document-shift-controls {
+  display: flex;
+  gap: 6px;
+}
+
 .zoom-value {
   min-width: 68px;
   text-align: center;
@@ -593,11 +599,13 @@ body.reading-mode .reading-mode-exit {
 
 .toolbar-content {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px;
   align-items: center;
   justify-content: center;
   max-width: 1400px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .edit-toolbar button, .edit-toolbar select {
@@ -2951,16 +2959,23 @@ body.magic-open .magic-view {
 
 /* ===== Notas flotantes ===== */
 .floating-notes-layer {
-  position: absolute;
+  position: fixed;
   top: var(--topbar-height);
   left: 0;
   right: 0;
+  bottom: 0;
   pointer-events: none;
   z-index: 3600;
 }
 
 body.reading-mode .floating-notes-layer {
   top: 0;
+}
+
+.page,
+.magic-page,
+.magic-content-container {
+  transform: translateX(var(--document-horizontal-shift));
 }
 
 .floating-note {
