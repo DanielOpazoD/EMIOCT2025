@@ -66,6 +66,7 @@ export function initializeEditor() {
       const FLOATING_NOTE_MIN_HEIGHT = 140;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
+      let pendingFloatingNoteViewportRefresh = false;
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -322,6 +323,7 @@ export function initializeEditor() {
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
+          scheduleFloatingNotesViewportRefresh();
           return;
         }
         currentPageRef = page;
@@ -332,6 +334,7 @@ export function initializeEditor() {
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
         syncBodyTheme(themeClass);
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function setSectionTheme(sectionId, themeClass) {
@@ -688,21 +691,10 @@ export function initializeEditor() {
         if (!floatingNotesLayer) return;
         if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
         if (!Number.isFinite(nextZoom) || nextZoom <= 0) return;
-        const scaleFactor = nextZoom / prevZoom;
-        if (!Number.isFinite(scaleFactor) || Math.abs(scaleFactor - 1) < 0.0001) {
+        if (Math.abs(nextZoom - prevZoom) < 0.0001) {
           return;
         }
-
-        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
-          const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
-          const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
-          if (!Number.isFinite(currentLeft) || !Number.isFinite(currentTop)) {
-            return;
-          }
-          const scaledLeft = currentLeft * scaleFactor;
-          const scaledTop = currentTop * scaleFactor;
-          positionFloatingNote(note, scaledLeft, scaledTop);
-        });
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function updateZoom(delta) {
@@ -3296,6 +3288,178 @@ export function initializeEditor() {
         }
       }
 
+      function getNotePageElement(note) {
+        if (!note) return null;
+        const topicId = (note.dataset.topicId || '').trim();
+        if (topicId) {
+          const page = findPageByTopicId(topicId);
+          if (page) {
+            return page;
+          }
+        }
+        if (currentPageRef && currentPageRef.isConnected) {
+          return currentPageRef;
+        }
+        return getCurrentPage();
+      }
+
+      function syncNoteRelativeOffsets(note) {
+        if (!note || !floatingNotesLayer) return;
+        const page = getNotePageElement(note);
+        if (!page) return;
+
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
+        const pageDocLeft = pageRect.left + window.scrollX;
+        const pageDocTop = pageRect.top + window.scrollY;
+        const pageWidth = pageRect.width || 1;
+        const pageHeight = pageRect.height || 1;
+
+        const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+        const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+        const docLeft = layerRect.left + currentLeft + window.scrollX;
+        const docTop = layerRect.top + currentTop + window.scrollY;
+        const offsetLeft = docLeft - pageDocLeft;
+        const offsetTop = docTop - pageDocTop;
+        const relativeLeft = pageWidth > 0 ? offsetLeft / pageWidth : 0;
+        const relativeTop = pageHeight > 0 ? offsetTop / pageHeight : 0;
+
+        note.dataset.offsetLeft = String(offsetLeft);
+        note.dataset.offsetTop = String(offsetTop);
+        note.dataset.relLeft = String(relativeLeft);
+        note.dataset.relTop = String(relativeTop);
+
+        const noteId = note.dataset.noteId;
+        if (noteId) {
+          updateNoteData(noteId, {
+            left: currentLeft,
+            top: currentTop,
+            pageOffsetLeft: offsetLeft,
+            pageOffsetTop: offsetTop,
+            relativeLeft,
+            relativeTop
+          }, { silent: true });
+        }
+      }
+
+      function computeNoteViewportPosition(note) {
+        const defaults = {
+          left: Number.parseFloat(note?.dataset.left || note?.style?.left || '0') || 0,
+          top: Number.parseFloat(note?.dataset.top || note?.style?.top || '0') || 0
+        };
+        if (!note || !floatingNotesLayer) {
+          return defaults;
+        }
+
+        const page = getNotePageElement(note);
+        if (!page) {
+          return defaults;
+        }
+
+        const noteId = note.dataset.noteId;
+        const noteData = noteId ? notesRegistry.get(noteId) : null;
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
+        const pageDocLeft = pageRect.left + window.scrollX;
+        const pageDocTop = pageRect.top + window.scrollY;
+        const pageWidth = pageRect.width || 1;
+        const pageHeight = pageRect.height || 1;
+
+        const relLeft = Number.parseFloat(note.dataset.relLeft ?? (noteData ? noteData.relativeLeft : NaN));
+        const relTop = Number.parseFloat(note.dataset.relTop ?? (noteData ? noteData.relativeTop : NaN));
+        let offsetLeft = Number.parseFloat(note.dataset.offsetLeft ?? (noteData ? noteData.pageOffsetLeft : NaN));
+        let offsetTop = Number.parseFloat(note.dataset.offsetTop ?? (noteData ? noteData.pageOffsetTop : NaN));
+
+        if (Number.isFinite(relLeft)) {
+          offsetLeft = relLeft * pageWidth;
+        }
+        if (Number.isFinite(relTop)) {
+          offsetTop = relTop * pageHeight;
+        }
+
+        let resolvedLeft = defaults.left;
+        let resolvedTop = defaults.top;
+
+        if (Number.isFinite(offsetLeft)) {
+          const docLeft = pageDocLeft + offsetLeft;
+          resolvedLeft = docLeft - window.scrollX - layerRect.left;
+        }
+
+        if (Number.isFinite(offsetTop)) {
+          const docTop = pageDocTop + offsetTop;
+          resolvedTop = docTop - window.scrollY - layerRect.top;
+        }
+
+        return { left: resolvedLeft, top: resolvedTop };
+      }
+
+      function resolveFloatingNoteInitialViewportPosition(noteData, fallbackLeft, fallbackTop) {
+        if (!floatingNotesLayer) {
+          return { left: fallbackLeft, top: fallbackTop };
+        }
+        const topicId = noteData?.topicId || '';
+        const page = topicId ? findPageByTopicId(topicId) : getCurrentPage();
+        if (!page) {
+          return { left: fallbackLeft, top: fallbackTop };
+        }
+
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
+        const pageDocLeft = pageRect.left + window.scrollX;
+        const pageDocTop = pageRect.top + window.scrollY;
+        const pageWidth = pageRect.width || 1;
+        const pageHeight = pageRect.height || 1;
+
+        let resolvedLeft = Number.isFinite(noteData?.left) ? noteData.left : fallbackLeft;
+        let resolvedTop = Number.isFinite(noteData?.top) ? noteData.top : fallbackTop;
+
+        if (Number.isFinite(noteData?.relativeLeft)) {
+          const offsetLeft = noteData.relativeLeft * pageWidth;
+          const docLeft = pageDocLeft + offsetLeft;
+          resolvedLeft = docLeft - window.scrollX - layerRect.left;
+        } else if (Number.isFinite(noteData?.pageOffsetLeft)) {
+          const docLeft = pageDocLeft + noteData.pageOffsetLeft;
+          resolvedLeft = docLeft - window.scrollX - layerRect.left;
+        }
+
+        if (Number.isFinite(noteData?.relativeTop)) {
+          const offsetTop = noteData.relativeTop * pageHeight;
+          const docTop = pageDocTop + offsetTop;
+          resolvedTop = docTop - window.scrollY - layerRect.top;
+        } else if (Number.isFinite(noteData?.pageOffsetTop)) {
+          const docTop = pageDocTop + noteData.pageOffsetTop;
+          resolvedTop = docTop - window.scrollY - layerRect.top;
+        }
+
+        return { left: resolvedLeft, top: resolvedTop };
+      }
+
+      function refreshFloatingNoteViewportPosition(note, options = {}) {
+        if (!note) return;
+        const coords = computeNoteViewportPosition(note);
+        positionFloatingNote(note, coords.left, coords.top, {
+          skipClamp: true,
+          skipSyncRelative: true,
+          ...options
+        });
+      }
+
+      function refreshAllFloatingNoteViewportPositions({ skipSyncRelative = true } = {}) {
+        if (!floatingNotesLayer) return;
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          refreshFloatingNoteViewportPosition(note, { skipSyncRelative });
+        });
+      }
+
+      function scheduleFloatingNotesViewportRefresh() {
+        if (pendingFloatingNoteViewportRefresh) return;
+        pendingFloatingNoteViewportRefresh = true;
+        requestAnimationFrame(() => {
+          pendingFloatingNoteViewportRefresh = false;
+          refreshAllFloatingNoteViewportPositions();
+        });
+      }
+
       function syncFloatingNoteStyleMenu(menu, styleId) {
         if (!menu) return;
         menu.querySelectorAll('button[data-style-id]').forEach(button => {
@@ -3451,17 +3615,25 @@ export function initializeEditor() {
         return { left: clampedLeft, top: clampedTop };
       }
 
-      function positionFloatingNote(note, left, top) {
+      function positionFloatingNote(note, left, top, options = {}) {
         if (!note) return;
+        const { skipClamp = false, skipSyncRelative = false } = options;
         const applyPosition = () => {
-          const coords = clampNotePosition(note, left, top);
-          note.style.left = `${coords.left}px`;
-          note.style.top = `${coords.top}px`;
-          note.dataset.left = String(coords.left);
-          note.dataset.top = String(coords.top);
+          const coords = skipClamp
+            ? { left: Number.isFinite(left) ? left : 0, top: Number.isFinite(top) ? top : 0 }
+            : clampNotePosition(note, left, top);
+          const finalLeft = Number.isFinite(coords.left) ? coords.left : 0;
+          const finalTop = Number.isFinite(coords.top) ? coords.top : 0;
+          note.style.left = `${finalLeft}px`;
+          note.style.top = `${finalTop}px`;
+          note.dataset.left = String(finalLeft);
+          note.dataset.top = String(finalTop);
           const noteId = note.dataset.noteId;
           if (noteId) {
-            updateNoteData(noteId, { left: coords.left, top: coords.top }, { silent: true });
+            updateNoteData(noteId, { left: finalLeft, top: finalTop }, { silent: true });
+          }
+          if (!skipSyncRelative) {
+            syncNoteRelativeOffsets(note);
           }
         };
 
@@ -3488,6 +3660,7 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu();
         } else {
           clampAllFloatingNotes();
+          scheduleFloatingNotesViewportRefresh();
         }
       }
 
@@ -3564,11 +3737,7 @@ export function initializeEditor() {
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           const left = Number.parseFloat(note.dataset.left || note.style.left || '0');
           const top = Number.parseFloat(note.dataset.top || note.style.top || '0');
-          const coords = clampNotePosition(note, left, top);
-          note.style.left = `${coords.left}px`;
-          note.style.top = `${coords.top}px`;
-          note.dataset.left = String(coords.left);
-          note.dataset.top = String(coords.top);
+          positionFloatingNote(note, left, top);
         });
       }
 
@@ -3631,6 +3800,10 @@ export function initializeEditor() {
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
         const parsedHeight = Number.parseFloat(data.height ?? metaSource.height);
+        const parsedPageOffsetLeft = Number.parseFloat(data.pageOffsetLeft ?? metaSource.pageOffsetLeft);
+        const parsedPageOffsetTop = Number.parseFloat(data.pageOffsetTop ?? metaSource.pageOffsetTop);
+        const parsedRelativeLeft = Number.parseFloat(data.relativeLeft ?? metaSource.relativeLeft);
+        const parsedRelativeTop = Number.parseFloat(data.relativeTop ?? metaSource.relativeTop);
 
         const noteData = ensureNoteData(noteId, {
           id: noteId,
@@ -3655,6 +3828,10 @@ export function initializeEditor() {
           top: Number.isFinite(parsedTop) ? parsedTop : null,
           width: Number.isFinite(parsedWidth) ? parsedWidth : null,
           height: Number.isFinite(parsedHeight) ? parsedHeight : null,
+          pageOffsetLeft: Number.isFinite(parsedPageOffsetLeft) ? parsedPageOffsetLeft : null,
+          pageOffsetTop: Number.isFinite(parsedPageOffsetTop) ? parsedPageOffsetTop : null,
+          relativeLeft: Number.isFinite(parsedRelativeLeft) ? parsedRelativeLeft : null,
+          relativeTop: Number.isFinite(parsedRelativeTop) ? parsedRelativeTop : null,
           element: note
         });
         notesRegistry.set(noteId, noteData);
@@ -3846,13 +4023,13 @@ export function initializeEditor() {
         const baseViewportTop = window.scrollY + 120 + (defaultOffset % 240);
         const fallbackLeft = Math.max(0, baseViewportLeft - layerPageLeft);
         const fallbackTop = Math.max(0, baseViewportTop - layerPageTop);
-        const initialLeft = Number.isFinite(noteData.left) ? noteData.left : (Number.isFinite(parsedLeft) ? parsedLeft : fallbackLeft);
-        const initialTop = Number.isFinite(noteData.top) ? noteData.top : (Number.isFinite(parsedTop) ? parsedTop : fallbackTop);
+        const initialPosition = resolveFloatingNoteInitialViewportPosition(noteData, fallbackLeft, fallbackTop);
 
-        positionFloatingNote(note, initialLeft, initialTop);
+        positionFloatingNote(note, initialPosition.left, initialPosition.top, { skipSyncRelative: true });
         bringNoteToFront(note);
 
         syncNoteElementMeta(note, noteData);
+        syncNoteRelativeOffsets(note);
         attachExistingAnchor(note, noteData.anchorId);
 
         if (data.focus !== false && isEditMode) {
@@ -3860,6 +4037,7 @@ export function initializeEditor() {
         }
 
         scheduleNotesViewRefresh();
+        scheduleFloatingNotesViewportRefresh();
         return note;
       }
 
@@ -4265,11 +4443,16 @@ export function initializeEditor() {
               sectionId: noteData.sectionId,
               type: noteData.type,
               anchorId: noteData.anchorId,
-              linkedTo: noteData.linkedTo
+              linkedTo: noteData.linkedTo,
+              pageOffsetLeft: noteData.pageOffsetLeft,
+              pageOffsetTop: noteData.pageOffsetTop,
+              relativeLeft: noteData.relativeLeft,
+              relativeTop: noteData.relativeTop
             });
           });
         }
         setFloatingNotesVisibility(hidden);
+        scheduleFloatingNotesViewportRefresh();
       }
 
       class NotesViewController {
@@ -4760,7 +4943,13 @@ export function initializeEditor() {
         }
       });
       window.addEventListener('pointercancel', endFloatingNoteDrag);
-      window.addEventListener('resize', clampAllFloatingNotes);
+      window.addEventListener('resize', () => {
+        clampAllFloatingNotes();
+        scheduleFloatingNotesViewportRefresh();
+      });
+      window.addEventListener('scroll', () => {
+        scheduleFloatingNotesViewportRefresh();
+      }, { passive: true });
 
       refreshToggleNotesButton();
 
@@ -6610,6 +6799,18 @@ ${inlineStyles}
           noteExport.linkedTo = noteData.linkedTo || null;
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
+          if (Number.isFinite(noteData.pageOffsetLeft)) {
+            noteExport.pageOffsetLeft = noteData.pageOffsetLeft;
+          }
+          if (Number.isFinite(noteData.pageOffsetTop)) {
+            noteExport.pageOffsetTop = noteData.pageOffsetTop;
+          }
+          if (Number.isFinite(noteData.relativeLeft)) {
+            noteExport.relativeLeft = noteData.relativeLeft;
+          }
+          if (Number.isFinite(noteData.relativeTop)) {
+            noteExport.relativeTop = noteData.relativeTop;
+          }
           noteExport.meta = { ...noteData, element: undefined };
           delete noteExport.meta.element;
         }

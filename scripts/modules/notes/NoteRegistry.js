@@ -54,6 +54,10 @@ export function createEnhancedNote(options = {}) {
     top: Number.isFinite(options.top) ? Number(options.top) : null,
     width: Number.isFinite(options.width) ? Number(options.width) : null,
     height: Number.isFinite(options.height) ? Number(options.height) : null,
+    pageOffsetLeft: Number.isFinite(options.pageOffsetLeft) ? Number(options.pageOffsetLeft) : null,
+    pageOffsetTop: Number.isFinite(options.pageOffsetTop) ? Number(options.pageOffsetTop) : null,
+    relativeLeft: Number.isFinite(options.relativeLeft) ? Number(options.relativeLeft) : null,
+    relativeTop: Number.isFinite(options.relativeTop) ? Number(options.relativeTop) : null,
     anchorId: options.anchorId || null,
     element: options.element || null
   };
@@ -136,7 +140,16 @@ export class NoteRegistry {
           } else if (overrides.title === null) {
             merged.title = null;
           }
-        } else if (key === 'left' || key === 'top' || key === 'width' || key === 'height') {
+        } else if (
+          key === 'left' ||
+          key === 'top' ||
+          key === 'width' ||
+          key === 'height' ||
+          key === 'pageOffsetLeft' ||
+          key === 'pageOffsetTop' ||
+          key === 'relativeLeft' ||
+          key === 'relativeTop'
+        ) {
           merged[key] = Number.isFinite(overrides[key]) ? Number(overrides[key]) : merged[key];
         } else if (overrides[key] !== undefined) {
           merged[key] = overrides[key];
