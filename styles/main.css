@@ -593,11 +593,13 @@ body.reading-mode .reading-mode-exit {
 
 .toolbar-content {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px;
   align-items: center;
   justify-content: center;
   max-width: 1400px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .edit-toolbar button, .edit-toolbar select {
