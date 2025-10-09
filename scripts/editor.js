@@ -93,6 +93,7 @@ export function initializeEditor() {
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
+      const SECTION_BOUNDARY_CLASS = 'section-boundary';
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -3126,6 +3127,70 @@ export function initializeEditor() {
       });
 
       /* === INICIALIZACIÓN === */
+      function rebuildSectionBoundaries() {
+        document.querySelectorAll(`.${SECTION_BOUNDARY_CLASS}`).forEach(boundary => boundary.remove());
+
+        if (!sections.length) {
+          return;
+        }
+
+        sections.forEach((section, index) => {
+          if (index === 0) {
+            return;
+          }
+
+          const firstTopic = section.temas.find(tema => tema?.page && tema.page.isConnected);
+          const firstPage = firstTopic?.page;
+
+          if (!firstPage || !firstPage.parentNode) {
+            return;
+          }
+
+          const boundary = document.createElement('div');
+          boundary.className = SECTION_BOUNDARY_CLASS;
+          boundary.dataset.sectionId = section.id || '';
+          boundary.dataset.sectionName = section.nombre || '';
+
+          const headingId = generateUniqueId('section-boundary-heading');
+          boundary.setAttribute('role', 'region');
+          boundary.setAttribute('aria-labelledby', headingId);
+
+          const content = document.createElement('div');
+          content.className = 'section-boundary-content';
+
+          const title = document.createElement('h2');
+          title.className = 'section-boundary-title';
+          title.id = headingId;
+          title.textContent = section.nombre || 'Siguiente sección';
+
+          const description = document.createElement('p');
+          description.className = 'section-boundary-description';
+          description.textContent = 'Has llegado al límite de la sección anterior. Usa el siguiente control para continuar con la nueva sección.';
+
+          const actions = document.createElement('div');
+          actions.className = 'section-boundary-actions';
+
+          const continueBtn = document.createElement('button');
+          continueBtn.type = 'button';
+          continueBtn.className = 'section-boundary-continue';
+          continueBtn.textContent = 'Entrar a esta sección';
+          continueBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            closePanel();
+            setActivePage(firstPage);
+            scrollPageIntoViewWithOffset(firstPage, 'smooth');
+          });
+
+          actions.appendChild(continueBtn);
+          content.appendChild(title);
+          content.appendChild(description);
+          content.appendChild(actions);
+          boundary.appendChild(content);
+
+          firstPage.parentNode.insertBefore(boundary, firstPage);
+        });
+      }
+
       function initializeSections() {
         const sectionMap = new Map();
         const newThemeMap = new Map(sectionThemes);
@@ -3161,6 +3226,7 @@ export function initializeEditor() {
 
         sectionThemes = newThemeMap;
         sections = Array.from(sectionMap.values());
+        rebuildSectionBoundaries();
       }
 
       pages.forEach(p => {
@@ -7332,6 +7398,7 @@ export function initializeEditor() {
             updateSectionIndicator(currentPageRef);
           }
           buildSectionsPanel();
+          rebuildSectionBoundaries();
         }
       }
 
@@ -7349,6 +7416,7 @@ export function initializeEditor() {
         if (currentPageRef && !document.body.contains(currentPageRef)) {
           setActivePage(getCurrentPage());
         }
+        rebuildSectionBoundaries();
       }
 
       function clearAllContent() {
@@ -7380,6 +7448,7 @@ export function initializeEditor() {
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
         updateSectionIndicator(null);
+        rebuildSectionBoundaries();
       }
 
       function addNewSection() {
@@ -7396,6 +7465,7 @@ export function initializeEditor() {
         sectionThemes.set(newSection.id, DEFAULT_THEME);
         sections.push(newSection);
         buildSectionsPanel();
+        rebuildSectionBoundaries();
       }
 
       function promptCreateTopicInSection(section) {
