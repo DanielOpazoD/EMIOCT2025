@@ -3667,15 +3667,7 @@ export function initializeEditor() {
         const tagsContainer = document.createElement('div');
         tagsContainer.className = 'note-tags';
 
-        const metaContainer = document.createElement('div');
-        metaContainer.className = 'note-meta';
-        const dateSpan = document.createElement('span');
-        dateSpan.className = 'note-date';
-        const reviewStatus = document.createElement('span');
-        reviewStatus.className = 'note-review-status';
-        metaContainer.append(dateSpan, reviewStatus);
-
-        footer.append(tagsContainer, metaContainer);
+        footer.append(tagsContainer);
 
         note.append(header, body, footer);
         floatingNotesLayer.appendChild(note);
@@ -3686,8 +3678,6 @@ export function initializeEditor() {
           categoryWrap,
           priorityBtn,
           tagsContainer,
-          dateSpan,
-          reviewStatus,
           optionsMenu
         };
 
@@ -4152,55 +4142,9 @@ export function initializeEditor() {
             ui.tagsContainer.appendChild(span);
           });
         }
-        if (ui.dateSpan) {
-          ui.dateSpan.textContent = noteData.updatedAt ? formatRelativeTime(noteData.updatedAt) : '';
-        }
-        if (ui.reviewStatus) {
-          const count = Number(noteData.reviewCount) || 0;
-          ui.reviewStatus.textContent = `📖 ${count}`;
-        }
         if (ui.optionsMenu) {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
-      }
-
-      function formatRelativeTime(isoString) {
-        if (!isoString) return '';
-        const date = new Date(isoString);
-        if (Number.isNaN(date.getTime())) return '';
-        const diffMs = Date.now() - date.getTime();
-        const thresholds = {
-          minute: 60,
-          hour: 60,
-          day: 24,
-          month: 30,
-          year: 12
-        };
-        const rtf = typeof Intl !== 'undefined' && Intl.RelativeTimeFormat
-          ? new Intl.RelativeTimeFormat('es', { numeric: 'auto' })
-          : null;
-        const seconds = Math.round(diffMs / 1000);
-        if (Math.abs(seconds) < 60) {
-          return rtf ? rtf.format(-seconds, 'second') : 'Hace unos segundos';
-        }
-        const minutes = Math.round(seconds / thresholds.minute);
-        if (Math.abs(minutes) < 60) {
-          return rtf ? rtf.format(-minutes, 'minute') : `Hace ${minutes} min`;
-        }
-        const hours = Math.round(minutes / thresholds.hour);
-        if (Math.abs(hours) < 24) {
-          return rtf ? rtf.format(-hours, 'hour') : `Hace ${hours} h`;
-        }
-        const days = Math.round(hours / thresholds.day);
-        if (Math.abs(days) < 30) {
-          return rtf ? rtf.format(-days, 'day') : `Hace ${days} d`;
-        }
-        const months = Math.round(days / thresholds.month);
-        if (Math.abs(months) < 12) {
-          return rtf ? rtf.format(-months, 'month') : `Hace ${months} meses`;
-        }
-        const years = Math.round(months / thresholds.year);
-        return rtf ? rtf.format(-years, 'year') : `Hace ${years} años`;
       }
 
       function formatDateTime(isoString) {
@@ -5576,30 +5520,12 @@ export function initializeEditor() {
         isMagicViewActive = true;
         applyZoom(1, { skipRemember: true });
         magic.innerHTML = '';
-        const header = document.createElement('div');
-        header.className = 'magic-header';
-        const headerTitle = document.createElement('strong');
-        headerTitle.textContent = '✨ Visor del tema';
-        header.appendChild(headerTitle);
-
-        const headerActions = document.createElement('div');
-        headerActions.className = 'magic-header-actions';
-
-        const backBtn = document.createElement('button');
-        backBtn.type = 'button';
-        backBtn.className = 'magic-back';
-        backBtn.innerHTML = '↩️ Volver al tema';
-        backBtn.disabled = !pageRef;
-        headerActions.appendChild(backBtn);
-
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'magic-close';
-        closeBtn.innerHTML = '&times;';
-        headerActions.appendChild(closeBtn);
-
-        header.appendChild(headerActions);
-        magic.appendChild(header);
+        closeBtn.setAttribute('aria-label', 'Cerrar visor mágico');
+        closeBtn.innerHTML = '<span aria-hidden="true">&times;</span>';
+        magic.appendChild(closeBtn);
         const magicPage = document.createElement('div');
         magicPage.className = 'magic-page';
 
@@ -5627,11 +5553,6 @@ export function initializeEditor() {
 
         closeBtn.addEventListener('click', () => {
           closeMagicView();
-        });
-
-        backBtn.addEventListener('click', () => {
-          if (!pageRef) return;
-          returnFromMagicView();
         });
         syncMagicZoom();
         magic.classList.add('open');
