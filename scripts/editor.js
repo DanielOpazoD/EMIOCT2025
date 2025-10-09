@@ -381,8 +381,10 @@ export function initializeEditor() {
       const shiftRightBtn = document.getElementById('shiftRightBtn');
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
+      const iconPalette = document.getElementById('iconPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
+      const insertIconBtn = document.getElementById('insertIconBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
       const tableMenu = document.getElementById('tableMenu');
@@ -411,6 +413,13 @@ export function initializeEditor() {
       const pastelColors = [
         '#FFB6C1', '#FFD1DC', '#FFC8DD', '#E7C6FF', '#C8B6FF', '#B4D4FF', '#AEC6CF', '#B2DFDB',
         '#C5E1A5', '#FFF9C4', '#FFE082', '#FFCCBC', '#D7CCC8', '#F5F5F5', '#CFD8DC', '#E1BEE7'
+      ];
+
+      const QUICK_INSERT_ICONS = [
+        '▪︎', '▪️', '▫️', '□', '●', '○', '◉', '◆', '◇', '◈', '🔹', '🔸', '📌', '📍', '📂', '📄', '📝', '📋', '📎',
+        '🔑', '📚', '📑', '📊', '🔎', '💡', '⚠️', '✅', '☑️', '✔️', '❌', '✖️', '❔', '⭐', '🩺', '💉', '💊', '🩸',
+        '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈', '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩',
+        '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️', '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
       ];
 
       const tableResizers = new WeakMap();
@@ -787,6 +796,18 @@ export function initializeEditor() {
         selection.removeAllRanges();
         selection.addRange(range);
         return selection;
+      }
+
+      function focusEditableElementAtEnd(element) {
+        if (!element) return;
+        element.focus();
+        const selection = window.getSelection();
+        if (!selection) return;
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
       }
 
       function insertNodeAtSelection(node) {
@@ -3569,6 +3590,15 @@ export function initializeEditor() {
         bodies.forEach(body => {
           body.contentEditable = editable ? 'true' : 'false';
         });
+        const titles = floatingNotesLayer.querySelectorAll('.floating-note-title');
+        titles.forEach(title => {
+          title.contentEditable = editable ? 'true' : 'false';
+          title.setAttribute('aria-readonly', editable ? 'false' : 'true');
+          const wrap = title.closest('.note-category');
+          if (wrap) {
+            wrap.classList.toggle('is-editable', !!editable);
+          }
+        });
       }
 
       function startFloatingNoteDrag(note, event) {
@@ -3751,8 +3781,54 @@ export function initializeEditor() {
         const categoryIcon = document.createElement('span');
         categoryIcon.className = 'note-icon';
         const categoryLabel = document.createElement('span');
-        categoryLabel.className = 'note-label';
+        categoryLabel.className = 'note-label floating-note-title';
+        categoryLabel.spellcheck = false;
+        categoryLabel.contentEditable = isEditMode ? 'true' : 'false';
+        categoryLabel.setAttribute('role', 'textbox');
+        categoryWrap.classList.toggle('is-editable', isEditMode);
         categoryWrap.append(categoryIcon, categoryLabel);
+
+        categoryLabel.addEventListener('focus', () => {
+          bringNoteToFront(note);
+        });
+
+        categoryLabel.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            categoryLabel.blur();
+          }
+        });
+
+        categoryLabel.addEventListener('input', () => {
+          const rawValue = categoryLabel.textContent || '';
+          updateNoteData(noteId, { title: rawValue }, { silent: true });
+        });
+
+        categoryLabel.addEventListener('paste', (event) => {
+          event.preventDefault();
+          const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
+          const inserted = document.execCommand('insertText', false, text);
+          if (!inserted) {
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount) {
+              return;
+            }
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        });
+
+        categoryLabel.addEventListener('blur', () => {
+          const rawValue = categoryLabel.textContent || '';
+          const trimmed = rawValue.trim();
+          const finalTitle = trimmed.length > 0 ? trimmed : null;
+          const updated = updateNoteData(noteId, { title: finalTitle, updatedAt: new Date().toISOString() });
+          syncNoteElementMeta(note, updated);
+        });
 
         const navigation = document.createElement('div');
         navigation.className = 'note-navigation';
@@ -3929,18 +4005,10 @@ export function initializeEditor() {
           event.stopPropagation();
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu(optionsMenu);
-          const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
-          const categoryInfo = getNoteCategoryInfo(currentData.category);
-          const hasCustomTitle = currentData.title !== null && currentData.title !== undefined;
-          const promptDefault = hasCustomTitle ? currentData.title : categoryInfo.label;
-          const proposed = window.prompt('Título de la nota', promptDefault);
-          if (proposed === null) {
+          if (!isEditMode) {
             return;
           }
-          const finalTitle = proposed.trim();
-          const updated = updateNoteData(noteId, { title: finalTitle }, { silent: true });
-          syncNoteElementMeta(note, updated);
-          scheduleNotesViewRefresh();
+          focusEditableElementAtEnd(categoryLabel);
         });
 
         header.addEventListener('pointerdown', (event) => {
@@ -3952,6 +4020,9 @@ export function initializeEditor() {
         });
 
         header.addEventListener('dblclick', (event) => {
+          if (event.target.closest('.floating-note-title')) {
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           bringNoteToFront(note);
@@ -4454,14 +4525,25 @@ export function initializeEditor() {
           ui.categoryIcon.textContent = categoryInfo.icon;
         }
         if (ui.categoryLabel) {
-          const hasCustomTitle = noteData.title !== null && noteData.title !== undefined;
-          const displayTitle = getNoteDisplayTitle(noteData.title, categoryInfo.label);
-          ui.categoryLabel.textContent = displayTitle || '';
-          if (ui.categoryWrap) {
-            ui.categoryWrap.title = hasCustomTitle
-              ? 'Haz clic para renombrar'
-              : `Haz clic para personalizar: ${categoryInfo.label}`;
+          const labelEl = ui.categoryLabel;
+          const normalizedTitle = typeof noteData.title === 'string' ? noteData.title.trim() : '';
+          const hasCustomTitle = normalizedTitle.length > 0;
+          const displayTitle = hasCustomTitle ? normalizedTitle : categoryInfo.label;
+          labelEl.dataset.placeholder = categoryInfo.label || '';
+          labelEl.classList.toggle('has-custom-title', hasCustomTitle);
+          if (document.activeElement !== labelEl) {
+            labelEl.textContent = displayTitle || '';
           }
+          labelEl.contentEditable = isEditMode ? 'true' : 'false';
+          labelEl.setAttribute('aria-readonly', isEditMode ? 'false' : 'true');
+          if (ui.categoryWrap) {
+            ui.categoryWrap.classList.toggle('is-editable', isEditMode);
+            ui.categoryWrap.title = isEditMode
+              ? (hasCustomTitle ? 'Haz clic para editar el título' : 'Haz clic para asignar un título')
+              : (hasCustomTitle ? `Título: ${normalizedTitle}` : `Título sugerido: ${categoryInfo.label}`);
+          }
+        } else if (ui.categoryWrap) {
+          ui.categoryWrap.classList.toggle('is-editable', isEditMode);
         }
         if (ui.priorityBtn) {
           const btn = ui.priorityBtn;
@@ -5431,9 +5513,72 @@ export function initializeEditor() {
       createColorPalette('highlightPalette', true);
       createColorPalette('textColorPalette', false);
 
+      let iconPaletteInitialized = false;
+
+      function buildIconPalette() {
+        if (!iconPalette || iconPaletteInitialized) return;
+        iconPalette.innerHTML = '';
+        QUICK_INSERT_ICONS.forEach(icon => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'icon-palette-btn';
+          button.textContent = icon;
+          button.title = `Insertar ${icon}`;
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            insertIconAtSelection(icon);
+            iconPalette.classList.remove('show');
+          });
+          iconPalette.appendChild(button);
+        });
+        iconPaletteInitialized = true;
+      }
+
+      function insertIconAtSelection(icon) {
+        if (!icon) return;
+        const selection = ensureEditableSelection();
+        if (!selection || !selection.rangeCount) {
+          savedSelection = null;
+          return;
+        }
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const textNode = document.createTextNode(`${icon} `);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedSelection = null;
+      }
+
+      insertIconBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!iconPalette) return;
+        if (iconPalette.classList.contains('show')) {
+          iconPalette.classList.remove('show');
+          savedSelection = null;
+          return;
+        }
+        if (!saveCurrentSelection()) {
+          alert('Coloca el cursor o selecciona el texto donde deseas insertar el icono.');
+          return;
+        }
+        if (!iconPaletteInitialized) {
+          buildIconPalette();
+        }
+        const btnRect = event.currentTarget.getBoundingClientRect();
+        iconPalette.style.left = `${btnRect.left}px`;
+        iconPalette.style.top = `${btnRect.bottom + 5}px`;
+        highlightPalette.classList.remove('show');
+        textColorPalette.classList.remove('show');
+        iconPalette.classList.add('show');
+      });
+
       document.getElementById('highlightBtn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        
+
         if (!saveCurrentSelection()) {
           alert('Por favor, selecciona el texto que deseas destacar');
           return;
@@ -5478,6 +5623,15 @@ export function initializeEditor() {
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
+          if (wasOpen) {
+            savedSelection = null;
+          }
+        }
+        if (!e.target.closest('#insertIconBtn') && !e.target.closest('#iconPalette')) {
+          const wasOpen = iconPalette?.classList.contains('show');
+          if (iconPalette) {
+            iconPalette.classList.remove('show');
+          }
           if (wasOpen) {
             savedSelection = null;
           }
@@ -6432,6 +6586,7 @@ export function initializeEditor() {
           closeImageCropModal();
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
+          iconPalette?.classList.remove('show');
           savedSelection = null;
         }
       });
@@ -6449,6 +6604,7 @@ export function initializeEditor() {
         }
         isEditMode = !isEditMode;
         hideTopicMenu();
+        iconPalette?.classList.remove('show');
 
         if (isEditMode) {
           pages.forEach(page => page.contentEditable = 'true');
