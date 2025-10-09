@@ -1562,16 +1562,27 @@ export function initializeEditor() {
       }
 
       function getCurrentPage() {
+        const viewportRect = getViewportRect();
+        let bestPage = null;
+        let bestScore = -Infinity;
+        pages.forEach(page => {
+          const visibility = getPageViewportVisibility(page, viewportRect);
+          if (!visibility.visible) {
+            return;
+          }
+          const score = (visibility.ratio * 1000) - visibility.centerOffset;
+          if (score > bestScore) {
+            bestScore = score;
+            bestPage = page;
+          }
+        });
+        if (bestPage) {
+          return bestPage;
+        }
         if (currentPageRef && document.body.contains(currentPageRef)) {
           return currentPageRef;
         }
-        const viewportCenter = window.scrollY + window.innerHeight / 2;
-        return pages.find(p => {
-          const rect = p.getBoundingClientRect();
-          const pageTop = rect.top + window.scrollY;
-          const pageBottom = pageTop + rect.height;
-          return viewportCenter >= pageTop && viewportCenter <= pageBottom;
-        }) || pages[0];
+        return pages[0] || null;
       }
 
       function getCurrentMagicPage() {
@@ -3371,6 +3382,57 @@ export function initializeEditor() {
         return '';
       }
 
+      function getViewportRect() {
+        const docEl = document.documentElement;
+        const width = window.innerWidth || docEl?.clientWidth || 0;
+        const height = window.innerHeight || docEl?.clientHeight || 0;
+        return {
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: height,
+          width,
+          height,
+          centerX: width / 2,
+          centerY: height / 2
+        };
+      }
+
+      function getPageViewportVisibility(page, viewportRect = null) {
+        const viewport = viewportRect || getViewportRect();
+        if (!page || !page.isConnected) {
+          return {
+            visible: false,
+            ratio: 0,
+            area: 0,
+            rect: null,
+            centerOffset: Number.POSITIVE_INFINITY,
+            viewport
+          };
+        }
+        const rect = page.getBoundingClientRect();
+        const intersectionLeft = Math.max(rect.left, viewport.left);
+        const intersectionRight = Math.min(rect.right, viewport.right);
+        const intersectionTop = Math.max(rect.top, viewport.top);
+        const intersectionBottom = Math.min(rect.bottom, viewport.bottom);
+        const intersectionWidth = Math.max(0, intersectionRight - intersectionLeft);
+        const intersectionHeight = Math.max(0, intersectionBottom - intersectionTop);
+        const visibleArea = intersectionWidth * intersectionHeight;
+        const totalArea = Math.max(rect.width * rect.height, 1);
+        const ratio = visibleArea / totalArea;
+        const centerY = rect.top + (rect.height / 2);
+        const centerOffset = Math.abs(centerY - viewport.centerY);
+        const visible = intersectionWidth > 0 && intersectionHeight > 0;
+        return {
+          visible,
+          ratio,
+          area: visibleArea,
+          rect,
+          centerOffset,
+          viewport
+        };
+      }
+
       function getNoteTopicMetrics(noteData) {
         if (!floatingNotesLayer) return null;
         if (!noteData || !noteData.topicId) return null;
@@ -3456,11 +3518,16 @@ export function initializeEditor() {
         positionFloatingNote(note, placement.left, placement.top);
       }
 
-      function applyFloatingNoteTopicVisibility(note) {
+      function applyFloatingNoteTopicVisibility(note, viewportRect = null) {
         if (!note) return;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
-        const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+        const viewport = viewportRect || getViewportRect();
+        const page = noteTopicId ? findPageByTopicId(noteTopicId) : null;
+        const visibility = getPageViewportVisibility(page, viewport);
+        const shouldShow = !floatingNotesHidden && currentTopic && noteTopicId
+          ? (noteTopicId === currentTopic && visibility.visible)
+          : false;
         if (!shouldShow && floatingNoteDragState.note === note) {
           endFloatingNoteDrag();
         }
@@ -3479,7 +3546,10 @@ export function initializeEditor() {
 
       function refreshFloatingNotesTopicVisibility() {
         if (!floatingNotesLayer) return;
-        floatingNotesLayer.querySelectorAll('.floating-note').forEach(applyFloatingNoteTopicVisibility);
+        const viewportRect = getViewportRect();
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          applyFloatingNoteTopicVisibility(note, viewportRect);
+        });
       }
 
       function scheduleFloatingNotesViewportRefresh() {
