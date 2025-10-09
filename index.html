@@ -407,7 +407,7 @@
     <div class="panel-header">
       <div class="panel-header-info">
         <strong>Navegación</strong>
-        <span class="panel-topic-count" id="panelTopicCount">0 temas</span>
+        <span class="panel-topic-count" id="panelTopicCount" aria-live="polite">0 temas</span>
       </div>
       <div class="panel-header-actions">
         <button class="panel-header-btn" id="editPanelBtn" title="Editar secciones">✏️</button>
@@ -419,6 +419,18 @@
       <button class="panel-action-btn" id="toggleAllBtn" title="Expandir/Colapsar todo">⊞</button>
       <button class="panel-action-btn" id="sortAlphaBtn">🔤</button>
       <button class="panel-action-btn" id="sortNumBtn">🔢</button>
+    </div>
+    <div class="panel-search" role="search">
+      <span class="panel-search-icon" aria-hidden="true">🔍</span>
+      <input
+        type="search"
+        id="panelSearchInput"
+        class="panel-search-input"
+        placeholder="Buscar secciones o temas"
+        aria-label="Buscar secciones o temas"
+        autocomplete="off"
+      />
+      <button type="button" class="panel-search-clear" id="panelSearchClear" aria-label="Limpiar búsqueda">×</button>
     </div>
     <div class="sections-container" id="sectionsContainer"></div>
   </aside>

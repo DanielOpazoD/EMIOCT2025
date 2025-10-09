@@ -113,11 +113,15 @@ export function initializeEditor() {
       let sectionThemes = new Map();
       let currentSectionId = '';
       let currentPageRef = null;
+      let panelFilterTerm = '';
+      let panelFilterNormalized = '';
       
       const panel = document.getElementById('topic-panel');
       const tocPanel = document.getElementById('toc-panel');
       const sectionsContainer = document.getElementById('sectionsContainer');
       const panelTopicCount = document.getElementById('panelTopicCount');
+      const panelSearchInput = document.getElementById('panelSearchInput');
+      const panelSearchClear = document.getElementById('panelSearchClear');
       const plusBtn = document.querySelector('.topbar-plus');
       const panelClose = document.querySelectorAll('.panel-close');
       const tocClose = document.getElementById('tocClose');
@@ -5292,6 +5296,12 @@ export function initializeEditor() {
         buildSectionsPanel();
         panel.classList.add('open');
         panelBackdrop.classList.add('show');
+        if (panelSearchInput) {
+          requestAnimationFrame(() => {
+            panelSearchInput.focus();
+            panelSearchInput.select();
+          });
+        }
       }
 
       function closePanel() {
@@ -5309,6 +5319,27 @@ export function initializeEditor() {
         }
         return value.replace(/[^a-zA-Z0-9_\-]/g, (char) => `\\${char}`);
       };
+
+      const normalizeForSearch = (value = '') =>
+        value
+          .toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      function setPanelFilter(value) {
+        panelFilterTerm = value ?? '';
+        panelFilterNormalized = normalizeForSearch(panelFilterTerm);
+        if (panelSearchClear) {
+          panelSearchClear.hidden = !panelFilterNormalized;
+        }
+        if (panelSearchInput) {
+          panelSearchInput.classList.toggle('has-value', Boolean(panelFilterNormalized));
+        }
+        buildSectionsPanel();
+      }
 
       function magicAnchorFor(page) {
         if (!page) return '';
@@ -5531,15 +5562,33 @@ export function initializeEditor() {
         sectionsContainer.innerHTML = '';
         globalTopicCounter = 1;
         let totalTopics = 0;
-        
-        sections.forEach((section, sectionIdx) => {
+        let renderedTopics = 0;
+        let matchedTopics = 0;
+        let renderedSections = 0;
+        const hasFilter = Boolean(panelFilterNormalized);
+
+        sections.forEach((section) => {
+          totalTopics += section.temas.length;
+
+          const sectionMatch = hasFilter && normalizeForSearch(section.nombre || '').includes(panelFilterNormalized);
+          const topicMatches = hasFilter
+            ? section.temas.filter((tema) => normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized))
+            : section.temas;
+
+          if (hasFilter && !sectionMatch && topicMatches.length === 0) {
+            return;
+          }
+
+          renderedSections++;
+
           const sectionDiv = document.createElement('div');
           sectionDiv.className = 'section-item';
           if (section.collapsed) sectionDiv.classList.add('collapsed');
-          
+          if (sectionMatch) sectionDiv.classList.add('matches-filter');
+
           const sectionHeader = document.createElement('div');
           sectionHeader.className = 'section-header';
-          
+
           const toggle = document.createElement('span');
           toggle.className = 'section-toggle';
           toggle.textContent = '▼';
@@ -5547,7 +5596,7 @@ export function initializeEditor() {
             section.collapsed = !section.collapsed;
             sectionDiv.classList.toggle('collapsed');
           });
-          
+
           const nameSpan = document.createElement('span');
           nameSpan.className = 'section-name';
           nameSpan.textContent = section.nombre;
@@ -5555,15 +5604,14 @@ export function initializeEditor() {
             section.collapsed = !section.collapsed;
             sectionDiv.classList.toggle('collapsed');
           });
-          
+
           const countSpan = document.createElement('span');
           countSpan.className = 'section-count';
           countSpan.textContent = `(${section.temas.length})`;
-          totalTopics += section.temas.length;
-          
+
           const actionsDiv = document.createElement('div');
           actionsDiv.className = 'section-actions';
-          
+
           const printBtn = document.createElement('button');
           printBtn.className = 'section-action-btn';
           printBtn.textContent = '🖨️';
@@ -5572,7 +5620,7 @@ export function initializeEditor() {
             e.stopPropagation();
             printSection(section);
           });
-          
+
           if (isPanelEditMode) {
             const renameBtn = document.createElement('button');
             renameBtn.className = 'section-action-btn';
@@ -5582,7 +5630,7 @@ export function initializeEditor() {
               e.stopPropagation();
               renameSection(section);
             });
-            
+
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'section-action-btn';
             deleteBtn.textContent = '🗑️';
@@ -5592,73 +5640,118 @@ export function initializeEditor() {
               e.stopPropagation();
               deleteSection(section);
             });
-            
+
             actionsDiv.appendChild(renameBtn);
             actionsDiv.appendChild(deleteBtn);
           }
-          
+
           actionsDiv.appendChild(printBtn);
-          
+
           sectionHeader.appendChild(toggle);
           sectionHeader.appendChild(nameSpan);
           sectionHeader.appendChild(countSpan);
           sectionHeader.appendChild(actionsDiv);
-          
+
           const topicList = document.createElement('ol');
           topicList.className = 'topic-list';
-          
-          section.temas.forEach(tema => {
+          const topicsToRender = hasFilter && !sectionMatch ? topicMatches : section.temas;
+          renderedTopics += topicsToRender.length;
+          if (hasFilter) {
+            matchedTopics += topicMatches.length;
+          }
+
+          topicsToRender.forEach((tema) => {
             const li = document.createElement('li');
             li.dataset.topicId = tema.id;
-            
+
             const numSpan = document.createElement('span');
             numSpan.className = 'topic-number';
-            numSpan.textContent = globalTopicCounter + '.';
+            numSpan.textContent = `${globalTopicCounter}.`;
             globalTopicCounter++;
-            
-          const btnMain = document.createElement('button');
-          btnMain.className = 'topic-action';
-          btnMain.title = 'Ir al tema';
-          btnMain.textContent = '📄';
-          const openTopic = () => {
-            if (!tema.page || !tema.page.isConnected) return;
-            closeMagicView();
-            closePanel();
-            closeTocPanel();
-            tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          };
 
-          btnMain.addEventListener('click', openTopic);
+            const btnMain = document.createElement('button');
+            btnMain.className = 'topic-action';
+            btnMain.title = 'Ir al tema';
+            btnMain.textContent = '📄';
+            const openTopic = () => {
+              if (!tema.page || !tema.page.isConnected) return;
+              closeMagicView();
+              closePanel();
+              closeTocPanel();
+              tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
 
-          const titleSpan = document.createElement('span');
-          titleSpan.className = 'topic-title';
-          titleSpan.textContent = tema.titulo;
-          titleSpan.title = 'Doble clic para opciones del tema';
-          titleSpan.addEventListener('dblclick', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            showTopicMenu(event, tema);
+            btnMain.addEventListener('click', openTopic);
+
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'topic-title';
+            titleSpan.textContent = tema.titulo;
+            titleSpan.title = 'Doble clic para opciones del tema';
+            titleSpan.addEventListener('dblclick', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              showTopicMenu(event, tema);
+            });
+            titleSpan.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openTopic();
+            });
+
+            if (hasFilter) {
+              const topicMatchesFilter = normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized);
+              li.classList.toggle('matches-filter', topicMatchesFilter);
+            }
+
+            li.appendChild(numSpan);
+            li.appendChild(btnMain);
+            li.appendChild(titleSpan);
+            topicList.appendChild(li);
           });
-          titleSpan.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openTopic();
-          });
 
-          li.appendChild(numSpan);
-          li.appendChild(btnMain);
-          li.appendChild(titleSpan);
-          topicList.appendChild(li);
-        });
-          
           sectionDiv.appendChild(sectionHeader);
           sectionDiv.appendChild(topicList);
           sectionsContainer.appendChild(sectionDiv);
         });
 
+        document.body.classList.toggle('panel-filter-active', hasFilter);
+
+        if (renderedSections === 0) {
+          const emptyState = document.createElement('div');
+          emptyState.className = 'panel-empty';
+          const term = escapeHtml(panelFilterTerm.trim());
+          emptyState.innerHTML = term
+            ? `<p>No encontramos coincidencias para <strong>“${term}”</strong>.</p>`
+            : '<p>Aún no hay secciones creadas.</p>';
+          if (hasFilter) {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'panel-empty-reset';
+            clearBtn.textContent = 'Limpiar búsqueda';
+            clearBtn.addEventListener('click', () => {
+              if (panelSearchInput) {
+                panelSearchInput.value = '';
+              }
+              setPanelFilter('');
+              panelSearchInput?.focus();
+            });
+            emptyState.appendChild(clearBtn);
+          }
+          sectionsContainer.appendChild(emptyState);
+        }
+
         if (panelTopicCount) {
-          const label = totalTopics === 1 ? '1 tema' : `${totalTopics} temas`;
-          panelTopicCount.textContent = label;
+          if (!hasFilter) {
+            const label = totalTopics === 1 ? '1 tema' : `${totalTopics} temas`;
+            panelTopicCount.textContent = label;
+            panelTopicCount.title = '';
+          } else {
+            const visibleLabel = renderedTopics === 1 ? '1 tema' : `${renderedTopics} temas`;
+            const totalLabel = totalTopics === 1 ? '1 tema total' : `${totalTopics} temas totales`;
+            const matchesLabel = matchedTopics === 1 ? '1 coincidencia' : `${matchedTopics} coincidencias`;
+            panelTopicCount.textContent = `${visibleLabel} · ${matchesLabel}`;
+            panelTopicCount.title = `${visibleLabel} visibles de ${totalLabel}`;
+          }
         }
       }
 
@@ -5828,6 +5921,30 @@ export function initializeEditor() {
       document.getElementById('sortAlphaBtn')?.addEventListener('click', sortSectionsAlpha);
       document.getElementById('sortNumBtn')?.addEventListener('click', sortSectionsNumeric);
       document.getElementById('printCurrentBtn')?.addEventListener('click', printCurrentTopic);
+      panelSearchInput?.addEventListener('input', (event) => {
+        setPanelFilter(event.target.value);
+      });
+      panelSearchInput?.addEventListener('search', (event) => {
+        setPanelFilter(event.target.value);
+      });
+      panelSearchInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          panelSearchInput.value = '';
+          setPanelFilter('');
+          panelSearchInput.blur();
+        }
+      });
+      if (panelSearchClear) {
+        panelSearchClear.hidden = true;
+        panelSearchClear.addEventListener('click', () => {
+          if (panelSearchInput) {
+            panelSearchInput.value = '';
+            panelSearchInput.focus();
+          }
+          setPanelFilter('');
+        });
+      }
       clearAllBtn?.addEventListener('click', clearAllContent);
 
       const io = new IntersectionObserver((entries) => {
