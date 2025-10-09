@@ -9,8 +9,94 @@ import {
 } from './noteConstants.js';
 import {
   normalizePriority,
-  sanitizeTags
+  sanitizeTags,
+  getNotePlainTextFromHtml
 } from './noteUtils.js';
+
+function createNormalizedNotePage(rawPage = {}, {
+  fallbackHtml = '',
+  fallbackContent = ''
+} = {}, seenIds = new Set()) {
+  const base = rawPage && typeof rawPage === 'object' ? { ...rawPage } : {};
+  let id = base.id ? String(base.id).trim() : '';
+  while (!id || seenIds.has(id)) {
+    id = generateUniqueId('note-page');
+  }
+  seenIds.add(id);
+
+  const html = typeof base.html === 'string' ? base.html : fallbackHtml;
+  const content = typeof base.content === 'string'
+    ? base.content
+    : (html ? getNotePlainTextFromHtml(html) : fallbackContent);
+  const title = typeof base.title === 'string' ? base.title.trim() : null;
+  const createdAt = base.createdAt ? String(base.createdAt) : new Date().toISOString();
+  const updatedAt = base.updatedAt ? String(base.updatedAt) : new Date().toISOString();
+
+  return {
+    id,
+    title,
+    html,
+    content,
+    createdAt,
+    updatedAt
+  };
+}
+
+function normalizeNotePages(pagesInput, options = {}) {
+  const { fallbackHtml = '', fallbackContent = '' } = options || {};
+  const seenIds = new Set();
+  const source = Array.isArray(pagesInput) ? pagesInput : [];
+  const normalized = source
+    .map(page => createNormalizedNotePage(page, { fallbackHtml, fallbackContent }, seenIds))
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    normalized.push(createNormalizedNotePage({}, { fallbackHtml, fallbackContent }, seenIds));
+  }
+
+  return normalized;
+}
+
+function applyPageStateToNote(note, overrides = {}) {
+  const fallbackHtml = typeof overrides.html === 'string'
+    ? overrides.html
+    : (note.html || '');
+  const fallbackContent = typeof overrides.content === 'string'
+    ? overrides.content
+    : (note.content || '');
+
+  const pages = normalizeNotePages(
+    overrides.pages !== undefined ? overrides.pages : note.pages,
+    { fallbackHtml, fallbackContent }
+  );
+
+  let currentIndex = Number.isInteger(overrides.currentPageIndex)
+    ? overrides.currentPageIndex
+    : (Number.isInteger(note.currentPageIndex) ? note.currentPageIndex : 0);
+  currentIndex = Math.min(Math.max(currentIndex, 0), pages.length - 1);
+
+  if (typeof overrides.html === 'string' || typeof overrides.content === 'string') {
+    const nowIso = overrides.updatedAt ? String(overrides.updatedAt) : new Date().toISOString();
+    const targetPage = pages[currentIndex];
+    const updatedPage = {
+      ...targetPage,
+      html: typeof overrides.html === 'string' ? overrides.html : targetPage.html,
+      content: typeof overrides.content === 'string' ? overrides.content : targetPage.content,
+      updatedAt: nowIso
+    };
+    pages[currentIndex] = updatedPage;
+  }
+
+  const activePage = pages[currentIndex] || pages[0];
+
+  return {
+    ...note,
+    pages,
+    currentPageIndex: currentIndex,
+    html: activePage?.html || '',
+    content: activePage?.content || ''
+  };
+}
 
 export function createEnhancedNote(options = {}) {
   const nowIso = new Date().toISOString();
@@ -32,7 +118,7 @@ export function createEnhancedNote(options = {}) {
     title = null;
   }
 
-  return {
+  const base = {
     id,
     type,
     category,
@@ -59,8 +145,18 @@ export function createEnhancedNote(options = {}) {
     relativeLeft: Number.isFinite(options.relativeLeft) ? Number(options.relativeLeft) : null,
     relativeTop: Number.isFinite(options.relativeTop) ? Number(options.relativeTop) : null,
     anchorId: options.anchorId || null,
-    element: options.element || null
+    element: options.element || null,
+    pages: [],
+    currentPageIndex: 0
   };
+
+  return applyPageStateToNote(base, {
+    pages: options.pages,
+    currentPageIndex: options.currentPageIndex,
+    html: typeof options.html === 'string' ? options.html : base.html,
+    content: typeof options.content === 'string' ? options.content : base.content,
+    updatedAt: options.updatedAt || nowIso
+  });
 }
 
 export class NoteRegistry {
@@ -119,6 +215,9 @@ export class NoteRegistry {
     } else if (overrides && typeof overrides === 'object') {
       const merged = { ...existing };
       Object.keys(overrides).forEach((key) => {
+        if (key === 'pages' || key === 'currentPageIndex' || key === 'html' || key === 'content') {
+          return;
+        }
         if (key === 'tags') {
           merged.tags = sanitizeTags(overrides.tags);
         } else if (key === 'priority') {
@@ -156,11 +255,11 @@ export class NoteRegistry {
         }
       });
 
-      if (!overrides.updatedAt) {
-        merged.updatedAt = new Date().toISOString();
-      }
-
-      existing = merged;
+      const nextUpdatedAt = overrides.updatedAt ? String(overrides.updatedAt) : new Date().toISOString();
+      merged.updatedAt = nextUpdatedAt;
+      existing = applyPageStateToNote(merged, { ...overrides, updatedAt: nextUpdatedAt });
+    } else {
+      existing = applyPageStateToNote(existing, {});
     }
 
     this._notes.set(id, existing);
@@ -170,8 +269,8 @@ export class NoteRegistry {
   update(noteId, updates = {}, options = {}) {
     if (!noteId) return null;
     const { silent = false } = options || {};
-    const current = this.ensure(noteId);
-    const next = this.ensure(noteId, { ...current, ...updates, id: noteId });
+    this.ensure(noteId);
+    const next = this.ensure(noteId, { ...updates, id: noteId });
     this._notes.set(noteId, next);
     if (!silent) {
       this._notifyChange();

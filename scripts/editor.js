@@ -3703,6 +3703,12 @@ export function initializeEditor() {
         const parsedPageOffsetTop = Number.parseFloat(data.pageOffsetTop ?? metaSource.pageOffsetTop);
         const parsedRelativeLeft = Number.parseFloat(data.relativeLeft ?? metaSource.relativeLeft);
         const parsedRelativeTop = Number.parseFloat(data.relativeTop ?? metaSource.relativeTop);
+        const incomingPages = Array.isArray(data.pages)
+          ? data.pages
+          : (Array.isArray(metaSource.pages) ? metaSource.pages : undefined);
+        const incomingPageIndex = Number.isInteger(data.currentPageIndex)
+          ? data.currentPageIndex
+          : (Number.isInteger(metaSource.currentPageIndex) ? metaSource.currentPageIndex : undefined);
 
         const noteData = ensureNoteData(noteId, {
           id: noteId,
@@ -3731,7 +3737,9 @@ export function initializeEditor() {
           pageOffsetTop: Number.isFinite(parsedPageOffsetTop) ? parsedPageOffsetTop : null,
           relativeLeft: Number.isFinite(parsedRelativeLeft) ? parsedRelativeLeft : null,
           relativeTop: Number.isFinite(parsedRelativeTop) ? parsedRelativeTop : null,
-          element: note
+          element: note,
+          pages: incomingPages,
+          currentPageIndex: incomingPageIndex
         });
         notesRegistry.set(noteId, noteData);
 
@@ -3746,6 +3754,38 @@ export function initializeEditor() {
         categoryLabel.className = 'note-label';
         categoryWrap.append(categoryIcon, categoryLabel);
 
+        const navigation = document.createElement('div');
+        navigation.className = 'note-navigation';
+
+        const prevPageBtn = document.createElement('button');
+        prevPageBtn.type = 'button';
+        prevPageBtn.className = 'note-nav-btn note-nav-prev';
+        prevPageBtn.title = 'Nota anterior';
+        prevPageBtn.textContent = '‹';
+
+        const pageIndicator = document.createElement('span');
+        pageIndicator.className = 'note-page-indicator';
+
+        const nextPageBtn = document.createElement('button');
+        nextPageBtn.type = 'button';
+        nextPageBtn.className = 'note-nav-btn note-nav-next';
+        nextPageBtn.title = 'Nota siguiente';
+        nextPageBtn.textContent = '›';
+
+        const addPageBtn = document.createElement('button');
+        addPageBtn.type = 'button';
+        addPageBtn.className = 'note-nav-btn note-nav-add';
+        addPageBtn.title = 'Agregar subnota';
+        addPageBtn.textContent = '+';
+
+        const removePageBtn = document.createElement('button');
+        removePageBtn.type = 'button';
+        removePageBtn.className = 'note-nav-btn note-nav-remove';
+        removePageBtn.title = 'Eliminar subnota actual';
+        removePageBtn.textContent = '−';
+
+        navigation.append(prevPageBtn, pageIndicator, nextPageBtn, addPageBtn, removePageBtn);
+
         const actions = document.createElement('div');
         actions.className = 'note-actions floating-note-actions';
 
@@ -3753,18 +3793,6 @@ export function initializeEditor() {
         priorityBtn.type = 'button';
         priorityBtn.className = 'note-priority';
         priorityBtn.title = 'Prioridad';
-
-        const linkBtn = document.createElement('button');
-        linkBtn.type = 'button';
-        linkBtn.className = 'note-link';
-        linkBtn.title = 'Anclar al texto';
-        linkBtn.textContent = '🔗';
-
-        const flashcardBtn = document.createElement('button');
-        flashcardBtn.type = 'button';
-        flashcardBtn.className = 'note-flashcard';
-        flashcardBtn.title = 'Crear flashcard';
-        flashcardBtn.textContent = '🎴';
 
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
@@ -3780,8 +3808,8 @@ export function initializeEditor() {
           }
         }
 
-        actions.append(priorityBtn, linkBtn, flashcardBtn, menuBtn);
-        header.append(categoryWrap, actions);
+        actions.append(priorityBtn, menuBtn);
+        header.append(categoryWrap, navigation, actions);
 
         const body = document.createElement('div');
         body.className = 'floating-note-body note-body';
@@ -3796,12 +3824,39 @@ export function initializeEditor() {
         body.addEventListener('input', () => {
           const html = body.innerHTML;
           const textContent = getNotePlainTextFromHtml(html);
-          updateNoteData(noteId, {
+          const nowIso = new Date().toISOString();
+          const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
+          const currentIndex = Math.min(
+            Math.max(Number(currentData?.currentPageIndex) || 0, 0),
+            Math.max((currentData?.pages?.length || 1) - 1, 0)
+          );
+          const updatedPages = Array.isArray(currentData?.pages)
+            ? currentData.pages.map((page, index) => {
+                if (index !== currentIndex) {
+                  return { ...page };
+                }
+                return {
+                  ...page,
+                  html,
+                  content: textContent,
+                  updatedAt: nowIso
+                };
+              })
+            : [{
+                id: generateUniqueId('note-page'),
+                title: null,
+                html,
+                content: textContent,
+                createdAt: nowIso,
+                updatedAt: nowIso
+              }];
+          const updated = updateNoteData(noteId, {
             html,
             content: textContent,
-            updatedAt: new Date().toISOString()
+            pages: updatedPages,
+            updatedAt: nowIso
           });
-          syncNoteElementMeta(note, notesRegistry.get(noteId));
+          syncNoteElementMeta(note, updated);
         });
 
         const footer = document.createElement('div');
@@ -3821,7 +3876,12 @@ export function initializeEditor() {
           categoryWrap,
           priorityBtn,
           tagsContainer,
-          optionsMenu
+          optionsMenu,
+          pageIndicator,
+          prevPageBtn,
+          nextPageBtn,
+          addPageBtn,
+          removePageBtn
         };
 
         priorityBtn.addEventListener('click', (event) => {
@@ -3829,17 +3889,28 @@ export function initializeEditor() {
           cycleNotePriority(note);
         });
 
-        linkBtn.addEventListener('click', (event) => {
+        prevPageBtn.addEventListener('click', (event) => {
           event.stopPropagation();
-          beginNoteLinking(note);
+          bringNoteToFront(note);
+          goToFloatingNotePage(note, -1);
         });
 
-        flashcardBtn.addEventListener('click', (event) => {
+        nextPageBtn.addEventListener('click', (event) => {
           event.stopPropagation();
-          const currentData = notesRegistry.get(noteId);
-          if (currentData) {
-            createFlashcardFromNote(currentData);
-          }
+          bringNoteToFront(note);
+          goToFloatingNotePage(note, 1);
+        });
+
+        addPageBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          bringNoteToFront(note);
+          addFloatingNotePage(note);
+        });
+
+        removePageBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          bringNoteToFront(note);
+          removeFloatingNotePage(note);
         });
 
         menuBtn.addEventListener('click', (event) => {
@@ -4231,6 +4302,136 @@ export function initializeEditor() {
         document.querySelectorAll(`.note-anchor[data-note-id="${noteId}"]`).forEach(anchor => anchor.remove());
       }
 
+      function updateFloatingNotePageUI(note, noteData) {
+        if (!note) return;
+        const ui = note._ui || {};
+        const total = Math.max(Array.isArray(noteData?.pages) ? noteData.pages.length : 0, 1);
+        const index = Math.min(
+          Math.max(Number(noteData?.currentPageIndex) || 0, 0),
+          total - 1
+        );
+        if (ui.pageIndicator) {
+          ui.pageIndicator.textContent = `${index + 1}/${total}`;
+        }
+        if (ui.prevPageBtn) {
+          ui.prevPageBtn.disabled = index <= 0;
+        }
+        if (ui.nextPageBtn) {
+          ui.nextPageBtn.disabled = index >= total - 1;
+        }
+        if (ui.removePageBtn) {
+          ui.removePageBtn.disabled = total <= 1;
+        }
+      }
+
+      function goToFloatingNotePage(note, direction) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        const pages = Array.isArray(currentData?.pages) ? currentData.pages : [];
+        if (!pages.length) {
+          return;
+        }
+        const currentIndex = Math.min(
+          Math.max(Number(currentData.currentPageIndex) || 0, 0),
+          pages.length - 1
+        );
+        let nextIndex = currentIndex + (Number(direction) || 0);
+        nextIndex = Math.min(Math.max(nextIndex, 0), pages.length - 1);
+        if (nextIndex === currentIndex) {
+          return;
+        }
+        const targetPage = pages[nextIndex] || { html: '', content: '' };
+        const updated = updateNoteData(noteId, {
+          currentPageIndex: nextIndex,
+          html: targetPage.html || '',
+          content: targetPage.content || ''
+        });
+        const body = note.querySelector('.floating-note-body');
+        if (body) {
+          body.innerHTML = targetPage.html || '';
+          if (isEditMode) {
+            setTimeout(() => body.focus(), 0);
+          }
+        }
+        syncNoteElementMeta(note, updated);
+      }
+
+      function addFloatingNotePage(note) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        const existingPages = Array.isArray(currentData?.pages)
+          ? currentData.pages.map(page => ({ ...page }))
+          : [];
+        const nowIso = new Date().toISOString();
+        const newPage = {
+          id: generateUniqueId('note-page'),
+          title: null,
+          html: '',
+          content: '',
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+        const pages = [...existingPages, newPage];
+        const updated = updateNoteData(noteId, {
+          pages,
+          currentPageIndex: pages.length - 1,
+          html: '',
+          content: '',
+          updatedAt: nowIso
+        });
+        const body = note.querySelector('.floating-note-body');
+        if (body) {
+          body.innerHTML = '';
+          if (isEditMode) {
+            setTimeout(() => body.focus(), 0);
+          }
+        }
+        syncNoteElementMeta(note, updated);
+      }
+
+      function removeFloatingNotePage(note) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        const existingPages = Array.isArray(currentData?.pages)
+          ? currentData.pages.map(page => ({ ...page }))
+          : [];
+        if (existingPages.length <= 1) {
+          return;
+        }
+        if (!window.confirm('¿Eliminar esta subnota?')) {
+          return;
+        }
+        const currentIndex = Math.min(
+          Math.max(Number(currentData.currentPageIndex) || 0, 0),
+          existingPages.length - 1
+        );
+        existingPages.splice(currentIndex, 1);
+        const nextIndex = Math.min(currentIndex, existingPages.length - 1);
+        const activePage = existingPages[nextIndex] || { html: '', content: '' };
+        const nowIso = new Date().toISOString();
+        const updated = updateNoteData(noteId, {
+          pages: existingPages,
+          currentPageIndex: nextIndex,
+          html: activePage.html || '',
+          content: activePage.content || '',
+          updatedAt: nowIso
+        });
+        const body = note.querySelector('.floating-note-body');
+        if (body) {
+          body.innerHTML = activePage.html || '';
+          if (isEditMode) {
+            setTimeout(() => body.focus(), 0);
+          }
+        }
+        syncNoteElementMeta(note, updated);
+      }
+
       function syncNoteElementMeta(note, noteData) {
         if (!note || !noteData) return;
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
@@ -4292,6 +4493,7 @@ export function initializeEditor() {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
 
+        updateFloatingNotePageUI(note, noteData);
         applyFloatingNoteTopicVisibility(note);
       }
 
@@ -4347,6 +4549,8 @@ export function initializeEditor() {
               type: noteData.type,
               anchorId: noteData.anchorId,
               linkedTo: noteData.linkedTo,
+              pages: Array.isArray(noteData.pages) ? noteData.pages : undefined,
+              currentPageIndex: Number.isInteger(noteData.currentPageIndex) ? noteData.currentPageIndex : undefined,
               pageOffsetLeft: noteData.pageOffsetLeft,
               pageOffsetTop: noteData.pageOffsetTop,
               relativeLeft: noteData.relativeLeft,
@@ -5765,6 +5969,15 @@ export function initializeEditor() {
           const actionsDiv = document.createElement('div');
           actionsDiv.className = 'section-actions';
 
+          const addTopicBtn = document.createElement('button');
+          addTopicBtn.className = 'section-action-btn';
+          addTopicBtn.textContent = '➕';
+          addTopicBtn.title = 'Nuevo tema';
+          addTopicBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            promptCreateTopicInSection(section);
+          });
+
           const printBtn = document.createElement('button');
           printBtn.className = 'section-action-btn';
           printBtn.textContent = '🖨️';
@@ -5774,6 +5987,7 @@ export function initializeEditor() {
             printSection(section);
           });
 
+          actionsDiv.appendChild(addTopicBtn);
           if (isPanelEditMode) {
             const renameBtn = document.createElement('button');
             renameBtn.className = 'section-action-btn';
@@ -5998,6 +6212,88 @@ export function initializeEditor() {
         sectionThemes.set(newSection.id, DEFAULT_THEME);
         sections.push(newSection);
         buildSectionsPanel();
+      }
+
+      function promptCreateTopicInSection(section) {
+        if (!section) return;
+        const defaultTitle = `Tema ${section.temas.length + 1}`;
+        const response = window.prompt('Título del nuevo tema', defaultTitle);
+        if (response === null) {
+          return;
+        }
+        const finalTitle = response.trim() || defaultTitle;
+        const page = createTopicPageForSection(section, finalTitle);
+        if (page) {
+          page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+
+      function createTopicPageForSection(section, title) {
+        if (!section) return null;
+        const newPage = document.createElement('section');
+        newPage.className = 'page';
+        const sectionId = section.id || 'seccion-' + Date.now();
+        newPage.dataset.sectionId = sectionId;
+        newPage.dataset.sectionName = section.nombre || '';
+        const topicId = generateUniqueId('topic');
+        newPage.dataset.topicId = topicId;
+        const sectionTheme = sectionThemes.get(sectionId) || DEFAULT_THEME;
+        applyThemeToPage(newPage, sectionTheme);
+        newPage.contentEditable = isEditMode ? 'true' : 'false';
+
+        const h1 = document.createElement('h1');
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'topic-title-text';
+        titleSpan.textContent = title;
+        h1.appendChild(titleSpan);
+        const magicIcon = document.createElement('span');
+        magicIcon.className = 'magic-icon';
+        magicIcon.title = 'Ver contenido mágico';
+        magicIcon.textContent = '✨';
+        h1.appendChild(magicIcon);
+        newPage.appendChild(h1);
+
+        const placeholder = document.createElement('p');
+        placeholder.innerHTML = '&nbsp;';
+        newPage.appendChild(placeholder);
+
+        let insertBefore = null;
+        if (section.temas.length > 0) {
+          const lastTopic = section.temas[section.temas.length - 1];
+          if (lastTopic?.page?.parentNode) {
+            insertBefore = lastTopic.page.nextSibling;
+            lastTopic.page.parentNode.insertBefore(newPage, insertBefore);
+          }
+        }
+
+        if (!newPage.isConnected) {
+          const sectionIndex = sections.findIndex(s => s.id === section.id);
+          let siblingPage = null;
+          for (let idx = sectionIndex + 1; idx < sections.length; idx += 1) {
+            const nextSection = sections[idx];
+            const candidate = nextSection?.temas?.[0]?.page;
+            if (candidate?.parentNode) {
+              siblingPage = candidate;
+              break;
+            }
+          }
+          if (siblingPage?.parentNode) {
+            siblingPage.parentNode.insertBefore(newPage, siblingPage);
+          } else {
+            const anchorParent = pages[pages.length - 1]?.parentNode || document.body;
+            anchorParent.appendChild(newPage);
+          }
+        }
+
+        pages = [...document.querySelectorAll('.page')];
+        setupMagicIcons();
+        if (io) {
+          io.observe(newPage);
+        }
+        initializeSections();
+        buildSectionsPanel();
+        setActivePage(newPage);
+        return newPage;
       }
 
       function sortSectionsAlpha() {
@@ -6703,6 +6999,19 @@ ${inlineStyles}
           noteExport.linkedTo = noteData.linkedTo || null;
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
+          if (Array.isArray(noteData.pages)) {
+            noteExport.pages = noteData.pages.map(page => ({
+              id: page.id,
+              title: page.title || null,
+              html: typeof page.html === 'string' ? page.html : '',
+              content: typeof page.content === 'string' ? page.content : '',
+              createdAt: page.createdAt || null,
+              updatedAt: page.updatedAt || null
+            }));
+          }
+          noteExport.currentPageIndex = Number.isInteger(noteData.currentPageIndex)
+            ? noteData.currentPageIndex
+            : 0;
           if (Number.isFinite(noteData.pageOffsetLeft)) {
             noteExport.pageOffsetLeft = noteData.pageOffsetLeft;
           }
