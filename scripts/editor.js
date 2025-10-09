@@ -1,3 +1,21 @@
+import { generateUniqueId } from './utils/id.js';
+import {
+  NoteRegistry,
+  NOTE_TYPES,
+  NOTE_CATEGORIES,
+  NOTE_PRIORITY_SEQUENCE,
+  DEFAULT_NOTE_PRIORITY,
+  DEFAULT_NOTE_CATEGORY,
+  DEFAULT_NOTE_TYPE
+} from './modules/notes/NoteRegistry.js';
+import {
+  sanitizeTags,
+  escapeHtml,
+  getNotePlainTextFromHtml,
+  getNoteCategoryInfo,
+  getNoteDisplayTitle
+} from './modules/notes/noteUtils.js';
+
 export function initializeEditor() {
       let isEditMode = false;
       let isPanelEditMode = false;
@@ -208,177 +226,20 @@ export function initializeEditor() {
       const NOTE_STYLE_CLASSES = noteStylePresets.map(p => p.className);
       const noteStylePresetMap = new Map(noteStylePresets.map(p => [p.id, p]));
 
-      const NOTE_TYPES = Object.freeze({
-        FLOATING: 'floating',
-        MARGIN: 'margin',
-        INLINE: 'inline',
-        FOOTNOTE: 'footnote'
-      });
-
-      const NOTE_CATEGORIES = Object.freeze({
-        IMPORTANT: { icon: '⚠️', color: '#dc3545', label: 'Importante' },
-        PEARL: { icon: '💎', color: '#6f42c1', label: 'Perla clínica' },
-        REMEMBER: { icon: '🔔', color: '#fd7e14', label: 'Recordar' },
-        QUESTION: { icon: '❓', color: '#0dcaf0', label: 'Duda' },
-        REFERENCE: { icon: '📚', color: '#198754', label: 'Referencia' },
-        TODO: { icon: '☑️', color: '#6c757d', label: 'Por hacer' },
-        PERSONAL: { icon: '✍️', color: '#0d6efd', label: 'Personal' }
-      });
-
-      const NOTE_PRIORITY_SEQUENCE = ['normal', 'high', 'low'];
-      const DEFAULT_NOTE_PRIORITY = 'normal';
-      const DEFAULT_NOTE_CATEGORY = 'PERSONAL';
-      const DEFAULT_NOTE_TYPE = NOTE_TYPES.FLOATING;
-
-      const notesRegistry = new Map();
+      const notesRegistry = new NoteRegistry();
       let notesViewController = null;
       let pendingNotesViewUpdate = false;
-
-      function normalizePriority(priority) {
-        const normalized = String(priority || '').toLowerCase();
-        return NOTE_PRIORITY_SEQUENCE.includes(normalized) ? normalized : DEFAULT_NOTE_PRIORITY;
-      }
-
-      function getNoteCategoryInfo(category) {
-        return NOTE_CATEGORIES[category] || NOTE_CATEGORIES[DEFAULT_NOTE_CATEGORY];
-      }
-
-      function sanitizeTags(tags) {
-        if (!Array.isArray(tags)) return [];
-        return tags
-          .map(tag => (typeof tag === 'string' ? tag.trim() : ''))
-          .filter(tag => tag.length > 0);
-      }
-
-      function escapeHtml(value) {
-        if (typeof value !== 'string') return '';
-        return value
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#39;');
-      }
-
-      function getNotePlainTextFromHtml(html = '') {
-        if (!html) return '';
-        const tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        return (tmp.textContent || '').trim();
-      }
-
-      function createEnhancedNote(options = {}) {
-        const nowIso = new Date().toISOString();
-        const id = (options.id && String(options.id).trim()) || generateUniqueId('note');
-        const type = Object.values(NOTE_TYPES).includes(options.type)
-          ? options.type
-          : DEFAULT_NOTE_TYPE;
-        const categoryKey = (options.category && String(options.category).toUpperCase()) || DEFAULT_NOTE_CATEGORY;
-        const category = NOTE_CATEGORIES[categoryKey] ? categoryKey : DEFAULT_NOTE_CATEGORY;
-        const priority = normalizePriority(options.priority);
-        const tags = sanitizeTags(options.tags);
-        const createdAt = options.createdAt ? String(options.createdAt) : nowIso;
-        const updatedAt = options.updatedAt ? String(options.updatedAt) : nowIso;
-
-        let title = null;
-        if (typeof options.title === 'string') {
-          title = options.title.trim();
-        } else if (options.title === null) {
-          title = null;
-        }
-
-        return {
-          id,
-          type,
-          category,
-          style: (options.style && String(options.style)) || 'default',
-          title,
-          content: typeof options.content === 'string' ? options.content : '',
-          html: typeof options.html === 'string' ? options.html : '',
-          linkedTo: options.linkedTo || null,
-          topicId: options.topicId || null,
-          sectionId: options.sectionId || null,
-          tags,
-          priority,
-          createdAt,
-          updatedAt,
-          reviewed: !!options.reviewed,
-          reviewCount: Number.isFinite(options.reviewCount) ? Number(options.reviewCount) : 0,
-          lastReviewed: options.lastReviewed || null,
-          left: Number.isFinite(options.left) ? Number(options.left) : null,
-          top: Number.isFinite(options.top) ? Number(options.top) : null,
-          width: Number.isFinite(options.width) ? Number(options.width) : null,
-          height: Number.isFinite(options.height) ? Number(options.height) : null,
-          anchorId: options.anchorId || null,
-          element: options.element || null
-        };
-      }
-
       function ensureNoteData(noteId, overrides = {}) {
-        const id = (noteId && String(noteId).trim()) || generateUniqueId('note');
-        let existing = notesRegistry.get(id);
-        if (!existing) {
-          existing = createEnhancedNote({ id, ...overrides });
-        } else if (overrides && typeof overrides === 'object') {
-          const merged = { ...existing };
-          Object.keys(overrides).forEach(key => {
-            if (key === 'tags') {
-              merged.tags = sanitizeTags(overrides.tags);
-            } else if (key === 'priority') {
-              merged.priority = normalizePriority(overrides.priority);
-            } else if (key === 'category') {
-              const catKey = overrides.category ? String(overrides.category).toUpperCase() : DEFAULT_NOTE_CATEGORY;
-              merged.category = NOTE_CATEGORIES[catKey] ? catKey : DEFAULT_NOTE_CATEGORY;
-            } else if (key === 'type') {
-              merged.type = Object.values(NOTE_TYPES).includes(overrides.type) ? overrides.type : DEFAULT_NOTE_TYPE;
-            } else if (key === 'reviewed') {
-              merged.reviewed = !!overrides.reviewed;
-            } else if (key === 'reviewCount') {
-              merged.reviewCount = Number.isFinite(overrides.reviewCount) ? Number(overrides.reviewCount) : merged.reviewCount;
-            } else if (key === 'title') {
-              if (typeof overrides.title === 'string') {
-                merged.title = overrides.title.trim();
-              } else if (overrides.title === null) {
-                merged.title = null;
-              }
-            } else if (key === 'left' || key === 'top' || key === 'width' || key === 'height') {
-              merged[key] = Number.isFinite(overrides[key]) ? Number(overrides[key]) : merged[key];
-            } else if (overrides[key] !== undefined) {
-              merged[key] = overrides[key];
-            }
-          });
-          if (!overrides.updatedAt) {
-            merged.updatedAt = new Date().toISOString();
-          }
-          existing = merged;
-        }
-        notesRegistry.set(id, existing);
-        return existing;
+        return notesRegistry.ensure(noteId, overrides);
       }
 
       function updateNoteData(noteId, updates = {}, { silent = false } = {}) {
-        if (!noteId) return null;
-        const current = ensureNoteData(noteId);
-        const next = ensureNoteData(noteId, { ...current, ...updates, id: noteId });
-        notesRegistry.set(noteId, next);
-        if (!silent) {
-          scheduleNotesViewRefresh();
-        }
-        return next;
-      }
-
-      function getNoteDisplayTitle(title, fallback = '') {
-        if (title === null || title === undefined) {
-          return fallback;
-        }
-        return title;
+        return notesRegistry.update(noteId, updates, { silent });
       }
 
       function removeNoteData(noteId) {
         if (!noteId) return;
-        if (notesRegistry.delete(noteId)) {
-          scheduleNotesViewRefresh();
-        }
+        notesRegistry.remove(noteId);
       }
 
       function scheduleNotesViewRefresh() {
@@ -390,6 +251,10 @@ export function initializeEditor() {
           notesViewController.notifyNotesUpdated();
         });
       }
+
+      notesRegistry.setChangeListener(() => {
+        scheduleNotesViewRefresh();
+      });
 
       function getPageTheme(page) {
         if (!page) return DEFAULT_THEME;
@@ -3558,7 +3423,7 @@ export function initializeEditor() {
           floatingNoteResizeObserver.disconnect();
         }
         document.querySelectorAll('.note-anchor').forEach(anchor => anchor.remove());
-        notesRegistry.clear();
+        notesRegistry.clear({ silent: true });
         scheduleNotesViewRefresh();
       }
 
@@ -4724,7 +4589,7 @@ export function initializeEditor() {
               reviewCount: !note.reviewed ? (Number(note.reviewCount) || 0) + 1 : note.reviewCount,
               lastReviewed: !note.reviewed ? new Date().toISOString() : null
             });
-            notesRegistry.set(note.id, updated);
+            notesRegistry.set(note.id, updated, { silent: true });
           }
           this.render();
         }
@@ -4737,7 +4602,7 @@ export function initializeEditor() {
                 toggleNoteReviewed(element, false);
               } else {
                 const updated = updateNoteData(noteId, { reviewed: false }, { silent: true });
-                notesRegistry.set(noteId, updated);
+                notesRegistry.set(noteId, updated, { silent: true });
               }
             }
           });
@@ -6397,10 +6262,6 @@ ${inlineStyles}
   });
 
   /* === IMPORTAR / EXPORTAR SECCIONES === */
-  function generateUniqueId(prefix) {
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
   function collectDocumentData() {
     persistMagicEdits();
     const magicContainer = document.querySelector('.magic-content-container');
