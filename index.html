@@ -10,38 +10,54 @@
 <body>
   <!-- build:topics {"especialidad":"Endocrinología","secciones":[]} -->
   
-  <div class="topbar">
+  <div class="topbar topbar-color-default" data-topbar>
     <div class="topbar-left">
-      <button class="topbar-btn topbar-plus" title="Abrir panel de navegación"><span>☰</span> <span class="topbar-btn-label">Menú</span></button>
+      <button class="topbar-btn topbar-plus" type="button" title="Abrir panel de navegación"><span>☰</span> <span class="topbar-btn-label">Menú</span></button>
+      <div class="topbar-group topbar-theme-group">
+        <button class="topbar-btn topbar-toggle" type="button" id="topbarThemeToggle" aria-haspopup="true" aria-expanded="false" title="Cambiar estilo de la barra"><span>🎨</span> <span class="topbar-btn-label">Colores</span></button>
+        <div class="topbar-dropdown" id="topbarThemeDropdown" role="menu">
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-default">Clásico</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-slate">Gris</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-night">Negro</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-navy">Azul intenso</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-sky">Azul claro</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-emerald">Verde</button>
+        </div>
+      </div>
     </div>
     <div class="topbar-center">
       <span id="specialtyTitle" class="topbar-topic" title="Sección actual" data-document-title="Endocrinología"></span>
-      <div class="zoom-controls">
-        <button class="topbar-btn" id="zoomOutBtn" title="Reducir zoom">-</button>
-        <span class="zoom-value" id="zoomValue">100%</span>
-        <button class="topbar-btn" id="zoomInBtn" title="Aumentar zoom">+</button>
+      <div class="topbar-actions">
+        <div class="zoom-controls">
+          <button class="topbar-btn" type="button" id="zoomOutBtn" title="Reducir zoom">-</button>
+          <span class="zoom-value" id="zoomValue">100%</span>
+          <button class="topbar-btn" type="button" id="zoomInBtn" title="Aumentar zoom">+</button>
+        </div>
+        <button class="topbar-btn" type="button" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
+        <button class="topbar-btn" type="button" id="notesViewBtn" title="Vista de notas"><span>📝</span> <span class="topbar-btn-label">Notas</span></button>
+        <button class="topbar-btn" type="button" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
+        <button class="topbar-btn" type="button" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
+        <button class="topbar-btn" type="button" id="saveHtmlBtn" style="display:none;" title="Guardar como HTML"><span>💾</span> <span class="topbar-btn-label">Guardar</span></button>
+        <button class="topbar-btn" type="button" id="exportDataBtn" title="Exportar secciones y temas" aria-label="Exportar secciones y temas"><span>📤</span></button>
+        <button class="topbar-btn" type="button" id="importDataBtn" title="Importar secciones y temas" aria-label="Importar secciones y temas"><span>📥</span></button>
+        <button class="topbar-btn" type="button" id="printCurrentBtn" title="Imprimir documento"><span>🖨️</span> <span class="topbar-btn-label">Imprimir</span></button>
+        <div class="topbar-group topbar-tools-group">
+          <button class="topbar-btn topbar-toggle" type="button" id="topbarToolsToggle" aria-haspopup="true" aria-expanded="false" title="Herramientas adicionales"><span>⚙️</span> <span class="topbar-btn-label">Herramientas</span></button>
+          <div class="topbar-dropdown" id="topbarToolsDropdown" role="menu">
+            <button type="button" class="topbar-dropdown-btn" id="statsBtn" title="Estadísticas"><span>📊</span> Estadísticas</button>
+            <button type="button" class="topbar-dropdown-btn" id="exportMarkdownBtn" title="Exportar a Markdown"><span>⬇️</span> Exportar MD</button>
+            <button type="button" class="topbar-dropdown-btn" id="copyHtmlBtn" title="Copiar HTML completo"><span>📋</span> Copiar HTML</button>
+            <button type="button" class="topbar-dropdown-btn" id="clearAllBtn" title="Eliminar todas las secciones y temas" aria-label="Eliminar todo"><span>🗑️</span> Limpiar todo</button>
+          </div>
+        </div>
       </div>
-      <button class="topbar-btn" id="tocBtn" title="Tabla de contenidos"><span>📑</span> <span class="topbar-btn-label">Índice</span></button>
-      <button class="topbar-btn" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
-      <button class="topbar-btn" id="notesViewBtn" title="Vista de notas">
-        <span>📝</span>
-        <span class="topbar-btn-label">Notas</span>
-      </button>
-      <button class="topbar-btn" id="statsBtn" title="Estadísticas"><span>📊</span> <span class="topbar-btn-label">Stats</span></button>
-      <button class="topbar-btn" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
-      <button class="topbar-btn" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
-      <button class="topbar-btn" id="saveHtmlBtn" style="display:none;" title="Guardar como HTML"><span>💾</span> <span class="topbar-btn-label">Guardar</span></button>
-      <button class="topbar-btn" id="clearAllBtn" title="Eliminar todas las secciones y temas" aria-label="Eliminar todo"><span>🗑️</span></button>
-      <button class="topbar-btn" id="exportDataBtn" title="Exportar secciones y temas" aria-label="Exportar secciones y temas"><span>📤</span></button>
-      <button class="topbar-btn" id="importDataBtn" title="Importar secciones y temas" aria-label="Importar secciones y temas"><span>📥</span></button>
-      <button class="topbar-btn" id="exportMarkdownBtn" title="Exportar a Markdown"><span>⬇️</span> <span class="topbar-btn-label">MD</span></button>
-      <button class="topbar-btn" id="copyHtmlBtn" title="Copiar HTML completo"><span>📋</span> <span class="topbar-btn-label">Copiar</span></button>
-      <button class="topbar-btn" id="printCurrentBtn" title="Imprimir documento"><span>🖨️</span> <span class="topbar-btn-label">Imprimir</span></button>
     </div>
     <div class="topbar-right">
-      <button class="topbar-btn" id="cacheSaveBtn" title="Guardar en caché"><span>💾</span> <span class="topbar-btn-label">Guardar</span></button>
+      <button class="topbar-btn" type="button" id="cacheSaveBtn" title="Guardar en caché"><span>💾</span> <span class="topbar-btn-label">Guardar</span></button>
     </div>
   </div>
+
+  <button class="magic-back-floating" id="magicBackFloating" type="button" aria-hidden="true">↩️ Volver al tema</button>
 
   <button class="reading-mode-exit" id="readingModeExit" title="Salir del modo lectura">✕</button>
 
@@ -433,15 +449,6 @@
       <button type="button" class="panel-search-clear" id="panelSearchClear" aria-label="Limpiar búsqueda">×</button>
     </div>
     <div class="sections-container" id="sectionsContainer"></div>
-  </aside>
-
-  <!-- Tabla de contenidos -->
-  <aside id="toc-panel" class="toc-panel">
-    <div class="toc-header">
-      <strong>Tabla de Contenidos</strong>
-      <button class="panel-close" id="tocClose">&times;</button>
-    </div>
-    <ul class="toc-list" id="tocList"></ul>
   </aside>
 
   <aside id="notesViewPanel" class="notes-view-panel">

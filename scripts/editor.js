@@ -117,14 +117,12 @@ export function initializeEditor() {
       let panelFilterNormalized = '';
       
       const panel = document.getElementById('topic-panel');
-      const tocPanel = document.getElementById('toc-panel');
       const sectionsContainer = document.getElementById('sectionsContainer');
       const panelTopicCount = document.getElementById('panelTopicCount');
       const panelSearchInput = document.getElementById('panelSearchInput');
       const panelSearchClear = document.getElementById('panelSearchClear');
       const plusBtn = document.querySelector('.topbar-plus');
       const panelClose = document.querySelectorAll('.panel-close');
-      const tocClose = document.getElementById('tocClose');
       const panelBackdrop = document.getElementById('panel-backdrop');
       const magic = document.getElementById('magic-view');
       const specialtySpan = document.getElementById('specialtyTitle');
@@ -134,6 +132,24 @@ export function initializeEditor() {
       const addFloatingNoteBtn = document.getElementById('addFloatingNoteBtn');
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
+      const topbar = document.querySelector('.topbar');
+      const topbarToolsToggle = document.getElementById('topbarToolsToggle');
+      const topbarToolsDropdown = document.getElementById('topbarToolsDropdown');
+      const topbarThemeToggle = document.getElementById('topbarThemeToggle');
+      const topbarThemeDropdown = document.getElementById('topbarThemeDropdown');
+      const topbarThemeButtons = topbarThemeDropdown ? Array.from(topbarThemeDropdown.querySelectorAll('[data-theme]')) : [];
+      const magicBackFloating = document.getElementById('magicBackFloating');
+      const AVAILABLE_TOPBAR_THEMES = [
+        'topbar-color-default',
+        'topbar-color-slate',
+        'topbar-color-night',
+        'topbar-color-navy',
+        'topbar-color-sky',
+        'topbar-color-emerald'
+      ];
+      const TOPBAR_THEME_STORAGE_KEY = 'emi2025-topbar-theme';
+      let activeTopbarDropdown = null;
+      let currentTopbarTheme = AVAILABLE_TOPBAR_THEMES[0];
 
       if (typeof ResizeObserver === 'function') {
         floatingNoteResizeObserver = new ResizeObserver((entries) => {
@@ -162,7 +178,6 @@ export function initializeEditor() {
       const importDataInput = document.getElementById('importDataInput');
       const cacheSaveBtn = document.getElementById('cacheSaveBtn');
       const editPanelBtn = document.getElementById('editPanelBtn');
-      const tocBtn = document.getElementById('tocBtn');
       const readingModeBtn = document.getElementById('readingModeBtn');
       const readingModeExit = document.getElementById('readingModeExit');
       const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
@@ -474,7 +489,6 @@ export function initializeEditor() {
         page.dataset.topicTitle = cleanTitle;
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         setupMagicIcons();
         return true;
       }
@@ -526,7 +540,6 @@ export function initializeEditor() {
         pages = pages.filter(p => p !== page);
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         if (currentPageRef === page) {
           setActivePage(getCurrentPage());
         }
@@ -551,7 +564,6 @@ export function initializeEditor() {
         io.observe(clone);
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         clone.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return clone;
       }
@@ -2574,7 +2586,6 @@ export function initializeEditor() {
         
         if (isReadingMode) {
           closePanel();
-          closeTocPanel();
           if (isEditMode) {
             toggleEditMode();
           }
@@ -2584,58 +2595,108 @@ export function initializeEditor() {
       readingModeBtn?.addEventListener('click', toggleReadingMode);
       readingModeExit?.addEventListener('click', toggleReadingMode);
 
-      /* === TABLA DE CONTENIDOS === */
-      function buildTableOfContents() {
-        const tocList = document.getElementById('tocList');
-        tocList.innerHTML = '';
-        
-        pages.forEach(page => {
-          const headings = page.querySelectorAll('h1, h2, h3');
-          headings.forEach(heading => {
-            const li = document.createElement('li');
-            li.className = `toc-item ${heading.tagName.toLowerCase()}`;
-            
-            // Para h1, obtener solo el texto sin el icono
-            if (heading.tagName === 'H1') {
-              const titleSpan = heading.querySelector('span:first-child');
-              li.textContent = titleSpan ? titleSpan.textContent : heading.textContent;
-            } else {
-              li.textContent = heading.textContent;
-            }
-            
-            li.addEventListener('click', () => {
-              heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              closeTocPanel();
-            });
-            tocList.appendChild(li);
-          });
+      function closeTopbarDropdowns() {
+        if (!activeTopbarDropdown) return;
+        const { trigger, dropdown } = activeTopbarDropdown;
+        dropdown.classList.remove('open');
+        trigger.classList.remove('active');
+        trigger.setAttribute('aria-expanded', 'false');
+        activeTopbarDropdown = null;
+      }
+
+      function toggleTopbarDropdown(trigger, dropdown) {
+        if (!trigger || !dropdown) return;
+        const isCurrent = activeTopbarDropdown?.dropdown === dropdown;
+        if (isCurrent) {
+          closeTopbarDropdowns();
+          return;
+        }
+        closeTopbarDropdowns();
+        dropdown.classList.add('open');
+        trigger.classList.add('active');
+        trigger.setAttribute('aria-expanded', 'true');
+        activeTopbarDropdown = { trigger, dropdown };
+      }
+
+      function applyTopbarTheme(theme, { persist = true } = {}) {
+        if (!topbar) return;
+        const resolved = AVAILABLE_TOPBAR_THEMES.includes(theme) ? theme : AVAILABLE_TOPBAR_THEMES[0];
+        if (currentTopbarTheme !== resolved) {
+          AVAILABLE_TOPBAR_THEMES.forEach(cls => topbar.classList.remove(cls));
+          topbar.classList.add(resolved);
+          currentTopbarTheme = resolved;
+        }
+        topbarThemeButtons.forEach(btn => {
+          const btnTheme = btn.dataset.theme;
+          btn.classList.toggle('active', btnTheme === resolved);
+        });
+        if (persist) {
+          try {
+            window.localStorage?.setItem(TOPBAR_THEME_STORAGE_KEY, resolved);
+          } catch (error) {
+            console.warn('No se pudo guardar la preferencia de la barra:', error);
+          }
+        }
+      }
+
+      if (topbarToolsToggle && topbarToolsDropdown) {
+        topbarToolsToggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTopbarDropdown(topbarToolsToggle, topbarToolsDropdown);
+        });
+        topbarToolsDropdown.addEventListener('click', (event) => {
+          event.stopPropagation();
+          requestAnimationFrame(() => closeTopbarDropdowns());
         });
       }
 
-      function openTocPanel() {
-        buildTableOfContents();
-        tocPanel.classList.add('open');
-        panelBackdrop.classList.add('show');
+      if (topbarThemeToggle && topbarThemeDropdown) {
+        topbarThemeToggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTopbarDropdown(topbarThemeToggle, topbarThemeDropdown);
+        });
+        topbarThemeDropdown.addEventListener('click', (event) => event.stopPropagation());
       }
 
-      function closeTocPanel() {
-        tocPanel.classList.remove('open');
-        if (!panel.classList.contains('open')) {
-          panelBackdrop.classList.remove('show');
-        }
-        hideTopicMenu();
-      }
-
-      tocBtn?.addEventListener('click', () => {
-        if (tocPanel.classList.contains('open')) {
-          closeTocPanel();
-        } else {
-          closePanel();
-          openTocPanel();
-        }
+      topbarThemeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const { theme } = btn.dataset;
+          if (theme) {
+            applyTopbarTheme(theme, { persist: true });
+          }
+          closeTopbarDropdowns();
+        });
       });
 
-      tocClose?.addEventListener('click', closeTocPanel);
+      if (topbar) {
+        let storedTheme = null;
+        try {
+          storedTheme = window.localStorage?.getItem(TOPBAR_THEME_STORAGE_KEY) || null;
+        } catch (error) {
+          console.warn('No se pudo cargar la preferencia de la barra:', error);
+        }
+        const fallbackTheme = topbarThemeButtons.find(btn => AVAILABLE_TOPBAR_THEMES.includes(btn.dataset.theme))?.dataset.theme
+          || AVAILABLE_TOPBAR_THEMES[0];
+        const themeToApply = storedTheme && AVAILABLE_TOPBAR_THEMES.includes(storedTheme)
+          ? storedTheme
+          : fallbackTheme;
+        applyTopbarTheme(themeToApply, { persist: false });
+      }
+
+      document.addEventListener('click', () => {
+        closeTopbarDropdowns();
+      });
+
+      if (magicBackFloating) {
+        magicBackFloating.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (magicBackFloating.disabled) return;
+          returnFromMagicView();
+        });
+        setMagicFloatingBackVisibility(false);
+      }
 
       /* === EXPORTAR MARKDOWN === */
       exportMarkdownBtn?.addEventListener('click', () => {
@@ -5293,6 +5354,7 @@ export function initializeEditor() {
 
       /* === PANEL LATERAL === */
       function openPanel() {
+        closeTopbarDropdowns();
         buildSectionsPanel();
         panel.classList.add('open');
         panelBackdrop.classList.add('show');
@@ -5306,9 +5368,8 @@ export function initializeEditor() {
 
       function closePanel() {
         panel.classList.remove('open');
-        if (!tocPanel.classList.contains('open')) {
-          panelBackdrop.classList.remove('show');
-        }
+        panelBackdrop.classList.remove('show');
+        closeTopbarDropdowns();
         hideTopicMenu();
       }
 
@@ -5464,6 +5525,29 @@ export function initializeEditor() {
         afterContentSanitize(activeMagicSource);
       }
 
+      function setMagicFloatingBackVisibility(visible, disabled = false) {
+        if (!magicBackFloating) return;
+        if (visible) {
+          magicBackFloating.classList.add('visible');
+          magicBackFloating.removeAttribute('aria-hidden');
+          magicBackFloating.disabled = !!disabled;
+        } else {
+          magicBackFloating.classList.remove('visible');
+          magicBackFloating.setAttribute('aria-hidden', 'true');
+          magicBackFloating.disabled = false;
+        }
+      }
+
+      function returnFromMagicView() {
+        const targetPage = activeMagicPage;
+        closeMagicView();
+        if (targetPage && document.contains(targetPage)) {
+          targetPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          targetPage.classList.add('pulse-highlight');
+          setTimeout(() => targetPage.classList.remove('pulse-highlight'), 1600);
+        }
+      }
+
       function closeMagicView() {
         persistMagicEdits();
         if (isMagicViewActive) {
@@ -5480,6 +5564,7 @@ export function initializeEditor() {
         activeMagicSource = null;
         activeMagicWrapper = null;
         activeMagicPage = null;
+        setMagicFloatingBackVisibility(false);
       }
 
       function activateMagicTopic(anchorId, title, pageRef = null) {
@@ -5533,6 +5618,7 @@ export function initializeEditor() {
         activeMagicSource = src;
         activeMagicWrapper = wrapper;
         activeMagicPage = pageRef || null;
+        setMagicFloatingBackVisibility(true, !pageRef);
 
         if (isEditMode) {
           magicPage.contentEditable = 'true';
@@ -5544,12 +5630,8 @@ export function initializeEditor() {
         });
 
         backBtn.addEventListener('click', () => {
-          closeMagicView();
-          if (pageRef && document.contains(pageRef)) {
-            pageRef.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            pageRef.classList.add('pulse-highlight');
-            setTimeout(() => pageRef.classList.remove('pulse-highlight'), 1600);
-          }
+          if (!pageRef) return;
+          returnFromMagicView();
         });
         syncMagicZoom();
         magic.classList.add('open');
@@ -5677,7 +5759,6 @@ export function initializeEditor() {
               if (!tema.page || !tema.page.isConnected) return;
               closeMagicView();
               closePanel();
-              closeTocPanel();
               tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
             };
 
@@ -5808,7 +5889,6 @@ export function initializeEditor() {
         closeMagicView();
         hideTopicMenu();
         closePanel();
-        closeTocPanel();
         io.disconnect();
         pages.forEach(page => page.remove());
         pages = [];
@@ -5827,7 +5907,6 @@ export function initializeEditor() {
         setFloatingNotesVisibility(false);
         setFloatingNotesEditable(isEditMode);
         buildSectionsPanel();
-        buildTableOfContents();
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
         updateSectionIndicator(null);
@@ -5963,23 +6042,20 @@ export function initializeEditor() {
         if (panel.classList.contains('open')) {
           closePanel();
         } else {
-          closeTocPanel();
           openPanel();
         }
       });
       panelClose.forEach(btn => btn.addEventListener('click', () => {
         closePanel();
-        closeTocPanel();
       }));
       panelBackdrop?.addEventListener('click', () => {
         closePanel();
-        closeTocPanel();
       });
-      
+
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
           closePanel();
-          closeTocPanel();
+          closeTopbarDropdowns();
           notesViewController?.close();
           hideModal();
           hideImageToolbar();
@@ -6857,7 +6933,6 @@ ${inlineStyles}
     setupMagicIcons();
     initializeSections();
     buildSectionsPanel();
-    buildTableOfContents();
     if (isEditMode) {
       enableHtmlPaste();
     }
@@ -7137,7 +7212,6 @@ ${inlineStyles}
       setupMagicIcons();
       initializeSections();
       buildSectionsPanel();
-      buildTableOfContents();
 
       if (isEditMode) {
         pages.forEach(page => page.contentEditable = 'true');
@@ -7195,7 +7269,6 @@ ${inlineStyles}
   const restoredFromCache = restoreFromLocalCache();
   if (!restoredFromCache) {
     buildSectionsPanel();
-    buildTableOfContents();
     applyZoom(currentZoom);
   }
 
