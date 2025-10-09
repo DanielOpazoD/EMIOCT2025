@@ -85,6 +85,7 @@ export function initializeEditor() {
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let pendingFloatingNoteViewportRefresh = false;
+      let cachedActiveTopicViewportState = null;
       let documentHorizontalShift = 0;
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
@@ -345,6 +346,7 @@ export function initializeEditor() {
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
+          invalidateActiveTopicViewportState();
           refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
           return;
@@ -357,6 +359,7 @@ export function initializeEditor() {
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
         syncBodyTheme(themeClass);
+        invalidateActiveTopicViewportState();
         refreshFloatingNotesTopicVisibility();
         scheduleFloatingNotesViewportRefresh();
       }
@@ -3519,11 +3522,86 @@ export function initializeEditor() {
         return '';
       }
 
+      function invalidateActiveTopicViewportState() {
+        cachedActiveTopicViewportState = null;
+      }
+
+      function getActiveTopicViewportState() {
+        if (cachedActiveTopicViewportState) {
+          return cachedActiveTopicViewportState;
+        }
+        if (!currentPageRef) {
+          return null;
+        }
+        const scrollY = window.scrollY
+          || window.pageYOffset
+          || document.documentElement.scrollTop
+          || document.body.scrollTop
+          || 0;
+        const rect = currentPageRef.getBoundingClientRect();
+        const pageTop = scrollY + rect.top;
+        const pageHeight = Math.max(currentPageRef.scrollHeight || rect.height || 0, 1);
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const rawOffset = scrollY - pageTop;
+        const maxOffset = Math.max(pageHeight - viewportHeight, 0);
+        const viewportTopOffset = Math.min(Math.max(rawOffset, 0), maxOffset);
+        const viewportCenterOffset = viewportTopOffset + viewportHeight * 0.5;
+        const relativeCenter = Math.min(Math.max(viewportCenterOffset / pageHeight, 0), 1);
+        cachedActiveTopicViewportState = {
+          topicId: currentPageRef.dataset.topicId || '',
+          pageHeight,
+          viewportHeight,
+          viewportTopOffset,
+          relativeCenter
+        };
+        return cachedActiveTopicViewportState;
+      }
+
+      function captureActiveTopicViewportContext() {
+        const state = getActiveTopicViewportState();
+        if (!state) {
+          return null;
+        }
+        return {
+          pageOffsetTop: state.viewportTopOffset,
+          relativeTop: state.relativeCenter,
+          pageHeight: state.pageHeight,
+          viewportHeight: state.viewportHeight
+        };
+      }
+
       function applyFloatingNoteTopicVisibility(note) {
         if (!note) return;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
-        const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+        let shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+
+        if (shouldShow) {
+          const viewportState = getActiveTopicViewportState();
+          if (!viewportState) {
+            shouldShow = false;
+          } else {
+            const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
+            const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');
+            let positionMatches = true;
+
+            if (Number.isFinite(storedOffset)) {
+              const delta = Math.abs(viewportState.viewportTopOffset - storedOffset);
+              const tolerance = Math.max(180, viewportState.viewportHeight * 0.45);
+              positionMatches = delta <= tolerance;
+            } else if (Number.isFinite(storedRelative)) {
+              const deltaRatio = Math.abs(viewportState.relativeCenter - storedRelative);
+              const ratioTolerance = Math.max(
+                0.18,
+                (viewportState.viewportHeight / viewportState.pageHeight) * 1.25
+              );
+              positionMatches = deltaRatio <= ratioTolerance;
+            }
+
+            shouldShow = positionMatches;
+          }
+        }
+
         if (!shouldShow && floatingNoteDragState.note === note) {
           endFloatingNoteDrag();
         }
@@ -3547,6 +3625,7 @@ export function initializeEditor() {
         pendingFloatingNoteViewportRefresh = true;
         requestAnimationFrame(() => {
           pendingFloatingNoteViewportRefresh = false;
+          invalidateActiveTopicViewportState();
           refreshFloatingNotesTopicVisibility();
         });
       }
@@ -3908,6 +3987,23 @@ export function initializeEditor() {
         const parsedPageOffsetTop = Number.parseFloat(data.pageOffsetTop ?? metaSource.pageOffsetTop);
         const parsedRelativeLeft = Number.parseFloat(data.relativeLeft ?? metaSource.relativeLeft);
         const parsedRelativeTop = Number.parseFloat(data.relativeTop ?? metaSource.relativeTop);
+        const hasIncomingOffsetTop = Number.isFinite(parsedPageOffsetTop);
+        const hasIncomingRelativeTop = Number.isFinite(parsedRelativeTop);
+        let viewportContext = null;
+        if (!hasIncomingOffsetTop || !hasIncomingRelativeTop) {
+          invalidateActiveTopicViewportState();
+          viewportContext = captureActiveTopicViewportContext();
+        }
+        const resolvedPageOffsetTop = hasIncomingOffsetTop
+          ? parsedPageOffsetTop
+          : Number.isFinite(viewportContext?.pageOffsetTop)
+            ? viewportContext.pageOffsetTop
+            : null;
+        const resolvedRelativeTop = hasIncomingRelativeTop
+          ? parsedRelativeTop
+          : Number.isFinite(viewportContext?.relativeTop)
+            ? viewportContext.relativeTop
+            : null;
         const incomingPages = Array.isArray(data.pages)
           ? data.pages
           : (Array.isArray(metaSource.pages) ? metaSource.pages : undefined);
@@ -3940,9 +4036,9 @@ export function initializeEditor() {
           width: Number.isFinite(parsedWidth) ? parsedWidth : null,
           height: Number.isFinite(parsedHeight) ? parsedHeight : null,
           pageOffsetLeft: Number.isFinite(parsedPageOffsetLeft) ? parsedPageOffsetLeft : null,
-          pageOffsetTop: Number.isFinite(parsedPageOffsetTop) ? parsedPageOffsetTop : null,
+          pageOffsetTop: Number.isFinite(resolvedPageOffsetTop) ? resolvedPageOffsetTop : null,
           relativeLeft: Number.isFinite(parsedRelativeLeft) ? parsedRelativeLeft : null,
-          relativeTop: Number.isFinite(parsedRelativeTop) ? parsedRelativeTop : null,
+          relativeTop: Number.isFinite(resolvedRelativeTop) ? resolvedRelativeTop : null,
           element: note,
           pages: incomingPages,
           currentPageIndex: incomingPageIndex
@@ -4770,6 +4866,16 @@ export function initializeEditor() {
           note.dataset.sectionId = noteData.sectionId;
         } else {
           delete note.dataset.sectionId;
+        }
+        if (Number.isFinite(noteData.pageOffsetTop)) {
+          note.dataset.pageOffsetTop = String(noteData.pageOffsetTop);
+        } else {
+          delete note.dataset.pageOffsetTop;
+        }
+        if (Number.isFinite(noteData.relativeTop)) {
+          note.dataset.relativeTop = String(noteData.relativeTop);
+        } else {
+          delete note.dataset.relativeTop;
         }
 
         const ui = note._ui || {};
