@@ -327,6 +327,7 @@ export function initializeEditor() {
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
+          refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
           return;
         }
@@ -338,6 +339,7 @@ export function initializeEditor() {
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
         syncBodyTheme(themeClass);
+        refreshFloatingNotesTopicVisibility();
         scheduleFloatingNotesViewportRefresh();
       }
 
@@ -3315,11 +3317,29 @@ export function initializeEditor() {
         }
       }
 
+      function resolveNoteTopicId(note) {
+        if (!note) return '';
+        const datasetTopicId = (note.dataset.topicId || '').trim();
+        if (datasetTopicId) {
+          return datasetTopicId;
+        }
+        const noteId = note.dataset.noteId;
+        if (noteId) {
+          const noteData = notesRegistry.get(noteId);
+          if (noteData?.topicId) {
+            const topicValue = String(noteData.topicId).trim();
+            note.dataset.topicId = topicValue;
+            return topicValue;
+          }
+        }
+        return '';
+      }
+
       function applyFloatingNoteTopicVisibility(note) {
         if (!note) return;
         const currentTopic = getCurrentTopicId();
-        const noteTopicId = (note.dataset.topicId || '').trim();
-        const shouldShow = !noteTopicId || noteTopicId === currentTopic;
+        const noteTopicId = resolveNoteTopicId(note);
+        const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
         if (!shouldShow && floatingNoteDragState.note === note) {
           endFloatingNoteDrag();
         }
@@ -3328,7 +3348,9 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu();
         }
         note.hidden = !shouldShow;
+        note.style.display = shouldShow ? '' : 'none';
         note.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+        note.classList.toggle('floating-note-visible', shouldShow);
       }
 
       function refreshFloatingNotesTopicVisibility() {
@@ -5805,6 +5827,7 @@ export function initializeEditor() {
               if (!tema.page || !tema.page.isConnected) return;
               closeMagicView();
               closePanel();
+              setActivePage(tema.page);
               tema.page.scrollIntoView({ behavior: 'auto', block: 'start' });
             };
 
