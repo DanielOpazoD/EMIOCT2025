@@ -2909,52 +2909,12 @@ body.magic-open .magic-view {
   cursor: default;
 }
 
-.magic-close {
-  position: fixed;
-  top: calc(var(--topbar-height) + 16px);
-  left: 18px;
-  width: 46px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: none;
-  background: rgba(15, 23, 42, 0.78);
-  color: #f8f9ff;
-  font-size: 1.9rem;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35);
-  z-index: 4600;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-}
-
-.magic-close:hover,
-.magic-close:focus-visible {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.38);
-  background: rgba(15, 23, 42, 0.9);
-  outline: none;
-}
-
-.magic-close span {
-  pointer-events: none;
-}
-
 @media (max-width: 600px) {
   .magic-back-floating {
     top: calc(var(--topbar-height) + 12px);
     right: 12px;
     width: 42px;
     height: 42px;
-  }
-  .magic-close {
-    top: calc(var(--topbar-height) + 12px);
-    left: 12px;
-    width: 42px;
-    height: 42px;
-    font-size: 1.7rem;
   }
 }
 

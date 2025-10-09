@@ -629,11 +629,24 @@ export function initializeEditor() {
 
       function applyZoom(level, options = {}) {
         const { skipRemember = false } = options;
-        currentZoom = Math.max(0.5, Math.min(2, level));
+        const previousZoom = currentZoom || 1;
+        const newZoom = Math.max(0.5, Math.min(2, level));
+        const scrollElement = document.scrollingElement || document.documentElement || document.body;
+        const viewportCenter = scrollElement ? scrollElement.scrollTop + window.innerHeight / 2 : null;
+
+        currentZoom = newZoom;
         document.documentElement.style.setProperty('--zoom-level', currentZoom);
-        zoomValue.textContent = Math.round(currentZoom * 100) + '%';
+        if (zoomValue) {
+          zoomValue.textContent = Math.round(currentZoom * 100) + '%';
+        }
         if (!skipRemember && !isMagicViewActive) {
           lastRegularZoom = currentZoom;
+        }
+        if (scrollElement && viewportCenter !== null && Math.abs(currentZoom - previousZoom) >= 0.0001) {
+          const scaleFactor = currentZoom / previousZoom;
+          const targetCenter = viewportCenter * scaleFactor;
+          const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
+          scrollElement.scrollTo({ top: desiredTop });
         }
         syncMagicZoom();
       }
@@ -5520,12 +5533,6 @@ export function initializeEditor() {
         isMagicViewActive = true;
         applyZoom(1, { skipRemember: true });
         magic.innerHTML = '';
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'magic-close';
-        closeBtn.setAttribute('aria-label', 'Cerrar visor mágico');
-        closeBtn.innerHTML = '<span aria-hidden="true">&times;</span>';
-        magic.appendChild(closeBtn);
         const magicPage = document.createElement('div');
         magicPage.className = 'magic-page';
 
@@ -5544,16 +5551,13 @@ export function initializeEditor() {
         activeMagicSource = src;
         activeMagicWrapper = wrapper;
         activeMagicPage = pageRef || null;
-        setMagicFloatingBackVisibility(true, !pageRef);
+        setMagicFloatingBackVisibility(true);
 
         if (isEditMode) {
           magicPage.contentEditable = 'true';
           enableHtmlPaste();
         }
 
-        closeBtn.addEventListener('click', () => {
-          closeMagicView();
-        });
         syncMagicZoom();
         magic.classList.add('open');
         magic.scrollTop = 0;
