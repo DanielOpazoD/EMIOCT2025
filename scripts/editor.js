@@ -120,6 +120,7 @@ export function initializeEditor() {
       let currentPageRef = null;
       let panelFilterTerm = '';
       let panelFilterNormalized = '';
+      let pendingActivePageSync = false;
       
       const panel = document.getElementById('topic-panel');
       const sectionsContainer = document.getElementById('sectionsContainer');
@@ -321,6 +322,12 @@ export function initializeEditor() {
       }
 
       function setActivePage(page) {
+        if (page && page === currentPageRef) {
+          refreshFloatingNotesTopicVisibility();
+          scheduleFloatingNotesViewportRefresh();
+          return;
+        }
+
         if (!page) {
           currentPageRef = null;
           currentSectionId = '';
@@ -331,6 +338,7 @@ export function initializeEditor() {
           scheduleFloatingNotesViewportRefresh();
           return;
         }
+
         currentPageRef = page;
         const sectionId = page.dataset.sectionId || 'seccion-default';
         currentSectionId = sectionId;
@@ -341,6 +349,20 @@ export function initializeEditor() {
         syncBodyTheme(themeClass);
         refreshFloatingNotesTopicVisibility();
         scheduleFloatingNotesViewportRefresh();
+      }
+
+      function scheduleActivePageSync() {
+        if (pendingActivePageSync) return;
+        pendingActivePageSync = true;
+        requestAnimationFrame(() => {
+          pendingActivePageSync = false;
+          const candidate = getCurrentPage();
+          if (candidate) {
+            setActivePage(candidate);
+          } else {
+            setActivePage(null);
+          }
+        });
       }
 
       function setSectionTheme(sectionId, themeClass) {
@@ -618,6 +640,8 @@ export function initializeEditor() {
 
       document.addEventListener('scroll', hideTopicMenu, true);
       window.addEventListener('resize', hideTopicMenu);
+      window.addEventListener('scroll', scheduleActivePageSync, { passive: true });
+      window.addEventListener('resize', scheduleActivePageSync);
       document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
           hideTopicMenu();
@@ -3336,7 +3360,7 @@ export function initializeEditor() {
       }
 
       function applyFloatingNoteTopicVisibility(note) {
-        if (!note) return;
+        if (!note) return false;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
         const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
@@ -3351,11 +3375,17 @@ export function initializeEditor() {
         note.style.display = shouldShow ? '' : 'none';
         note.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
         note.classList.toggle('floating-note-visible', shouldShow);
+        return shouldShow;
       }
 
       function refreshFloatingNotesTopicVisibility() {
         if (!floatingNotesLayer) return;
-        floatingNotesLayer.querySelectorAll('.floating-note').forEach(applyFloatingNoteTopicVisibility);
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          const visible = applyFloatingNoteTopicVisibility(note);
+          if (visible) {
+            realignFloatingNoteToTopic(note);
+          }
+        });
       }
 
       function scheduleFloatingNotesViewportRefresh() {
@@ -3534,6 +3564,7 @@ export function initializeEditor() {
           if (noteId) {
             updateNoteData(noteId, { left: finalLeft, top: finalTop }, { silent: true });
           }
+          updateNoteViewportMetrics(note, finalLeft, finalTop);
         };
 
         if ((note.offsetWidth || note.getBoundingClientRect().width) === 0) {
@@ -3541,6 +3572,123 @@ export function initializeEditor() {
         } else {
           applyPosition();
         }
+      }
+
+      function updateNoteViewportMetrics(note, left, top) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const topicId = resolveNoteTopicId(note);
+        if (!floatingNotesLayer || !topicId) {
+          updateNoteData(noteId, {
+            pageOffsetLeft: null,
+            pageOffsetTop: null,
+            relativeLeft: null,
+            relativeTop: null
+          }, { silent: true });
+          delete note.dataset.pageOffsetLeft;
+          delete note.dataset.pageOffsetTop;
+          delete note.dataset.relativeLeft;
+          delete note.dataset.relativeTop;
+          return;
+        }
+
+        const page = findPageByTopicId(topicId);
+        if (!page) {
+          updateNoteData(noteId, {
+            pageOffsetLeft: null,
+            pageOffsetTop: null,
+            relativeLeft: null,
+            relativeTop: null
+          }, { silent: true });
+          delete note.dataset.pageOffsetLeft;
+          delete note.dataset.pageOffsetTop;
+          delete note.dataset.relativeLeft;
+          delete note.dataset.relativeTop;
+          return;
+        }
+
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
+        const layerLeft = layerRect.left + window.scrollX;
+        const layerTop = layerRect.top + window.scrollY;
+        const pageLeft = pageRect.left + window.scrollX;
+        const pageTop = pageRect.top + window.scrollY;
+
+        const absoluteLeft = layerLeft + (Number.isFinite(left) ? left : 0);
+        const absoluteTop = layerTop + (Number.isFinite(top) ? top : 0);
+        const pageOffsetLeft = absoluteLeft - pageLeft;
+        const pageOffsetTop = absoluteTop - pageTop;
+        const relativeLeft = pageRect.width > 0 ? pageOffsetLeft / pageRect.width : null;
+        const relativeTop = pageRect.height > 0 ? pageOffsetTop / pageRect.height : null;
+
+        const metrics = {
+          pageOffsetLeft: Number.isFinite(pageOffsetLeft) ? pageOffsetLeft : null,
+          pageOffsetTop: Number.isFinite(pageOffsetTop) ? pageOffsetTop : null,
+          relativeLeft: Number.isFinite(relativeLeft) ? relativeLeft : null,
+          relativeTop: Number.isFinite(relativeTop) ? relativeTop : null
+        };
+
+        updateNoteData(noteId, metrics, { silent: true });
+
+        if (Number.isFinite(metrics.pageOffsetLeft)) {
+          note.dataset.pageOffsetLeft = String(metrics.pageOffsetLeft);
+        } else {
+          delete note.dataset.pageOffsetLeft;
+        }
+        if (Number.isFinite(metrics.pageOffsetTop)) {
+          note.dataset.pageOffsetTop = String(metrics.pageOffsetTop);
+        } else {
+          delete note.dataset.pageOffsetTop;
+        }
+        if (Number.isFinite(metrics.relativeLeft)) {
+          note.dataset.relativeLeft = String(metrics.relativeLeft);
+        } else {
+          delete note.dataset.relativeLeft;
+        }
+        if (Number.isFinite(metrics.relativeTop)) {
+          note.dataset.relativeTop = String(metrics.relativeTop);
+        } else {
+          delete note.dataset.relativeTop;
+        }
+      }
+
+      function realignFloatingNoteToTopic(note) {
+        if (!note || note.hidden) return;
+        if (!floatingNotesLayer) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const noteData = notesRegistry.get(noteId);
+        if (!noteData) return;
+        const topicId = resolveNoteTopicId(note);
+        if (!topicId) return;
+        const page = findPageByTopicId(topicId);
+        if (!page) return;
+
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
+        const layerLeft = layerRect.left + window.scrollX;
+        const layerTop = layerRect.top + window.scrollY;
+        const pageLeft = pageRect.left + window.scrollX;
+        const pageTop = pageRect.top + window.scrollY;
+
+        let offsetLeft = Number.isFinite(noteData.pageOffsetLeft) ? noteData.pageOffsetLeft : null;
+        if (!Number.isFinite(offsetLeft) && Number.isFinite(noteData.relativeLeft)) {
+          offsetLeft = noteData.relativeLeft * pageRect.width;
+        }
+
+        let offsetTop = Number.isFinite(noteData.pageOffsetTop) ? noteData.pageOffsetTop : null;
+        if (!Number.isFinite(offsetTop) && Number.isFinite(noteData.relativeTop)) {
+          offsetTop = noteData.relativeTop * pageRect.height;
+        }
+
+        if (!Number.isFinite(offsetLeft) || !Number.isFinite(offsetTop)) {
+          return;
+        }
+
+        const targetLeft = (pageLeft + offsetLeft) - layerLeft;
+        const targetTop = (pageTop + offsetTop) - layerTop;
+        positionFloatingNote(note, targetLeft, targetTop);
       }
 
       function refreshToggleNotesButton() {
@@ -3884,12 +4032,7 @@ export function initializeEditor() {
           event.preventDefault();
           event.stopPropagation();
           bringNoteToFront(note);
-          if (optionsMenu.classList.contains('show')) {
-            closeFloatingNoteStyleMenu(optionsMenu);
-          } else {
-            syncNoteOptionsMenu(optionsMenu, notesRegistry.get(noteId));
-            openFloatingNoteStyleMenu(optionsMenu, menuBtn);
-          }
+          promptNoteTopicAssignment(note);
         });
 
         note.addEventListener('pointerdown', (event) => {
@@ -3898,6 +4041,16 @@ export function initializeEditor() {
           }
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu();
+        });
+
+        note.addEventListener('dblclick', (event) => {
+          if (event.target.closest('.floating-note-body')) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          bringNoteToFront(note);
+          promptNoteTopicAssignment(note);
         });
 
         if (floatingNoteResizeObserver) {
@@ -3937,6 +4090,76 @@ export function initializeEditor() {
         scheduleNotesViewRefresh();
         scheduleFloatingNotesViewportRefresh();
         return note;
+      }
+
+      function promptNoteTopicAssignment(note) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const topics = pages
+          .map((page, index) => ({
+            id: page.dataset.topicId || '',
+            title: getTopicTitle(page) || `Tema ${index + 1}`,
+            index
+          }))
+          .filter(topic => topic.id);
+
+        const currentTopicId = resolveNoteTopicId(note) || getCurrentTopicId();
+        const currentIndex = topics.findIndex(topic => topic.id === currentTopicId);
+
+        let message = 'Asignar nota a un tema:\n';
+        if (topics.length === 0) {
+          message += 'No hay temas disponibles.';
+        } else {
+          message += topics
+            .map(topic => `${topic.index + 1}. ${topic.title}`)
+            .join('\n');
+          message += '\n\nIngresa el número del tema o su ID. Deja vacío para cancelar, escribe 0 para quitar la asignación.';
+        }
+
+        const defaultValue = currentIndex >= 0 ? String(currentIndex + 1) : '';
+        const response = window.prompt(message, defaultValue);
+        if (response === null) {
+          return;
+        }
+
+        const trimmed = (response || '').trim();
+        if (!trimmed) {
+          return;
+        }
+
+        let selectedTopicId = null;
+        if (trimmed === '0') {
+          selectedTopicId = null;
+        } else {
+          const numeric = Number.parseInt(trimmed, 10);
+          if (Number.isFinite(numeric) && numeric >= 1 && numeric <= topics.length) {
+            selectedTopicId = topics[numeric - 1].id;
+          } else {
+            const matching = topics.find(topic => topic.id === trimmed);
+            selectedTopicId = matching ? matching.id : trimmed;
+          }
+        }
+
+        assignNoteToTopic(note, selectedTopicId);
+      }
+
+      function assignNoteToTopic(note, topicId) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const normalizedTopicId = topicId ? String(topicId).trim() : '';
+        const page = normalizedTopicId ? findPageByTopicId(normalizedTopicId) : null;
+        const sectionId = page?.dataset.sectionId || null;
+        const updated = updateNoteData(noteId, {
+          topicId: normalizedTopicId || null,
+          sectionId
+        });
+        syncNoteElementMeta(note, updated);
+        if (page && floatingNotesLayer) {
+          realignFloatingNoteToTopic(note);
+        }
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function buildNoteOptionsMenu(note) {
@@ -4289,7 +4512,10 @@ export function initializeEditor() {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
 
-        applyFloatingNoteTopicVisibility(note);
+        const isVisible = applyFloatingNoteTopicVisibility(note);
+        if (isVisible) {
+          realignFloatingNoteToTopic(note);
+        }
       }
 
       function formatDateTime(isoString) {
