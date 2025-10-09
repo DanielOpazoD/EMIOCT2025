@@ -13,17 +13,6 @@
   <div class="topbar topbar-color-default" data-topbar>
     <div class="topbar-left">
       <button class="topbar-btn topbar-plus" type="button" title="Abrir panel de navegación"><span>☰</span> <span class="topbar-btn-label">Menú</span></button>
-      <div class="topbar-group topbar-theme-group">
-        <button class="topbar-btn topbar-toggle" type="button" id="topbarThemeToggle" aria-haspopup="true" aria-expanded="false" title="Cambiar estilo de la barra"><span>🎨</span> <span class="topbar-btn-label">Colores</span></button>
-        <div class="topbar-dropdown" id="topbarThemeDropdown" role="menu">
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-default">Clásico</button>
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-slate">Gris</button>
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-night">Negro</button>
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-navy">Azul intenso</button>
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-sky">Azul claro</button>
-          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-emerald">Verde</button>
-        </div>
-      </div>
     </div>
     <div class="topbar-center">
       <span id="specialtyTitle" class="topbar-topic" title="Sección actual" data-document-title="Endocrinología"></span>
@@ -53,11 +42,22 @@
       </div>
     </div>
     <div class="topbar-right">
+      <div class="topbar-group topbar-theme-group">
+        <button class="topbar-btn topbar-toggle" type="button" id="topbarThemeToggle" aria-haspopup="true" aria-expanded="false" title="Cambiar estilo de la barra" aria-label="Cambiar estilo de la barra"><span aria-hidden="true">🎨</span></button>
+        <div class="topbar-dropdown" id="topbarThemeDropdown" role="menu">
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-default">Clásico</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-slate">Gris</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-night">Negro</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-navy">Azul intenso</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-sky">Azul claro</button>
+          <button type="button" class="topbar-dropdown-btn" data-theme="topbar-color-emerald">Verde</button>
+        </div>
+      </div>
       <button class="topbar-btn" type="button" id="cacheSaveBtn" title="Guardar en caché"><span>💾</span> <span class="topbar-btn-label">Guardar</span></button>
     </div>
   </div>
 
-  <button class="magic-back-floating" id="magicBackFloating" type="button" aria-hidden="true">↩️ Volver al tema</button>
+  <button class="magic-back-floating" id="magicBackFloating" type="button" aria-hidden="true" aria-label="Volver al tema principal"><span aria-hidden="true">↩️</span></button>
 
   <button class="reading-mode-exit" id="readingModeExit" title="Salir del modo lectura">✕</button>
 

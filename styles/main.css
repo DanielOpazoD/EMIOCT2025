@@ -2919,17 +2919,22 @@ body.magic-open .magic-view {
   right: 18px;
   display: none;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 999px;
-  font-size: 0.95rem;
-  background: linear-gradient(135deg, #4338ca, #7c3aed);
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.78);
   color: #f8f9ff;
   border: none;
   cursor: pointer;
-  box-shadow: 0 16px 32px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35);
   z-index: 4600;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.magic-back-floating span {
+  font-size: 1.35rem;
+  line-height: 1;
 }
 
 .magic-back-floating.visible {
@@ -2938,13 +2943,14 @@ body.magic-open .magic-view {
 
 .magic-back-floating:hover,
 .magic-back-floating:focus-visible {
-  transform: translateY(-2px);
-  box-shadow: 0 20px 40px rgba(76, 29, 149, 0.38);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.38);
+  background: rgba(15, 23, 42, 0.9);
   outline: none;
 }
 
 .magic-back-floating:disabled {
-  opacity: 0.7;
+  opacity: 0.55;
   cursor: default;
 }
 
@@ -2952,8 +2958,8 @@ body.magic-open .magic-view {
   .magic-back-floating {
     top: calc(var(--topbar-height) + 12px);
     right: 12px;
-    padding: 8px 14px;
-    font-size: 0.9rem;
+    width: 42px;
+    height: 42px;
   }
 }
 
