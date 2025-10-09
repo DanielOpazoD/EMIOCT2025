@@ -632,7 +632,21 @@ export function initializeEditor() {
         const previousZoom = currentZoom || 1;
         const newZoom = Math.max(0.5, Math.min(2, level));
         const scrollElement = document.scrollingElement || document.documentElement || document.body;
-        const viewportCenter = scrollElement ? scrollElement.scrollTop + window.innerHeight / 2 : null;
+        const pageRef = getCurrentPage();
+
+        let pageScrollState = null;
+        if (scrollElement && pageRef && pageRef.isConnected) {
+          const scrollTop = scrollElement.scrollTop;
+          const pageRect = pageRef.getBoundingClientRect();
+          const pageTop = pageRect.top + scrollTop;
+          const pageHeight = pageRect.height || 1;
+          const rawOffset = scrollTop - pageTop;
+          const clampedOffset = Math.min(Math.max(rawOffset, 0), pageHeight);
+          pageScrollState = {
+            page: pageRef,
+            ratio: pageHeight > 0 ? clampedOffset / pageHeight : 0
+          };
+        }
 
         currentZoom = newZoom;
         document.documentElement.style.setProperty('--zoom-level', currentZoom);
@@ -642,13 +656,53 @@ export function initializeEditor() {
         if (!skipRemember && !isMagicViewActive) {
           lastRegularZoom = currentZoom;
         }
-        if (scrollElement && viewportCenter !== null && Math.abs(currentZoom - previousZoom) >= 0.0001) {
-          const scaleFactor = currentZoom / previousZoom;
-          const targetCenter = viewportCenter * scaleFactor;
-          const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
-          scrollElement.scrollTo({ top: desiredTop });
+
+        if (Math.abs(currentZoom - previousZoom) >= 0.0001) {
+          adjustFloatingNotesForZoom(previousZoom, currentZoom);
+
+          if (scrollElement) {
+            if (pageScrollState) {
+              requestAnimationFrame(() => {
+                const { page, ratio } = pageScrollState;
+                if (!page || !page.isConnected) return;
+                const updatedRect = page.getBoundingClientRect();
+                const updatedTop = updatedRect.top + scrollElement.scrollTop;
+                const updatedHeight = updatedRect.height || 1;
+                const targetTop = updatedTop + (updatedHeight * (Number.isFinite(ratio) ? ratio : 0));
+                scrollElement.scrollTo({ top: targetTop });
+              });
+            } else {
+              const viewportCenter = scrollElement.scrollTop + window.innerHeight / 2;
+              const scaleFactor = currentZoom / previousZoom;
+              const targetCenter = viewportCenter * scaleFactor;
+              const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
+              scrollElement.scrollTo({ top: desiredTop });
+            }
+          }
         }
+
         syncMagicZoom();
+      }
+
+      function adjustFloatingNotesForZoom(prevZoom, nextZoom) {
+        if (!floatingNotesLayer) return;
+        if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
+        if (!Number.isFinite(nextZoom) || nextZoom <= 0) return;
+        const scaleFactor = nextZoom / prevZoom;
+        if (!Number.isFinite(scaleFactor) || Math.abs(scaleFactor - 1) < 0.0001) {
+          return;
+        }
+
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+          const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+          if (!Number.isFinite(currentLeft) || !Number.isFinite(currentTop)) {
+            return;
+          }
+          const scaledLeft = currentLeft * scaleFactor;
+          const scaledTop = currentTop * scaleFactor;
+          positionFloatingNote(note, scaledLeft, scaledTop);
+        });
       }
 
       function updateZoom(delta) {
@@ -5684,7 +5738,7 @@ export function initializeEditor() {
               if (!tema.page || !tema.page.isConnected) return;
               closeMagicView();
               closePanel();
-              tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              tema.page.scrollIntoView({ behavior: 'auto', block: 'start' });
             };
 
             btnMain.addEventListener('click', openTopic);
