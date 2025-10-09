@@ -57,6 +57,14 @@ export function initializeEditor() {
         { id: 'slate', name: 'Gris pizarra', className: 'floating-note-style-slate' }
       ];
 
+      const NOTE_ICON_SYMBOLS = [
+        '▪︎', '▪️', '▫️', '□', '●', '○', '◉', '◆', '◇', '◈', '🔹', '🔸', '📌', '📍', '📂', '📄',
+        '📝', '📋', '📎', '🔑', '📚', '📑', '📊', '🔎', '💡', '⚠️', '✅', '☑️', '✔️', '❌', '✖️',
+        '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
+        '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
+        '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
+      ];
+
       let floatingNotesHidden = false;
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
@@ -382,6 +390,7 @@ export function initializeEditor() {
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
+      const insertIconBtn = document.getElementById('insertIconBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
@@ -414,6 +423,52 @@ export function initializeEditor() {
       ];
 
       const tableResizers = new WeakMap();
+
+      const iconPicker = document.createElement('div');
+      iconPicker.id = 'iconPicker';
+      iconPicker.className = 'icon-picker';
+      iconPicker.setAttribute('role', 'menu');
+      iconPicker.setAttribute('aria-label', 'Insertar icono');
+      NOTE_ICON_SYMBOLS.forEach(symbol => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'icon-picker-btn';
+        btn.textContent = symbol;
+        btn.title = `Insertar ${symbol}`;
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          const inserted = insertTextAtSelection(`${symbol} `);
+          if (!inserted) {
+            alert('Selecciona un área editable antes de insertar iconos.');
+          }
+          hideIconPicker();
+        });
+        iconPicker.appendChild(btn);
+      });
+      document.body.appendChild(iconPicker);
+
+      let iconPickerAnchor = null;
+
+      function hideIconPicker() {
+        if (!iconPicker.classList.contains('show')) {
+          return;
+        }
+        iconPicker.classList.remove('show');
+        iconPickerAnchor = null;
+      }
+
+      function showIconPicker(anchor) {
+        if (!anchor) {
+          return;
+        }
+        iconPickerAnchor = anchor;
+        const rect = anchor.getBoundingClientRect();
+        const offsetTop = rect.bottom + window.scrollY + 6;
+        const offsetLeft = rect.left + window.scrollX;
+        iconPicker.style.top = `${offsetTop}px`;
+        iconPicker.style.left = `${offsetLeft}px`;
+        iconPicker.classList.add('show');
+      }
 
       if (cropImageBtn) {
         cropImageBtn.disabled = true;
@@ -820,6 +875,24 @@ export function initializeEditor() {
         selection.addRange(range);
         savedSelection = null;
         return nodes[0] || null;
+      }
+
+      function insertTextAtSelection(text) {
+        if (typeof text !== 'string' || !text) {
+          return null;
+        }
+        const selection = ensureEditableSelection();
+        if (!selection || !selection.rangeCount) return null;
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.setEndAfter(textNode);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedSelection = null;
+        return textNode;
       }
 
       function normalizeColorToHex(color, fallback = '#ffffff') {
@@ -3565,9 +3638,27 @@ export function initializeEditor() {
 
       function setFloatingNotesEditable(editable) {
         if (!floatingNotesLayer) return;
-        const bodies = floatingNotesLayer.querySelectorAll('.floating-note-body');
-        bodies.forEach(body => {
-          body.contentEditable = editable ? 'true' : 'false';
+        const notes = floatingNotesLayer.querySelectorAll('.floating-note');
+        notes.forEach(note => {
+          const body = note.querySelector('.floating-note-body');
+          if (body) {
+            body.contentEditable = editable ? 'true' : 'false';
+          }
+          const label = note.querySelector('.note-category .note-label');
+          if (label) {
+            label.contentEditable = editable ? 'true' : 'false';
+            label.setAttribute('role', 'textbox');
+            label.setAttribute('aria-label', 'Título de la nota');
+            label.spellcheck = false;
+            if (!editable) {
+              label.dataset.editing = 'false';
+              delete label.dataset.initialTitleText;
+            }
+          }
+          const category = note.querySelector('.note-category');
+          if (category) {
+            category.dataset.editableTitle = editable ? 'true' : 'false';
+          }
         });
       }
 
@@ -3752,7 +3843,13 @@ export function initializeEditor() {
         categoryIcon.className = 'note-icon';
         const categoryLabel = document.createElement('span');
         categoryLabel.className = 'note-label';
+        categoryLabel.contentEditable = isEditMode ? 'true' : 'false';
+        categoryLabel.setAttribute('role', 'textbox');
+        categoryLabel.setAttribute('aria-label', 'Título de la nota');
+        categoryLabel.spellcheck = false;
+        categoryLabel.dataset.editing = 'false';
         categoryWrap.append(categoryIcon, categoryLabel);
+        categoryWrap.dataset.editableTitle = isEditMode ? 'true' : 'false';
 
         const navigation = document.createElement('div');
         navigation.className = 'note-navigation';
@@ -3925,22 +4022,71 @@ export function initializeEditor() {
           }
         });
 
-        categoryWrap.addEventListener('click', (event) => {
-          event.stopPropagation();
-          bringNoteToFront(note);
-          closeFloatingNoteStyleMenu(optionsMenu);
-          const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
-          const categoryInfo = getNoteCategoryInfo(currentData.category);
-          const hasCustomTitle = currentData.title !== null && currentData.title !== undefined;
-          const promptDefault = hasCustomTitle ? currentData.title : categoryInfo.label;
-          const proposed = window.prompt('Título de la nota', promptDefault);
-          if (proposed === null) {
+        const finishTitleEdit = (restoreOriginal = false) => {
+          if (categoryLabel.dataset.editing !== 'true') {
             return;
           }
-          const finalTitle = proposed.trim();
-          const updated = updateNoteData(noteId, { title: finalTitle }, { silent: true });
+          categoryLabel.dataset.editing = 'false';
+          const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
+          const initialNormalized = (categoryLabel.dataset.initialTitleText || '').replace(/[\s\u00A0]+/g, ' ').trim();
+          delete categoryLabel.dataset.initialTitleText;
+          if (restoreOriginal) {
+            syncNoteElementMeta(note, currentData);
+            return;
+          }
+          const raw = categoryLabel.textContent || '';
+          const normalized = raw.replace(/[\s\u00A0]+/g, ' ').trim();
+          if (normalized !== raw) {
+            categoryLabel.textContent = normalized;
+          }
+          if (normalized === initialNormalized) {
+            syncNoteElementMeta(note, currentData);
+            return;
+          }
+          const titleValue = normalized.length ? normalized : null;
+          const updated = updateNoteData(noteId, { title: titleValue }, { silent: true });
           syncNoteElementMeta(note, updated);
           scheduleNotesViewRefresh();
+        };
+
+        categoryLabel.addEventListener('focus', () => {
+          if (categoryLabel.contentEditable !== 'true') {
+            return;
+          }
+          bringNoteToFront(note);
+          closeFloatingNoteStyleMenu(optionsMenu);
+          categoryLabel.dataset.editing = 'true';
+          categoryLabel.dataset.initialTitleText = categoryLabel.textContent || '';
+        });
+
+        categoryLabel.addEventListener('blur', () => {
+          if (categoryLabel.contentEditable !== 'true') {
+            return;
+          }
+          finishTitleEdit(false);
+        });
+
+        categoryLabel.addEventListener('keydown', (event) => {
+          if (categoryLabel.contentEditable !== 'true') {
+            return;
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            categoryLabel.blur();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            finishTitleEdit(true);
+            categoryLabel.blur();
+          }
+        });
+
+        categoryLabel.addEventListener('paste', (event) => {
+          if (categoryLabel.contentEditable !== 'true') {
+            return;
+          }
+          event.preventDefault();
+          const text = event.clipboardData?.getData('text/plain') || '';
+          document.execCommand('insertText', false, text);
         });
 
         header.addEventListener('pointerdown', (event) => {
@@ -4456,11 +4602,14 @@ export function initializeEditor() {
         if (ui.categoryLabel) {
           const hasCustomTitle = noteData.title !== null && noteData.title !== undefined;
           const displayTitle = getNoteDisplayTitle(noteData.title, categoryInfo.label);
-          ui.categoryLabel.textContent = displayTitle || '';
+          if (ui.categoryLabel.dataset.editing !== 'true') {
+            ui.categoryLabel.textContent = displayTitle || '';
+          }
           if (ui.categoryWrap) {
             ui.categoryWrap.title = hasCustomTitle
-              ? 'Haz clic para renombrar'
-              : `Haz clic para personalizar: ${categoryInfo.label}`;
+              ? 'Haz clic para editar el título'
+              : `Haz clic para personalizar el título: ${categoryInfo.label}`;
+            ui.categoryWrap.dataset.editableTitle = ui.categoryLabel?.contentEditable === 'true' ? 'true' : 'false';
           }
         }
         if (ui.priorityBtn) {
@@ -6432,6 +6581,7 @@ export function initializeEditor() {
           closeImageCropModal();
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
+          hideIconPicker();
           savedSelection = null;
         }
       });
@@ -6449,6 +6599,7 @@ export function initializeEditor() {
         }
         isEditMode = !isEditMode;
         hideTopicMenu();
+        hideIconPicker();
 
         if (isEditMode) {
           pages.forEach(page => page.contentEditable = 'true');
@@ -6501,6 +6652,49 @@ export function initializeEditor() {
       document.getElementById('insertOlBtn')?.addEventListener('click', () => execCmd('insertOrderedList'));
       document.getElementById('indentBtn')?.addEventListener('click', () => execCmd('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => execCmd('outdent'));
+
+      insertIconBtn?.addEventListener('pointerdown', () => {
+        saveCurrentSelection();
+      });
+
+      insertIconBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        saveCurrentSelection();
+        if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
+          hideIconPicker();
+        } else {
+          showIconPicker(insertIconBtn);
+        }
+      });
+
+      insertIconBtn?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          saveCurrentSelection();
+          if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
+            hideIconPicker();
+          } else {
+            showIconPicker(insertIconBtn);
+          }
+        }
+      });
+
+      document.addEventListener('pointerdown', (event) => {
+        if (!iconPicker.classList.contains('show')) {
+          return;
+        }
+        if (iconPicker.contains(event.target)) {
+          return;
+        }
+        if (event.target === insertIconBtn) {
+          return;
+        }
+        hideIconPicker();
+      });
+
+      window.addEventListener('resize', hideIconPicker);
+      document.addEventListener('scroll', hideIconPicker, true);
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {

@@ -691,6 +691,44 @@ body.reading-mode .reading-mode-exit {
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
+.icon-picker {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+  padding: 8px;
+  max-width: 280px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: none;
+  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+}
+
+.icon-picker.show {
+  display: grid;
+}
+
+.icon-picker button {
+  border: none;
+  background: transparent;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.icon-picker button:hover,
+.icon-picker button:focus {
+  background: rgba(13, 110, 253, 0.12);
+  outline: none;
+  transform: translateY(-1px);
+}
+
 /* ===== Panel de herramientas de imagen ===== */
 .image-toolbar {
   position: fixed;
@@ -3175,6 +3213,21 @@ body.reading-mode .floating-notes-layer {
 .enhanced-note .note-category .note-label {
   border-bottom: 1px dashed transparent;
   transition: border-color 0.2s ease;
+}
+
+.enhanced-note .note-category[data-editable-title="true"] {
+  cursor: text;
+}
+
+.enhanced-note .note-category .note-label[contenteditable="true"] {
+  cursor: text;
+}
+
+.enhanced-note .note-category .note-label[contenteditable="true"]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .enhanced-note .note-navigation {
