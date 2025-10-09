@@ -78,6 +78,8 @@ export function initializeEditor() {
       let floatingNotesHidden = false;
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
+      let activeTopicNotesMenu = null;
+      let activeTopicNotesMenuAnchor = null;
       const floatingNoteDragState = { note: null, pointerId: null, offsetX: 0, offsetY: 0 };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
       const FLOATING_NOTE_MIN_WIDTH = 160;
@@ -296,6 +298,8 @@ export function initializeEditor() {
       }
 
       notesRegistry.setChangeListener(() => {
+        refreshTopicNoteIndicators();
+        refreshActiveTopicNotesMenu();
         scheduleNotesViewRefresh();
       });
 
@@ -859,17 +863,25 @@ export function initializeEditor() {
         document.documentElement.style.setProperty('--document-horizontal-shift', `${documentHorizontalShift}px`);
       }
 
-      function adjustDocumentShift(delta) {
-        const nextValue = Math.min(
-          DOCUMENT_SHIFT_MAX,
-          Math.max(DOCUMENT_SHIFT_MIN, documentHorizontalShift + delta)
-        );
-        if (nextValue === documentHorizontalShift) {
-          return;
+      function clampDocumentHorizontalShift(value) {
+        return Math.min(DOCUMENT_SHIFT_MAX, Math.max(DOCUMENT_SHIFT_MIN, value));
+      }
+
+      function setDocumentHorizontalShift(value) {
+        const normalized = Number.isFinite(value) ? value : 0;
+        const clamped = clampDocumentHorizontalShift(normalized);
+        if (clamped === documentHorizontalShift) {
+          applyDocumentShift();
+          return documentHorizontalShift;
         }
-        documentHorizontalShift = nextValue;
+        documentHorizontalShift = clamped;
         applyDocumentShift();
         scheduleFloatingNotesViewportRefresh();
+        return documentHorizontalShift;
+      }
+
+      function adjustDocumentShift(delta) {
+        setDocumentHorizontalShift(documentHorizontalShift + delta);
       }
 
       function updateZoom(delta) {
@@ -2806,6 +2818,21 @@ export function initializeEditor() {
 
           const getTitle = () => (titleSpan?.textContent || '').trim() || getTopicTitle(page) || 'Tema';
 
+          let noteTrigger = h1.querySelector('.topic-note-trigger');
+          if (!noteTrigger) {
+            noteTrigger = document.createElement('button');
+            noteTrigger.type = 'button';
+            noteTrigger.className = 'topic-note-trigger';
+            noteTrigger.setAttribute('aria-label', 'Notas del tema');
+            noteTrigger.setAttribute('aria-haspopup', 'dialog');
+            noteTrigger.setAttribute('aria-expanded', 'false');
+            noteTrigger.title = 'Notas del tema';
+            noteTrigger.textContent = '📝';
+            magicIcon.insertAdjacentElement('afterend', noteTrigger);
+          }
+
+          noteTrigger.dataset.topicId = page.dataset.topicId || '';
+
           if (!magicIcon.dataset.bound) {
             magicIcon.addEventListener('click', (e) => {
               e.stopPropagation();
@@ -2813,6 +2840,15 @@ export function initializeEditor() {
               activateMagicTopic(magicAnchorFor(page), getTitle(), page);
             });
             magicIcon.dataset.bound = 'true';
+          }
+
+          if (!noteTrigger.dataset.bound) {
+            noteTrigger.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openTopicNotesMenu(page, noteTrigger);
+            });
+            noteTrigger.dataset.bound = 'true';
           }
 
           if (!titleSpan.dataset.bound) {
@@ -2829,7 +2865,12 @@ export function initializeEditor() {
           if (titleSpan.nextSibling !== magicIcon) {
             h1.appendChild(magicIcon);
           }
+          if (magicIcon.nextSibling !== noteTrigger) {
+            magicIcon.insertAdjacentElement('afterend', noteTrigger);
+          }
         });
+
+        refreshTopicNoteIndicators();
       }
 
       setupMagicIcons();
@@ -3453,6 +3494,495 @@ export function initializeEditor() {
           closeFloatingNoteStyleMenu();
         }
       });
+
+      function findFloatingNoteElement(noteId) {
+        if (!floatingNotesLayer || !noteId) return null;
+        const notes = floatingNotesLayer.querySelectorAll('.floating-note');
+        for (const node of notes) {
+          if (node.dataset.noteId === noteId) {
+            return node;
+          }
+        }
+        return null;
+      }
+
+      function getFloatingNotesByTopic(topicId) {
+        const normalized = (topicId || '').trim();
+        if (!normalized) return [];
+        return Array.from(notesRegistry.values())
+          .filter(note => note && note.type === NOTE_TYPES.FLOATING && (note.topicId || '').trim() === normalized)
+          .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+      }
+
+      function getTopicNoteCounts() {
+        const counts = new Map();
+        notesRegistry.forEach(note => {
+          if (!note || note.type !== NOTE_TYPES.FLOATING) return;
+          const topicId = (note.topicId || '').trim();
+          if (!topicId) return;
+          counts.set(topicId, (counts.get(topicId) || 0) + 1);
+        });
+        return counts;
+      }
+
+      function refreshTopicNoteIndicators() {
+        const counts = getTopicNoteCounts();
+        document.querySelectorAll('.topic-note-trigger').forEach(button => {
+          const topicId = button.dataset.topicId || '';
+          const count = counts.get(topicId) || 0;
+          const hasNotes = count > 0;
+          const displayCount = hasNotes ? (count > 99 ? '99+' : String(count)) : '';
+          if (displayCount) {
+            button.setAttribute('data-note-count', displayCount);
+          } else {
+            button.removeAttribute('data-note-count');
+          }
+          button.classList.toggle('has-notes', hasNotes);
+          const labelBase = 'Notas del tema';
+          const label = hasNotes ? `${labelBase} (${count === 1 ? '1 nota' : `${count} notas`})` : 'Agregar nota flotante al tema';
+          button.setAttribute('aria-label', label);
+          button.title = label;
+          if (!button.hasAttribute('aria-expanded')) {
+            button.setAttribute('aria-expanded', 'false');
+          }
+        });
+
+        if (sectionsContainer) {
+          sectionsContainer.querySelectorAll('.topic-list li').forEach(li => {
+            const indicator = li.querySelector('.topic-note-indicator');
+            if (!indicator) return;
+            const topicId = li.dataset.topicId || '';
+            const count = counts.get(topicId) || 0;
+            if (count > 0) {
+              const label = count === 1 ? '1 nota en este tema' : `${count} notas en este tema`;
+              indicator.hidden = false;
+              indicator.textContent = '📝';
+              indicator.title = label;
+              indicator.setAttribute('aria-label', label);
+              indicator.setAttribute('aria-hidden', 'false');
+            } else {
+              indicator.hidden = true;
+              indicator.textContent = '';
+              indicator.removeAttribute('title');
+              indicator.removeAttribute('aria-label');
+              indicator.setAttribute('aria-hidden', 'true');
+            }
+          });
+        }
+      }
+
+      function getTopicNoteAnchorPosition(anchor) {
+        if (!anchor || !floatingNotesLayer) return null;
+        const anchorRect = anchor.getBoundingClientRect();
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const viewportWidth = floatingNotesLayer.clientWidth || window.innerWidth || 0;
+        const approxWidth = FLOATING_NOTE_DEFAULT_WIDTH;
+        const minLeft = 16;
+        const maxLeft = Math.max(minLeft, viewportWidth - approxWidth - 16);
+        const candidateLeft = anchorRect.left - layerRect.left + (anchorRect.width / 2) - (approxWidth / 2);
+        const left = Math.min(Math.max(candidateLeft, minLeft), maxLeft);
+        const top = Math.max(16, anchorRect.bottom - layerRect.top + 16);
+        return { left, top };
+      }
+
+      function handleTopicNotesMenuPointerDown(event) {
+        if (!activeTopicNotesMenu) return;
+        if (activeTopicNotesMenu.contains(event.target)) return;
+        if (activeTopicNotesMenuAnchor && activeTopicNotesMenuAnchor.contains(event.target)) return;
+        closeTopicNotesMenu();
+      }
+
+      function handleTopicNotesMenuKeydown(event) {
+        if (event.key === 'Escape') {
+          closeTopicNotesMenu();
+        }
+      }
+
+      function closeTopicNotesMenu() {
+        if (!activeTopicNotesMenu) {
+          return;
+        }
+        const shouldRestoreFocus = activeTopicNotesMenu.contains(document.activeElement);
+        activeTopicNotesMenu.remove();
+        activeTopicNotesMenu = null;
+        if (activeTopicNotesMenuAnchor) {
+          activeTopicNotesMenuAnchor.setAttribute('aria-expanded', 'false');
+          activeTopicNotesMenuAnchor.removeAttribute('aria-controls');
+        }
+        if (shouldRestoreFocus && activeTopicNotesMenuAnchor && typeof activeTopicNotesMenuAnchor.focus === 'function') {
+          activeTopicNotesMenuAnchor.focus({ preventScroll: true });
+        }
+        activeTopicNotesMenuAnchor = null;
+        document.removeEventListener('pointerdown', handleTopicNotesMenuPointerDown, true);
+        document.removeEventListener('keydown', handleTopicNotesMenuKeydown, true);
+        window.removeEventListener('resize', closeTopicNotesMenu);
+        window.removeEventListener('scroll', closeTopicNotesMenu, true);
+      }
+
+      function positionTopicNotesMenu(menu, anchor) {
+        if (!menu) return;
+        let targetLeft = 24;
+        let targetTop = 24;
+        if (anchor) {
+          const rect = anchor.getBoundingClientRect();
+          targetLeft = rect.left + rect.width / 2;
+          targetTop = rect.bottom + 12;
+        }
+        const menuRect = menu.getBoundingClientRect();
+        let computedLeft = targetLeft - menuRect.width / 2;
+        computedLeft = Math.max(12, Math.min(window.innerWidth - menuRect.width - 12, computedLeft));
+        let computedTop = targetTop;
+        if (computedTop + menuRect.height > window.innerHeight - 12) {
+          computedTop = Math.max(12, window.innerHeight - menuRect.height - 12);
+        }
+        menu.style.left = `${Math.round(computedLeft)}px`;
+        menu.style.top = `${Math.round(computedTop)}px`;
+      }
+
+      function renderTopicNotesMenu(menu, topicId) {
+        if (!menu) return;
+        const notes = getFloatingNotesByTopic(topicId);
+        const page = findPageByTopicId(topicId);
+        const topicTitle = getTopicTitle(page) || 'Tema';
+        const titleEl = menu.querySelector('.topic-notes-menu-title');
+        const countEl = menu.querySelector('.topic-notes-menu-count');
+        const list = menu.querySelector('.topic-notes-menu-list');
+        if (titleEl) {
+          titleEl.textContent = `Notas de ${topicTitle}`;
+        }
+        if (countEl) {
+          countEl.textContent = notes.length === 1 ? '1 nota' : `${notes.length} notas`;
+        }
+        if (!list) {
+          return;
+        }
+        list.innerHTML = '';
+        if (notes.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'topic-notes-empty';
+          empty.textContent = 'Aún no hay notas en este tema.';
+          list.appendChild(empty);
+          return;
+        }
+        notes.forEach(note => {
+          const item = document.createElement('div');
+          item.className = 'topic-note-item';
+          item.dataset.noteId = note.id;
+          if (note.priority === 'high') {
+            item.classList.add('priority-high');
+          } else if (note.priority === 'low') {
+            item.classList.add('priority-low');
+          }
+          if (note.reviewed) {
+            item.classList.add('note-reviewed');
+          }
+
+          const main = document.createElement('div');
+          main.className = 'topic-note-item-main';
+          const icon = document.createElement('span');
+          icon.className = 'topic-note-item-icon';
+          icon.textContent = getNoteCategoryInfo(note.category).icon;
+          const titleSpan = document.createElement('span');
+          titleSpan.className = 'topic-note-item-title';
+          const fallbackTitle = note.content || '';
+          const displayTitle = getNoteDisplayTitle(note.title, fallbackTitle).trim() || 'Nota sin título';
+          titleSpan.textContent = displayTitle.length > 90 ? `${displayTitle.slice(0, 87)}…` : displayTitle;
+          titleSpan.title = displayTitle;
+          main.append(icon, titleSpan);
+
+          const actions = document.createElement('div');
+          actions.className = 'topic-note-item-actions';
+          const focusBtn = document.createElement('button');
+          focusBtn.type = 'button';
+          focusBtn.className = 'topic-note-item-action';
+          focusBtn.title = 'Mostrar nota';
+          focusBtn.textContent = '👁️';
+          focusBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            focusFloatingNoteById(note.id);
+          });
+
+          const moveBtn = document.createElement('button');
+          moveBtn.type = 'button';
+          moveBtn.className = 'topic-note-item-action';
+          moveBtn.title = 'Mover nota a otro tema';
+          moveBtn.textContent = '↗️';
+          moveBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            showMoveNoteDialog(note.id);
+          });
+
+          const deleteBtn = document.createElement('button');
+          deleteBtn.type = 'button';
+          deleteBtn.className = 'topic-note-item-action danger';
+          deleteBtn.title = 'Eliminar nota';
+          deleteBtn.textContent = '🗑️';
+          deleteBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const element = findFloatingNoteElement(note.id);
+            if (element) {
+              deleteFloatingNote(element);
+            } else {
+              removeNoteData(note.id);
+            }
+          });
+
+          actions.append(focusBtn, moveBtn, deleteBtn);
+          item.append(main, actions);
+          list.appendChild(item);
+        });
+      }
+
+      function refreshActiveTopicNotesMenu() {
+        if (!activeTopicNotesMenu) return;
+        const topicId = activeTopicNotesMenu.dataset.topicId || '';
+        if (!topicId || !findPageByTopicId(topicId)) {
+          closeTopicNotesMenu();
+          return;
+        }
+        if (activeTopicNotesMenuAnchor && !document.body.contains(activeTopicNotesMenuAnchor)) {
+          activeTopicNotesMenuAnchor = null;
+        }
+        renderTopicNotesMenu(activeTopicNotesMenu, topicId);
+        positionTopicNotesMenu(activeTopicNotesMenu, activeTopicNotesMenuAnchor);
+      }
+
+      function focusFloatingNoteById(noteId) {
+        const element = findFloatingNoteElement(noteId);
+        if (!element) return;
+        if (floatingNotesHidden) {
+          setFloatingNotesVisibility(false);
+        }
+        bringNoteToFront(element);
+        element.classList.add('pulse-highlight');
+        setTimeout(() => element.classList.remove('pulse-highlight'), 1600);
+      }
+
+      function createFloatingNoteForTopic(topicId) {
+        const page = findPageByTopicId(topicId);
+        if (!page) {
+          alert('No se pudo encontrar el tema seleccionado para agregar la nota.');
+          return null;
+        }
+        if (floatingNotesHidden) {
+          setFloatingNotesVisibility(false);
+        }
+        const anchor = activeTopicNotesMenuAnchor && activeTopicNotesMenuAnchor.dataset.topicId === topicId
+          ? activeTopicNotesMenuAnchor
+          : page.querySelector('.topic-note-trigger');
+        const viewport = captureActiveTopicViewportContext();
+        const position = getTopicNoteAnchorPosition(anchor);
+        const noteOptions = {
+          topicId,
+          sectionId: page.dataset.sectionId || '',
+          focus: true
+        };
+        if (position) {
+          noteOptions.left = position.left;
+          noteOptions.top = position.top;
+        }
+        if (viewport) {
+          if (Number.isFinite(viewport.pageOffsetTop)) {
+            noteOptions.pageOffsetTop = viewport.pageOffsetTop;
+          }
+          if (Number.isFinite(viewport.relativeTop)) {
+            noteOptions.relativeTop = viewport.relativeTop;
+          }
+        }
+        const note = createFloatingNote(noteOptions);
+        if (note) {
+          bringNoteToFront(note);
+          note.classList.add('pulse-highlight');
+          setTimeout(() => note.classList.remove('pulse-highlight'), 1600);
+        }
+        return note;
+      }
+
+      function openTopicNotesMenu(page, trigger) {
+        if (!page) return;
+        const topicId = (page.dataset.topicId || '').trim();
+        if (!topicId) {
+          alert('Este tema no tiene un identificador válido para notas.');
+          return;
+        }
+        if (activeTopicNotesMenu && activeTopicNotesMenu.dataset.topicId === topicId) {
+          closeTopicNotesMenu();
+          return;
+        }
+        closeTopicNotesMenu();
+        const menu = document.createElement('div');
+        menu.className = 'topic-notes-menu';
+        menu.dataset.topicId = topicId;
+        const menuId = generateUniqueId('topic-notes-menu');
+        menu.id = menuId;
+        menu.setAttribute('role', 'dialog');
+        menu.setAttribute('aria-modal', 'false');
+        menu.tabIndex = -1;
+        if (trigger) {
+          trigger.setAttribute('aria-controls', menuId);
+          trigger.setAttribute('aria-expanded', 'true');
+        }
+
+        const header = document.createElement('div');
+        header.className = 'topic-notes-menu-header';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'topic-notes-menu-title';
+        const countEl = document.createElement('span');
+        countEl.className = 'topic-notes-menu-count';
+        header.append(titleEl, countEl);
+
+        const actions = document.createElement('div');
+        actions.className = 'topic-notes-menu-actions';
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'topic-notes-menu-btn primary';
+        addBtn.textContent = '➕ Nueva nota';
+        const manageBtn = document.createElement('button');
+        manageBtn.type = 'button';
+        manageBtn.className = 'topic-notes-menu-btn';
+        manageBtn.textContent = '📋 Ver en panel';
+        actions.append(addBtn, manageBtn);
+
+        const list = document.createElement('div');
+        list.className = 'topic-notes-menu-list';
+
+        menu.append(header, actions, list);
+        document.body.appendChild(menu);
+
+        activeTopicNotesMenu = menu;
+        activeTopicNotesMenuAnchor = trigger || null;
+
+        addBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          createFloatingNoteForTopic(topicId);
+        });
+
+        manageBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (notesViewController) {
+            notesViewController.open('topic');
+          }
+          closeTopicNotesMenu();
+        });
+
+        renderTopicNotesMenu(menu, topicId);
+        positionTopicNotesMenu(menu, trigger);
+
+        requestAnimationFrame(() => {
+          menu.classList.add('show');
+          menu.focus({ preventScroll: true });
+        });
+
+        document.addEventListener('pointerdown', handleTopicNotesMenuPointerDown, true);
+        document.addEventListener('keydown', handleTopicNotesMenuKeydown, true);
+        window.addEventListener('resize', closeTopicNotesMenu);
+        window.addEventListener('scroll', closeTopicNotesMenu, true);
+      }
+
+      function moveFloatingNoteToTopic(noteId, targetTopicId) {
+        if (!noteId || !targetTopicId) return false;
+        const page = findPageByTopicId(targetTopicId);
+        if (!page) {
+          alert('No se encontró el tema de destino seleccionado.');
+          return false;
+        }
+        const updated = updateNoteData(noteId, {
+          topicId: targetTopicId,
+          sectionId: page.dataset.sectionId || ''
+        });
+        const element = findFloatingNoteElement(noteId);
+        if (element) {
+          syncNoteElementMeta(element, updated);
+        }
+        scheduleFloatingNotesViewportRefresh();
+        return true;
+      }
+
+      function showMoveNoteDialog(noteId) {
+        const noteData = notesRegistry.get(noteId);
+        if (!noteData) return;
+        const topicEntries = sections.flatMap(section =>
+          section.temas.map(tema => ({ section, tema }))
+        );
+        if (topicEntries.length <= 1) {
+          alert('No hay otros temas disponibles para mover la nota.');
+          return;
+        }
+
+        showModal('');
+        const modal = document.createElement('div');
+        modal.className = 'modal note-move-modal';
+
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const title = document.createElement('h3');
+        title.textContent = 'Mover nota a otro tema';
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'modal-close';
+        closeBtn.setAttribute('aria-label', 'Cerrar');
+        closeBtn.textContent = '×';
+        header.append(title, closeBtn);
+
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        const description = document.createElement('p');
+        description.textContent = 'Selecciona el tema de destino para esta nota flotante.';
+        const selectLabel = document.createElement('label');
+        selectLabel.className = 'note-move-label';
+        const selectId = generateUniqueId('note-move-select');
+        selectLabel.setAttribute('for', selectId);
+        selectLabel.textContent = 'Tema destino';
+        const select = document.createElement('select');
+        select.id = selectId;
+        select.className = 'note-move-select';
+        topicEntries.forEach(({ section, tema }) => {
+          const option = document.createElement('option');
+          option.value = tema.id;
+          option.textContent = `${section.nombre} — ${tema.titulo}`;
+          if (tema.id === noteData.topicId) {
+            option.selected = true;
+          }
+          select.appendChild(option);
+        });
+        body.append(description, selectLabel, select);
+
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'modal-btn';
+        cancelBtn.textContent = 'Cancelar';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'modal-btn primary';
+        confirmBtn.textContent = 'Mover nota';
+        footer.append(cancelBtn, confirmBtn);
+
+        modal.append(header, body, footer);
+        modalContent.appendChild(modal);
+
+        const cleanup = () => {
+          hideModal();
+        };
+
+        closeBtn.addEventListener('click', cleanup);
+        cancelBtn.addEventListener('click', cleanup);
+        confirmBtn.addEventListener('click', () => {
+          const targetTopicId = select.value;
+          if (!targetTopicId || targetTopicId === noteData.topicId) {
+            cleanup();
+            return;
+          }
+          const moved = moveFloatingNoteToTopic(noteId, targetTopicId);
+          cleanup();
+          if (moved) {
+            refreshActiveTopicNotesMenu();
+          }
+        });
+      }
 
       /* === NOTAS FLOTANTES === */
       function getFloatingNoteStyle(styleId) {
@@ -6267,6 +6797,7 @@ export function initializeEditor() {
         panelBackdrop.classList.remove('show');
         closeTopbarDropdowns();
         hideTopicMenu();
+        closeTopicNotesMenu();
       }
 
       const escapeAttr = (value) => {
@@ -6662,6 +7193,11 @@ export function initializeEditor() {
             li.appendChild(numSpan);
             li.appendChild(btnMain);
             li.appendChild(titleSpan);
+            const noteIndicator = document.createElement('span');
+            noteIndicator.className = 'topic-note-indicator';
+            noteIndicator.hidden = true;
+            noteIndicator.setAttribute('aria-hidden', 'true');
+            li.appendChild(noteIndicator);
             topicList.appendChild(li);
           });
 
@@ -6709,6 +7245,8 @@ export function initializeEditor() {
             panelTopicCount.title = `${visibleLabel} visibles de ${totalLabel}`;
           }
         }
+
+        refreshTopicNoteIndicators();
       }
 
       function togglePanelEditMode() {
@@ -7794,7 +8332,8 @@ ${inlineStyles}
       magicContainerHtml: magicContainer ? magicContainer.innerHTML : '',
       magicTopics: exportedMagicTopics,
       floatingNotes: exportedNotes,
-      notesHidden: floatingNotesHidden
+      notesHidden: floatingNotesHidden,
+      horizontalShift: documentHorizontalShift
     };
   }
 
@@ -7808,6 +8347,7 @@ ${inlineStyles}
         version: 1,
         savedAt: new Date().toISOString(),
         zoom: isMagicViewActive ? lastRegularZoom : currentZoom,
+        horizontalShift: documentHorizontalShift,
         data: collectDocumentData()
       };
 
@@ -7852,6 +8392,17 @@ ${inlineStyles}
       if (parsed.data) {
         importSectionsData(parsed.data);
         restored = true;
+      }
+
+      const storedShift = typeof parsed.horizontalShift === 'number'
+        ? parsed.horizontalShift
+        : (parsed.data && typeof parsed.data.horizontalShift === 'number'
+          ? parsed.data.horizontalShift
+          : null);
+      if (storedShift !== null) {
+        setDocumentHorizontalShift(storedShift);
+      } else {
+        setDocumentHorizontalShift(documentHorizontalShift);
       }
 
       if (typeof parsed.zoom === 'number') {
@@ -8083,6 +8634,11 @@ ${inlineStyles}
     setupMagicIcons();
     initializeSections();
     buildSectionsPanel();
+    if (typeof data.horizontalShift === 'number') {
+      setDocumentHorizontalShift(data.horizontalShift);
+    } else {
+      setDocumentHorizontalShift(0);
+    }
     if (isEditMode) {
       enableHtmlPaste();
     }
