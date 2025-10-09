@@ -2177,6 +2177,110 @@ body.panel-filter-active .panel-topic-count {
   outline-offset: 4px;
 }
 
+.section-boundary {
+  width: min(75.6rem, calc(100% - 2.4rem));
+  margin: 6rem auto;
+  padding: clamp(2.4rem, 4vw, 3.5rem);
+  box-sizing: border-box;
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.12), rgba(59, 130, 246, 0.12));
+  border-radius: 28px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.16);
+  position: relative;
+  overflow: hidden;
+  scroll-margin-top: calc(var(--topbar-height) + 2.4rem);
+}
+
+.section-boundary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.16), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(circle at 50% 80%, rgba(16, 185, 129, 0.15), transparent 60%);
+  opacity: 0.85;
+}
+
+.section-boundary-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+  text-align: center;
+  min-height: clamp(18rem, 40vh, 26rem);
+  justify-content: center;
+}
+
+.section-boundary-title {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.2vw, 2.1rem);
+  color: #0f172a;
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+
+.section-boundary-description {
+  margin: 0;
+  font-size: clamp(0.98rem, 1.2vw, 1.05rem);
+  line-height: 1.65;
+  color: #334155;
+  max-width: 48rem;
+}
+
+.section-boundary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.section-boundary-continue {
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--theme-primary, #0d6efd), #2563eb);
+  color: #fff;
+  padding: 0.95rem 2.8rem;
+  font-size: 1rem;
+  font-weight: 600;
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.28);
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
+}
+
+.section-boundary-continue:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 24px 46px rgba(30, 64, 175, 0.3);
+}
+
+.section-boundary-continue:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 4px;
+}
+
+@media (max-width: 768px) {
+  .section-boundary {
+    margin: 4rem auto;
+    padding: 2.4rem 1.6rem;
+    border-radius: 22px;
+  }
+
+  .section-boundary-content {
+    min-height: auto;
+    gap: 1.25rem;
+  }
+
+  .section-boundary-actions {
+    width: 100%;
+  }
+
+  .section-boundary-continue {
+    width: 100%;
+  }
+}
+
 /* ===== Icono mágico en el título ===== */
 h1 {
   font-size: 1.714rem;

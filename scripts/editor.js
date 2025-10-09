@@ -84,6 +84,8 @@ export function initializeEditor() {
       const FLOATING_NOTE_MIN_HEIGHT = 140;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
+      let floatingNotesViewportRelaxedMatching = false;
+      let pendingFloatingNotesViewportSync = false;
       let pendingFloatingNoteViewportRefresh = false;
       let pendingTopicNoteIndicatorUpdate = false;
       let cachedActiveTopicViewportState = null;
@@ -91,6 +93,7 @@ export function initializeEditor() {
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
+      const SECTION_BOUNDARY_CLASS = 'section-boundary';
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -3124,6 +3127,70 @@ export function initializeEditor() {
       });
 
       /* === INICIALIZACIÓN === */
+      function rebuildSectionBoundaries() {
+        document.querySelectorAll(`.${SECTION_BOUNDARY_CLASS}`).forEach(boundary => boundary.remove());
+
+        if (!sections.length) {
+          return;
+        }
+
+        sections.forEach((section, index) => {
+          if (index === 0) {
+            return;
+          }
+
+          const firstTopic = section.temas.find(tema => tema?.page && tema.page.isConnected);
+          const firstPage = firstTopic?.page;
+
+          if (!firstPage || !firstPage.parentNode) {
+            return;
+          }
+
+          const boundary = document.createElement('div');
+          boundary.className = SECTION_BOUNDARY_CLASS;
+          boundary.dataset.sectionId = section.id || '';
+          boundary.dataset.sectionName = section.nombre || '';
+
+          const headingId = generateUniqueId('section-boundary-heading');
+          boundary.setAttribute('role', 'region');
+          boundary.setAttribute('aria-labelledby', headingId);
+
+          const content = document.createElement('div');
+          content.className = 'section-boundary-content';
+
+          const title = document.createElement('h2');
+          title.className = 'section-boundary-title';
+          title.id = headingId;
+          title.textContent = section.nombre || 'Siguiente sección';
+
+          const description = document.createElement('p');
+          description.className = 'section-boundary-description';
+          description.textContent = 'Has llegado al límite de la sección anterior. Usa el siguiente control para continuar con la nueva sección.';
+
+          const actions = document.createElement('div');
+          actions.className = 'section-boundary-actions';
+
+          const continueBtn = document.createElement('button');
+          continueBtn.type = 'button';
+          continueBtn.className = 'section-boundary-continue';
+          continueBtn.textContent = 'Entrar a esta sección';
+          continueBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            closePanel();
+            setActivePage(firstPage);
+            scrollPageIntoViewWithOffset(firstPage, 'smooth');
+          });
+
+          actions.appendChild(continueBtn);
+          content.appendChild(title);
+          content.appendChild(description);
+          content.appendChild(actions);
+          boundary.appendChild(content);
+
+          firstPage.parentNode.insertBefore(boundary, firstPage);
+        });
+      }
+
       function initializeSections() {
         const sectionMap = new Map();
         const newThemeMap = new Map(sectionThemes);
@@ -3159,6 +3226,7 @@ export function initializeEditor() {
 
         sectionThemes = newThemeMap;
         sections = Array.from(sectionMap.values());
+        rebuildSectionBoundaries();
       }
 
       pages.forEach(p => {
@@ -4029,17 +4097,99 @@ export function initializeEditor() {
         };
       }
 
-      function applyFloatingNoteTopicVisibility(note) {
+      const FLOATING_NOTE_VIEWPORT_REANCHOR_OFFSET_EPSILON = 2;
+      const FLOATING_NOTE_VIEWPORT_REANCHOR_RATIO_EPSILON = 0.002;
+
+      function consumeFloatingNotesRelaxedMatching() {
+        const shouldRelax = floatingNotesViewportRelaxedMatching;
+        floatingNotesViewportRelaxedMatching = false;
+        return shouldRelax;
+      }
+
+      function syncNoteViewportAnchors(note, viewportState, { force = false } = {}) {
+        if (!note || !viewportState) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId || !notesRegistry.has(noteId)) {
+          return;
+        }
+
+        const currentData = notesRegistry.get(noteId);
+        const updates = {};
+        const hasViewportOffset = Number.isFinite(viewportState.viewportTopOffset);
+        const hasRelativePosition = Number.isFinite(viewportState.relativeCenter);
+
+        if (hasViewportOffset) {
+          const newOffset = Math.round(viewportState.viewportTopOffset);
+          const previousOffset = Number.isFinite(currentData?.pageOffsetTop)
+            ? Math.round(currentData.pageOffsetTop)
+            : Number.parseFloat(note.dataset.pageOffsetTop || '');
+
+          if (
+            force
+            || !Number.isFinite(previousOffset)
+            || Math.abs(previousOffset - newOffset) > FLOATING_NOTE_VIEWPORT_REANCHOR_OFFSET_EPSILON
+          ) {
+            updates.pageOffsetTop = newOffset;
+          }
+          note.dataset.pageOffsetTop = String(newOffset);
+        } else {
+          delete note.dataset.pageOffsetTop;
+          if (Number.isFinite(currentData?.pageOffsetTop)) {
+            updates.pageOffsetTop = null;
+          }
+        }
+
+        if (hasRelativePosition) {
+          const newRelative = Number(Math.max(Math.min(viewportState.relativeCenter, 1), 0).toFixed(4));
+          const previousRelative = Number.isFinite(currentData?.relativeTop)
+            ? Number(currentData.relativeTop)
+            : Number.parseFloat(note.dataset.relativeTop || '');
+
+          if (
+            force
+            || !Number.isFinite(previousRelative)
+            || Math.abs(previousRelative - newRelative) > FLOATING_NOTE_VIEWPORT_REANCHOR_RATIO_EPSILON
+          ) {
+            updates.relativeTop = newRelative;
+          }
+          note.dataset.relativeTop = String(newRelative);
+        } else {
+          delete note.dataset.relativeTop;
+          if (Number.isFinite(currentData?.relativeTop)) {
+            updates.relativeTop = null;
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          const updated = updateNoteData(noteId, updates, { silent: true }) || notesRegistry.get(noteId);
+          if (updated) {
+            if (Number.isFinite(updated.pageOffsetTop)) {
+              note.dataset.pageOffsetTop = String(updated.pageOffsetTop);
+            } else {
+              delete note.dataset.pageOffsetTop;
+            }
+            if (Number.isFinite(updated.relativeTop)) {
+              note.dataset.relativeTop = String(updated.relativeTop);
+            } else {
+              delete note.dataset.relativeTop;
+            }
+          }
+        }
+      }
+
+      function applyFloatingNoteTopicVisibility(note, options = {}) {
         if (!note) return;
+        const { relaxMatching = false } = options;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
         let shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+        let viewportState = null;
 
         if (shouldShow) {
-          const viewportState = getActiveTopicViewportState();
+          viewportState = getActiveTopicViewportState();
           if (!viewportState) {
             shouldShow = false;
-          } else {
+          } else if (!relaxMatching) {
             const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
             const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');
             let positionMatches = true;
@@ -4061,6 +4211,10 @@ export function initializeEditor() {
           }
         }
 
+        if (shouldShow && viewportState) {
+          syncNoteViewportAnchors(note, viewportState, { force: relaxMatching });
+        }
+
         if (!shouldShow && floatingNoteDragState.note === note) {
           endFloatingNoteDrag();
         }
@@ -4074,18 +4228,24 @@ export function initializeEditor() {
         note.classList.toggle('floating-note-visible', shouldShow);
       }
 
-      function refreshFloatingNotesTopicVisibility() {
+      function refreshFloatingNotesTopicVisibility({ relaxMatching = false } = {}) {
         if (!floatingNotesLayer) return;
-        floatingNotesLayer.querySelectorAll('.floating-note').forEach(applyFloatingNoteTopicVisibility);
+        let shouldRelax = !!relaxMatching;
+        if (!shouldRelax) {
+          shouldRelax = consumeFloatingNotesRelaxedMatching();
+        }
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          applyFloatingNoteTopicVisibility(note, { relaxMatching: shouldRelax });
+        });
       }
 
-      function scheduleFloatingNotesViewportRefresh() {
+      function scheduleFloatingNotesViewportRefresh(options = {}) {
         if (pendingFloatingNoteViewportRefresh) return;
         pendingFloatingNoteViewportRefresh = true;
         requestAnimationFrame(() => {
           pendingFloatingNoteViewportRefresh = false;
           invalidateActiveTopicViewportState();
-          refreshFloatingNotesTopicVisibility();
+          refreshFloatingNotesTopicVisibility(options);
         });
       }
 
@@ -5991,6 +6151,19 @@ export function initializeEditor() {
 
       notesViewController = new NotesViewController();
 
+      function requestFloatingNotesViewportSync() {
+        floatingNotesViewportRelaxedMatching = true;
+        if (pendingFloatingNotesViewportSync) {
+          return;
+        }
+        pendingFloatingNotesViewportSync = true;
+        requestAnimationFrame(() => {
+          pendingFloatingNotesViewportSync = false;
+          clampAllFloatingNotes();
+          scheduleFloatingNotesViewportRefresh();
+        });
+      }
+
       notesViewBtn?.addEventListener('click', () => {
         if (!notesViewController) return;
         closeTopicNotesPopover();
@@ -6009,10 +6182,14 @@ export function initializeEditor() {
         }
       });
       window.addEventListener('pointercancel', endFloatingNoteDrag);
-      window.addEventListener('resize', () => {
-        clampAllFloatingNotes();
-        scheduleFloatingNotesViewportRefresh();
-      });
+      window.addEventListener('resize', requestFloatingNotesViewportSync);
+      if (window.visualViewport) {
+        const handleVisualViewportChange = () => {
+          requestFloatingNotesViewportSync();
+        };
+        window.visualViewport.addEventListener('resize', handleVisualViewportChange);
+        window.visualViewport.addEventListener('scroll', handleVisualViewportChange);
+      }
       window.addEventListener('scroll', () => {
         scheduleFloatingNotesViewportRefresh();
         if (isTopicNotesPopoverOpen()) {
@@ -7221,6 +7398,7 @@ export function initializeEditor() {
             updateSectionIndicator(currentPageRef);
           }
           buildSectionsPanel();
+          rebuildSectionBoundaries();
         }
       }
 
@@ -7238,6 +7416,7 @@ export function initializeEditor() {
         if (currentPageRef && !document.body.contains(currentPageRef)) {
           setActivePage(getCurrentPage());
         }
+        rebuildSectionBoundaries();
       }
 
       function clearAllContent() {
@@ -7269,6 +7448,7 @@ export function initializeEditor() {
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
         updateSectionIndicator(null);
+        rebuildSectionBoundaries();
       }
 
       function addNewSection() {
@@ -7285,6 +7465,7 @@ export function initializeEditor() {
         sectionThemes.set(newSection.id, DEFAULT_THEME);
         sections.push(newSection);
         buildSectionsPanel();
+        rebuildSectionBoundaries();
       }
 
       function promptCreateTopicInSection(section) {
