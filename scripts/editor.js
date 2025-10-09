@@ -3914,12 +3914,15 @@ export function initializeEditor() {
           applyFloatingNoteSize(note, parsedWidth, parsedHeight);
         }
 
+        // ✅ CORRECCIÓN APLICADA AQUÍ
         const defaultOffset = (floatingNoteCreationOffset += 40);
         const layerRect = floatingNotesLayer.getBoundingClientRect();
-        const layerPageLeft = layerRect.left + window.scrollX;
-        const layerPageTop = layerRect.top + window.scrollY;
-        const baseViewportLeft = window.scrollX + 80 + (defaultOffset % 160);
-        const baseViewportTop = window.scrollY + 120 + (defaultOffset % 240);
+
+        // ✓ Sin sumar scrollX/scrollY porque la capa es position:fixed
+        const layerPageLeft = layerRect.left;
+        const layerPageTop = layerRect.top;
+        const baseViewportLeft = 80 + (defaultOffset % 160);
+        const baseViewportTop = 120 + (defaultOffset % 240);
         const fallbackLeft = Math.max(0, baseViewportLeft - layerPageLeft);
         const fallbackTop = Math.max(0, baseViewportTop - layerPageTop);
         const initialPosition = resolveFloatingNoteInitialPosition(noteData, fallbackLeft, fallbackTop);
