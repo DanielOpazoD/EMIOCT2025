@@ -1263,6 +1263,70 @@ export function initializeEditor() {
         if (Math.abs(nextZoom - prevZoom) < 0.0001) {
           return;
         }
+
+        const scaleFactor = nextZoom / prevZoom;
+        if (!Number.isFinite(scaleFactor) || Math.abs(scaleFactor - 1) < 0.0001) {
+          scheduleFloatingNotesViewportRefresh();
+          return;
+        }
+
+        const applyScaledPosition = (value) => {
+          if (!Number.isFinite(value)) return value;
+          const scaled = value * scaleFactor;
+          return Number.isFinite(scaled) ? scaled : value;
+        };
+
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          if (!(note instanceof HTMLElement)) {
+            return;
+          }
+
+          const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+          const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+          const nextLeft = applyScaledPosition(currentLeft);
+          const nextTop = applyScaledPosition(currentTop);
+
+          if (Number.isFinite(nextLeft) || Number.isFinite(nextTop)) {
+            positionFloatingNote(
+              note,
+              Number.isFinite(nextLeft) ? nextLeft : currentLeft,
+              Number.isFinite(nextTop) ? nextTop : currentTop
+            );
+          }
+
+          const noteId = note.dataset.noteId;
+          if (!noteId) {
+            return;
+          }
+
+          const registryData = notesRegistry.get(noteId);
+          if (!registryData) {
+            return;
+          }
+
+          const updates = {};
+
+          if (Number.isFinite(registryData.pageOffsetTop)) {
+            const scaledTop = applyScaledPosition(registryData.pageOffsetTop);
+            if (Number.isFinite(scaledTop)) {
+              updates.pageOffsetTop = scaledTop;
+              note.dataset.pageOffsetTop = String(scaledTop);
+            }
+          }
+
+          if (Number.isFinite(registryData.pageOffsetLeft)) {
+            const scaledLeft = applyScaledPosition(registryData.pageOffsetLeft);
+            if (Number.isFinite(scaledLeft)) {
+              updates.pageOffsetLeft = scaledLeft;
+              note.dataset.pageOffsetLeft = String(scaledLeft);
+            }
+          }
+
+          if (Object.keys(updates).length > 0) {
+            updateNoteData(noteId, updates, { silent: true });
+          }
+        });
+
         scheduleFloatingNotesViewportRefresh();
       }
 
