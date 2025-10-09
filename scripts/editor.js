@@ -113,14 +113,16 @@ export function initializeEditor() {
       let sectionThemes = new Map();
       let currentSectionId = '';
       let currentPageRef = null;
+      let panelFilterTerm = '';
+      let panelFilterNormalized = '';
       
       const panel = document.getElementById('topic-panel');
-      const tocPanel = document.getElementById('toc-panel');
       const sectionsContainer = document.getElementById('sectionsContainer');
       const panelTopicCount = document.getElementById('panelTopicCount');
+      const panelSearchInput = document.getElementById('panelSearchInput');
+      const panelSearchClear = document.getElementById('panelSearchClear');
       const plusBtn = document.querySelector('.topbar-plus');
       const panelClose = document.querySelectorAll('.panel-close');
-      const tocClose = document.getElementById('tocClose');
       const panelBackdrop = document.getElementById('panel-backdrop');
       const magic = document.getElementById('magic-view');
       const specialtySpan = document.getElementById('specialtyTitle');
@@ -130,6 +132,24 @@ export function initializeEditor() {
       const addFloatingNoteBtn = document.getElementById('addFloatingNoteBtn');
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
+      const topbar = document.querySelector('.topbar');
+      const topbarToolsToggle = document.getElementById('topbarToolsToggle');
+      const topbarToolsDropdown = document.getElementById('topbarToolsDropdown');
+      const topbarThemeToggle = document.getElementById('topbarThemeToggle');
+      const topbarThemeDropdown = document.getElementById('topbarThemeDropdown');
+      const topbarThemeButtons = topbarThemeDropdown ? Array.from(topbarThemeDropdown.querySelectorAll('[data-theme]')) : [];
+      const magicBackFloating = document.getElementById('magicBackFloating');
+      const AVAILABLE_TOPBAR_THEMES = [
+        'topbar-color-default',
+        'topbar-color-slate',
+        'topbar-color-night',
+        'topbar-color-navy',
+        'topbar-color-sky',
+        'topbar-color-emerald'
+      ];
+      const TOPBAR_THEME_STORAGE_KEY = 'emi2025-topbar-theme';
+      let activeTopbarDropdown = null;
+      let currentTopbarTheme = AVAILABLE_TOPBAR_THEMES[0];
 
       if (typeof ResizeObserver === 'function') {
         floatingNoteResizeObserver = new ResizeObserver((entries) => {
@@ -158,7 +178,6 @@ export function initializeEditor() {
       const importDataInput = document.getElementById('importDataInput');
       const cacheSaveBtn = document.getElementById('cacheSaveBtn');
       const editPanelBtn = document.getElementById('editPanelBtn');
-      const tocBtn = document.getElementById('tocBtn');
       const readingModeBtn = document.getElementById('readingModeBtn');
       const readingModeExit = document.getElementById('readingModeExit');
       const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
@@ -470,7 +489,6 @@ export function initializeEditor() {
         page.dataset.topicTitle = cleanTitle;
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         setupMagicIcons();
         return true;
       }
@@ -522,7 +540,6 @@ export function initializeEditor() {
         pages = pages.filter(p => p !== page);
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         if (currentPageRef === page) {
           setActivePage(getCurrentPage());
         }
@@ -547,7 +564,6 @@ export function initializeEditor() {
         io.observe(clone);
         initializeSections();
         buildSectionsPanel();
-        buildTableOfContents();
         clone.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return clone;
       }
@@ -2570,7 +2586,6 @@ export function initializeEditor() {
         
         if (isReadingMode) {
           closePanel();
-          closeTocPanel();
           if (isEditMode) {
             toggleEditMode();
           }
@@ -2580,58 +2595,108 @@ export function initializeEditor() {
       readingModeBtn?.addEventListener('click', toggleReadingMode);
       readingModeExit?.addEventListener('click', toggleReadingMode);
 
-      /* === TABLA DE CONTENIDOS === */
-      function buildTableOfContents() {
-        const tocList = document.getElementById('tocList');
-        tocList.innerHTML = '';
-        
-        pages.forEach(page => {
-          const headings = page.querySelectorAll('h1, h2, h3');
-          headings.forEach(heading => {
-            const li = document.createElement('li');
-            li.className = `toc-item ${heading.tagName.toLowerCase()}`;
-            
-            // Para h1, obtener solo el texto sin el icono
-            if (heading.tagName === 'H1') {
-              const titleSpan = heading.querySelector('span:first-child');
-              li.textContent = titleSpan ? titleSpan.textContent : heading.textContent;
-            } else {
-              li.textContent = heading.textContent;
-            }
-            
-            li.addEventListener('click', () => {
-              heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              closeTocPanel();
-            });
-            tocList.appendChild(li);
-          });
+      function closeTopbarDropdowns() {
+        if (!activeTopbarDropdown) return;
+        const { trigger, dropdown } = activeTopbarDropdown;
+        dropdown.classList.remove('open');
+        trigger.classList.remove('active');
+        trigger.setAttribute('aria-expanded', 'false');
+        activeTopbarDropdown = null;
+      }
+
+      function toggleTopbarDropdown(trigger, dropdown) {
+        if (!trigger || !dropdown) return;
+        const isCurrent = activeTopbarDropdown?.dropdown === dropdown;
+        if (isCurrent) {
+          closeTopbarDropdowns();
+          return;
+        }
+        closeTopbarDropdowns();
+        dropdown.classList.add('open');
+        trigger.classList.add('active');
+        trigger.setAttribute('aria-expanded', 'true');
+        activeTopbarDropdown = { trigger, dropdown };
+      }
+
+      function applyTopbarTheme(theme, { persist = true } = {}) {
+        if (!topbar) return;
+        const resolved = AVAILABLE_TOPBAR_THEMES.includes(theme) ? theme : AVAILABLE_TOPBAR_THEMES[0];
+        if (currentTopbarTheme !== resolved) {
+          AVAILABLE_TOPBAR_THEMES.forEach(cls => topbar.classList.remove(cls));
+          topbar.classList.add(resolved);
+          currentTopbarTheme = resolved;
+        }
+        topbarThemeButtons.forEach(btn => {
+          const btnTheme = btn.dataset.theme;
+          btn.classList.toggle('active', btnTheme === resolved);
+        });
+        if (persist) {
+          try {
+            window.localStorage?.setItem(TOPBAR_THEME_STORAGE_KEY, resolved);
+          } catch (error) {
+            console.warn('No se pudo guardar la preferencia de la barra:', error);
+          }
+        }
+      }
+
+      if (topbarToolsToggle && topbarToolsDropdown) {
+        topbarToolsToggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTopbarDropdown(topbarToolsToggle, topbarToolsDropdown);
+        });
+        topbarToolsDropdown.addEventListener('click', (event) => {
+          event.stopPropagation();
+          requestAnimationFrame(() => closeTopbarDropdowns());
         });
       }
 
-      function openTocPanel() {
-        buildTableOfContents();
-        tocPanel.classList.add('open');
-        panelBackdrop.classList.add('show');
+      if (topbarThemeToggle && topbarThemeDropdown) {
+        topbarThemeToggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTopbarDropdown(topbarThemeToggle, topbarThemeDropdown);
+        });
+        topbarThemeDropdown.addEventListener('click', (event) => event.stopPropagation());
       }
 
-      function closeTocPanel() {
-        tocPanel.classList.remove('open');
-        if (!panel.classList.contains('open')) {
-          panelBackdrop.classList.remove('show');
-        }
-        hideTopicMenu();
-      }
-
-      tocBtn?.addEventListener('click', () => {
-        if (tocPanel.classList.contains('open')) {
-          closeTocPanel();
-        } else {
-          closePanel();
-          openTocPanel();
-        }
+      topbarThemeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const { theme } = btn.dataset;
+          if (theme) {
+            applyTopbarTheme(theme, { persist: true });
+          }
+          closeTopbarDropdowns();
+        });
       });
 
-      tocClose?.addEventListener('click', closeTocPanel);
+      if (topbar) {
+        let storedTheme = null;
+        try {
+          storedTheme = window.localStorage?.getItem(TOPBAR_THEME_STORAGE_KEY) || null;
+        } catch (error) {
+          console.warn('No se pudo cargar la preferencia de la barra:', error);
+        }
+        const fallbackTheme = topbarThemeButtons.find(btn => AVAILABLE_TOPBAR_THEMES.includes(btn.dataset.theme))?.dataset.theme
+          || AVAILABLE_TOPBAR_THEMES[0];
+        const themeToApply = storedTheme && AVAILABLE_TOPBAR_THEMES.includes(storedTheme)
+          ? storedTheme
+          : fallbackTheme;
+        applyTopbarTheme(themeToApply, { persist: false });
+      }
+
+      document.addEventListener('click', () => {
+        closeTopbarDropdowns();
+      });
+
+      if (magicBackFloating) {
+        magicBackFloating.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (magicBackFloating.disabled) return;
+          returnFromMagicView();
+        });
+        setMagicFloatingBackVisibility(false);
+      }
 
       /* === EXPORTAR MARKDOWN === */
       exportMarkdownBtn?.addEventListener('click', () => {
@@ -3602,15 +3667,7 @@ export function initializeEditor() {
         const tagsContainer = document.createElement('div');
         tagsContainer.className = 'note-tags';
 
-        const metaContainer = document.createElement('div');
-        metaContainer.className = 'note-meta';
-        const dateSpan = document.createElement('span');
-        dateSpan.className = 'note-date';
-        const reviewStatus = document.createElement('span');
-        reviewStatus.className = 'note-review-status';
-        metaContainer.append(dateSpan, reviewStatus);
-
-        footer.append(tagsContainer, metaContainer);
+        footer.append(tagsContainer);
 
         note.append(header, body, footer);
         floatingNotesLayer.appendChild(note);
@@ -3621,8 +3678,6 @@ export function initializeEditor() {
           categoryWrap,
           priorityBtn,
           tagsContainer,
-          dateSpan,
-          reviewStatus,
           optionsMenu
         };
 
@@ -4087,55 +4142,9 @@ export function initializeEditor() {
             ui.tagsContainer.appendChild(span);
           });
         }
-        if (ui.dateSpan) {
-          ui.dateSpan.textContent = noteData.updatedAt ? formatRelativeTime(noteData.updatedAt) : '';
-        }
-        if (ui.reviewStatus) {
-          const count = Number(noteData.reviewCount) || 0;
-          ui.reviewStatus.textContent = `📖 ${count}`;
-        }
         if (ui.optionsMenu) {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
-      }
-
-      function formatRelativeTime(isoString) {
-        if (!isoString) return '';
-        const date = new Date(isoString);
-        if (Number.isNaN(date.getTime())) return '';
-        const diffMs = Date.now() - date.getTime();
-        const thresholds = {
-          minute: 60,
-          hour: 60,
-          day: 24,
-          month: 30,
-          year: 12
-        };
-        const rtf = typeof Intl !== 'undefined' && Intl.RelativeTimeFormat
-          ? new Intl.RelativeTimeFormat('es', { numeric: 'auto' })
-          : null;
-        const seconds = Math.round(diffMs / 1000);
-        if (Math.abs(seconds) < 60) {
-          return rtf ? rtf.format(-seconds, 'second') : 'Hace unos segundos';
-        }
-        const minutes = Math.round(seconds / thresholds.minute);
-        if (Math.abs(minutes) < 60) {
-          return rtf ? rtf.format(-minutes, 'minute') : `Hace ${minutes} min`;
-        }
-        const hours = Math.round(minutes / thresholds.hour);
-        if (Math.abs(hours) < 24) {
-          return rtf ? rtf.format(-hours, 'hour') : `Hace ${hours} h`;
-        }
-        const days = Math.round(hours / thresholds.day);
-        if (Math.abs(days) < 30) {
-          return rtf ? rtf.format(-days, 'day') : `Hace ${days} d`;
-        }
-        const months = Math.round(days / thresholds.month);
-        if (Math.abs(months) < 12) {
-          return rtf ? rtf.format(-months, 'month') : `Hace ${months} meses`;
-        }
-        const years = Math.round(months / thresholds.year);
-        return rtf ? rtf.format(-years, 'year') : `Hace ${years} años`;
       }
 
       function formatDateTime(isoString) {
@@ -5289,16 +5298,22 @@ export function initializeEditor() {
 
       /* === PANEL LATERAL === */
       function openPanel() {
+        closeTopbarDropdowns();
         buildSectionsPanel();
         panel.classList.add('open');
         panelBackdrop.classList.add('show');
+        if (panelSearchInput) {
+          requestAnimationFrame(() => {
+            panelSearchInput.focus();
+            panelSearchInput.select();
+          });
+        }
       }
 
       function closePanel() {
         panel.classList.remove('open');
-        if (!tocPanel.classList.contains('open')) {
-          panelBackdrop.classList.remove('show');
-        }
+        panelBackdrop.classList.remove('show');
+        closeTopbarDropdowns();
         hideTopicMenu();
       }
 
@@ -5309,6 +5324,27 @@ export function initializeEditor() {
         }
         return value.replace(/[^a-zA-Z0-9_\-]/g, (char) => `\\${char}`);
       };
+
+      const normalizeForSearch = (value = '') =>
+        value
+          .toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      function setPanelFilter(value) {
+        panelFilterTerm = value ?? '';
+        panelFilterNormalized = normalizeForSearch(panelFilterTerm);
+        if (panelSearchClear) {
+          panelSearchClear.hidden = !panelFilterNormalized;
+        }
+        if (panelSearchInput) {
+          panelSearchInput.classList.toggle('has-value', Boolean(panelFilterNormalized));
+        }
+        buildSectionsPanel();
+      }
 
       function magicAnchorFor(page) {
         if (!page) return '';
@@ -5433,6 +5469,29 @@ export function initializeEditor() {
         afterContentSanitize(activeMagicSource);
       }
 
+      function setMagicFloatingBackVisibility(visible, disabled = false) {
+        if (!magicBackFloating) return;
+        if (visible) {
+          magicBackFloating.classList.add('visible');
+          magicBackFloating.removeAttribute('aria-hidden');
+          magicBackFloating.disabled = !!disabled;
+        } else {
+          magicBackFloating.classList.remove('visible');
+          magicBackFloating.setAttribute('aria-hidden', 'true');
+          magicBackFloating.disabled = false;
+        }
+      }
+
+      function returnFromMagicView() {
+        const targetPage = activeMagicPage;
+        closeMagicView();
+        if (targetPage && document.contains(targetPage)) {
+          targetPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          targetPage.classList.add('pulse-highlight');
+          setTimeout(() => targetPage.classList.remove('pulse-highlight'), 1600);
+        }
+      }
+
       function closeMagicView() {
         persistMagicEdits();
         if (isMagicViewActive) {
@@ -5449,6 +5508,7 @@ export function initializeEditor() {
         activeMagicSource = null;
         activeMagicWrapper = null;
         activeMagicPage = null;
+        setMagicFloatingBackVisibility(false);
       }
 
       function activateMagicTopic(anchorId, title, pageRef = null) {
@@ -5460,30 +5520,12 @@ export function initializeEditor() {
         isMagicViewActive = true;
         applyZoom(1, { skipRemember: true });
         magic.innerHTML = '';
-        const header = document.createElement('div');
-        header.className = 'magic-header';
-        const headerTitle = document.createElement('strong');
-        headerTitle.textContent = '✨ Visor del tema';
-        header.appendChild(headerTitle);
-
-        const headerActions = document.createElement('div');
-        headerActions.className = 'magic-header-actions';
-
-        const backBtn = document.createElement('button');
-        backBtn.type = 'button';
-        backBtn.className = 'magic-back';
-        backBtn.innerHTML = '↩️ Volver al tema';
-        backBtn.disabled = !pageRef;
-        headerActions.appendChild(backBtn);
-
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'magic-close';
-        closeBtn.innerHTML = '&times;';
-        headerActions.appendChild(closeBtn);
-
-        header.appendChild(headerActions);
-        magic.appendChild(header);
+        closeBtn.setAttribute('aria-label', 'Cerrar visor mágico');
+        closeBtn.innerHTML = '<span aria-hidden="true">&times;</span>';
+        magic.appendChild(closeBtn);
         const magicPage = document.createElement('div');
         magicPage.className = 'magic-page';
 
@@ -5502,6 +5544,7 @@ export function initializeEditor() {
         activeMagicSource = src;
         activeMagicWrapper = wrapper;
         activeMagicPage = pageRef || null;
+        setMagicFloatingBackVisibility(true, !pageRef);
 
         if (isEditMode) {
           magicPage.contentEditable = 'true';
@@ -5510,15 +5553,6 @@ export function initializeEditor() {
 
         closeBtn.addEventListener('click', () => {
           closeMagicView();
-        });
-
-        backBtn.addEventListener('click', () => {
-          closeMagicView();
-          if (pageRef && document.contains(pageRef)) {
-            pageRef.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            pageRef.classList.add('pulse-highlight');
-            setTimeout(() => pageRef.classList.remove('pulse-highlight'), 1600);
-          }
         });
         syncMagicZoom();
         magic.classList.add('open');
@@ -5531,15 +5565,33 @@ export function initializeEditor() {
         sectionsContainer.innerHTML = '';
         globalTopicCounter = 1;
         let totalTopics = 0;
-        
-        sections.forEach((section, sectionIdx) => {
+        let renderedTopics = 0;
+        let matchedTopics = 0;
+        let renderedSections = 0;
+        const hasFilter = Boolean(panelFilterNormalized);
+
+        sections.forEach((section) => {
+          totalTopics += section.temas.length;
+
+          const sectionMatch = hasFilter && normalizeForSearch(section.nombre || '').includes(panelFilterNormalized);
+          const topicMatches = hasFilter
+            ? section.temas.filter((tema) => normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized))
+            : section.temas;
+
+          if (hasFilter && !sectionMatch && topicMatches.length === 0) {
+            return;
+          }
+
+          renderedSections++;
+
           const sectionDiv = document.createElement('div');
           sectionDiv.className = 'section-item';
           if (section.collapsed) sectionDiv.classList.add('collapsed');
-          
+          if (sectionMatch) sectionDiv.classList.add('matches-filter');
+
           const sectionHeader = document.createElement('div');
           sectionHeader.className = 'section-header';
-          
+
           const toggle = document.createElement('span');
           toggle.className = 'section-toggle';
           toggle.textContent = '▼';
@@ -5547,7 +5599,7 @@ export function initializeEditor() {
             section.collapsed = !section.collapsed;
             sectionDiv.classList.toggle('collapsed');
           });
-          
+
           const nameSpan = document.createElement('span');
           nameSpan.className = 'section-name';
           nameSpan.textContent = section.nombre;
@@ -5555,15 +5607,14 @@ export function initializeEditor() {
             section.collapsed = !section.collapsed;
             sectionDiv.classList.toggle('collapsed');
           });
-          
+
           const countSpan = document.createElement('span');
           countSpan.className = 'section-count';
           countSpan.textContent = `(${section.temas.length})`;
-          totalTopics += section.temas.length;
-          
+
           const actionsDiv = document.createElement('div');
           actionsDiv.className = 'section-actions';
-          
+
           const printBtn = document.createElement('button');
           printBtn.className = 'section-action-btn';
           printBtn.textContent = '🖨️';
@@ -5572,7 +5623,7 @@ export function initializeEditor() {
             e.stopPropagation();
             printSection(section);
           });
-          
+
           if (isPanelEditMode) {
             const renameBtn = document.createElement('button');
             renameBtn.className = 'section-action-btn';
@@ -5582,7 +5633,7 @@ export function initializeEditor() {
               e.stopPropagation();
               renameSection(section);
             });
-            
+
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'section-action-btn';
             deleteBtn.textContent = '🗑️';
@@ -5592,73 +5643,117 @@ export function initializeEditor() {
               e.stopPropagation();
               deleteSection(section);
             });
-            
+
             actionsDiv.appendChild(renameBtn);
             actionsDiv.appendChild(deleteBtn);
           }
-          
+
           actionsDiv.appendChild(printBtn);
-          
+
           sectionHeader.appendChild(toggle);
           sectionHeader.appendChild(nameSpan);
           sectionHeader.appendChild(countSpan);
           sectionHeader.appendChild(actionsDiv);
-          
+
           const topicList = document.createElement('ol');
           topicList.className = 'topic-list';
-          
-          section.temas.forEach(tema => {
+          const topicsToRender = hasFilter && !sectionMatch ? topicMatches : section.temas;
+          renderedTopics += topicsToRender.length;
+          if (hasFilter) {
+            matchedTopics += topicMatches.length;
+          }
+
+          topicsToRender.forEach((tema) => {
             const li = document.createElement('li');
             li.dataset.topicId = tema.id;
-            
+
             const numSpan = document.createElement('span');
             numSpan.className = 'topic-number';
-            numSpan.textContent = globalTopicCounter + '.';
+            numSpan.textContent = `${globalTopicCounter}.`;
             globalTopicCounter++;
-            
-          const btnMain = document.createElement('button');
-          btnMain.className = 'topic-action';
-          btnMain.title = 'Ir al tema';
-          btnMain.textContent = '📄';
-          const openTopic = () => {
-            if (!tema.page || !tema.page.isConnected) return;
-            closeMagicView();
-            closePanel();
-            closeTocPanel();
-            tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          };
 
-          btnMain.addEventListener('click', openTopic);
+            const btnMain = document.createElement('button');
+            btnMain.className = 'topic-action';
+            btnMain.title = 'Ir al tema';
+            btnMain.textContent = '📄';
+            const openTopic = () => {
+              if (!tema.page || !tema.page.isConnected) return;
+              closeMagicView();
+              closePanel();
+              tema.page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
 
-          const titleSpan = document.createElement('span');
-          titleSpan.className = 'topic-title';
-          titleSpan.textContent = tema.titulo;
-          titleSpan.title = 'Doble clic para opciones del tema';
-          titleSpan.addEventListener('dblclick', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            showTopicMenu(event, tema);
+            btnMain.addEventListener('click', openTopic);
+
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'topic-title';
+            titleSpan.textContent = tema.titulo;
+            titleSpan.title = 'Doble clic para opciones del tema';
+            titleSpan.addEventListener('dblclick', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              showTopicMenu(event, tema);
+            });
+            titleSpan.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openTopic();
+            });
+
+            if (hasFilter) {
+              const topicMatchesFilter = normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized);
+              li.classList.toggle('matches-filter', topicMatchesFilter);
+            }
+
+            li.appendChild(numSpan);
+            li.appendChild(btnMain);
+            li.appendChild(titleSpan);
+            topicList.appendChild(li);
           });
-          titleSpan.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openTopic();
-          });
 
-          li.appendChild(numSpan);
-          li.appendChild(btnMain);
-          li.appendChild(titleSpan);
-          topicList.appendChild(li);
-        });
-          
           sectionDiv.appendChild(sectionHeader);
           sectionDiv.appendChild(topicList);
           sectionsContainer.appendChild(sectionDiv);
         });
 
+        document.body.classList.toggle('panel-filter-active', hasFilter);
+
+        if (renderedSections === 0) {
+          const emptyState = document.createElement('div');
+          emptyState.className = 'panel-empty';
+          const term = escapeHtml(panelFilterTerm.trim());
+          emptyState.innerHTML = term
+            ? `<p>No encontramos coincidencias para <strong>“${term}”</strong>.</p>`
+            : '<p>Aún no hay secciones creadas.</p>';
+          if (hasFilter) {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'panel-empty-reset';
+            clearBtn.textContent = 'Limpiar búsqueda';
+            clearBtn.addEventListener('click', () => {
+              if (panelSearchInput) {
+                panelSearchInput.value = '';
+              }
+              setPanelFilter('');
+              panelSearchInput?.focus();
+            });
+            emptyState.appendChild(clearBtn);
+          }
+          sectionsContainer.appendChild(emptyState);
+        }
+
         if (panelTopicCount) {
-          const label = totalTopics === 1 ? '1 tema' : `${totalTopics} temas`;
-          panelTopicCount.textContent = label;
+          if (!hasFilter) {
+            const label = totalTopics === 1 ? '1 tema' : `${totalTopics} temas`;
+            panelTopicCount.textContent = label;
+            panelTopicCount.title = '';
+          } else {
+            const visibleLabel = renderedTopics === 1 ? '1 tema' : `${renderedTopics} temas`;
+            const totalLabel = totalTopics === 1 ? '1 tema total' : `${totalTopics} temas totales`;
+            const matchesLabel = matchedTopics === 1 ? '1 coincidencia' : `${matchedTopics} coincidencias`;
+            panelTopicCount.textContent = `${visibleLabel} · ${matchesLabel}`;
+            panelTopicCount.title = `${visibleLabel} visibles de ${totalLabel}`;
+          }
         }
       }
 
@@ -5715,7 +5810,6 @@ export function initializeEditor() {
         closeMagicView();
         hideTopicMenu();
         closePanel();
-        closeTocPanel();
         io.disconnect();
         pages.forEach(page => page.remove());
         pages = [];
@@ -5734,7 +5828,6 @@ export function initializeEditor() {
         setFloatingNotesVisibility(false);
         setFloatingNotesEditable(isEditMode);
         buildSectionsPanel();
-        buildTableOfContents();
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
         updateSectionIndicator(null);
@@ -5828,6 +5921,30 @@ export function initializeEditor() {
       document.getElementById('sortAlphaBtn')?.addEventListener('click', sortSectionsAlpha);
       document.getElementById('sortNumBtn')?.addEventListener('click', sortSectionsNumeric);
       document.getElementById('printCurrentBtn')?.addEventListener('click', printCurrentTopic);
+      panelSearchInput?.addEventListener('input', (event) => {
+        setPanelFilter(event.target.value);
+      });
+      panelSearchInput?.addEventListener('search', (event) => {
+        setPanelFilter(event.target.value);
+      });
+      panelSearchInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          panelSearchInput.value = '';
+          setPanelFilter('');
+          panelSearchInput.blur();
+        }
+      });
+      if (panelSearchClear) {
+        panelSearchClear.hidden = true;
+        panelSearchClear.addEventListener('click', () => {
+          if (panelSearchInput) {
+            panelSearchInput.value = '';
+            panelSearchInput.focus();
+          }
+          setPanelFilter('');
+        });
+      }
       clearAllBtn?.addEventListener('click', clearAllContent);
 
       const io = new IntersectionObserver((entries) => {
@@ -5846,23 +5963,20 @@ export function initializeEditor() {
         if (panel.classList.contains('open')) {
           closePanel();
         } else {
-          closeTocPanel();
           openPanel();
         }
       });
       panelClose.forEach(btn => btn.addEventListener('click', () => {
         closePanel();
-        closeTocPanel();
       }));
       panelBackdrop?.addEventListener('click', () => {
         closePanel();
-        closeTocPanel();
       });
-      
+
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
           closePanel();
-          closeTocPanel();
+          closeTopbarDropdowns();
           notesViewController?.close();
           hideModal();
           hideImageToolbar();
@@ -6740,7 +6854,6 @@ ${inlineStyles}
     setupMagicIcons();
     initializeSections();
     buildSectionsPanel();
-    buildTableOfContents();
     if (isEditMode) {
       enableHtmlPaste();
     }
@@ -7020,7 +7133,6 @@ ${inlineStyles}
       setupMagicIcons();
       initializeSections();
       buildSectionsPanel();
-      buildTableOfContents();
 
       if (isEditMode) {
         pages.forEach(page => page.contentEditable = 'true');
@@ -7078,7 +7190,6 @@ ${inlineStyles}
   const restoredFromCache = restoreFromLocalCache();
   if (!restoredFromCache) {
     buildSectionsPanel();
-    buildTableOfContents();
     applyZoom(currentZoom);
   }
 
