@@ -1338,7 +1338,27 @@ export function initializeEditor() {
         if (Math.abs(nextZoom - prevZoom) < 0.0001) {
           return;
         }
-        scheduleFloatingNotesViewportRefresh();
+        const ratio = nextZoom / prevZoom;
+        if (!Number.isFinite(ratio) || ratio <= 0) {
+          scheduleFloatingNotesViewportRefresh();
+          return;
+        }
+
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          const noteId = note.dataset.noteId;
+          const currentOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
+          if (!Number.isFinite(currentOffset)) {
+            return;
+          }
+          const adjustedOffset = Math.round(currentOffset * ratio);
+          note.dataset.pageOffsetTop = String(adjustedOffset);
+          if (noteId) {
+            updateNoteData(noteId, { pageOffsetTop: adjustedOffset }, { silent: true });
+          }
+        });
+
+        floatingNotesViewportRelaxedMatching = true;
+        scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
       }
 
       function applyDocumentShift() {
