@@ -85,6 +85,7 @@ export function initializeEditor() {
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let pendingFloatingNoteViewportRefresh = false;
+      let pendingTopicNoteIndicatorUpdate = false;
       let cachedActiveTopicViewportState = null;
       let documentHorizontalShift = 0;
       const DOCUMENT_SHIFT_STEP = 80;
@@ -286,6 +287,7 @@ export function initializeEditor() {
       }
 
       function scheduleNotesViewRefresh() {
+        scheduleTopicNoteIndicatorRefresh();
         if (!notesViewController) return;
         if (pendingNotesViewUpdate) return;
         pendingNotesViewUpdate = true;
@@ -341,6 +343,7 @@ export function initializeEditor() {
 
       function setActivePage(page) {
         if (!page) {
+          closeTopicNotesPopover();
           currentPageRef = null;
           currentSectionId = '';
           updateSectionIndicator(null);
@@ -350,6 +353,10 @@ export function initializeEditor() {
           refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
           return;
+        }
+        const nextTopicId = page.dataset.topicId || '';
+        if (isTopicNotesPopoverOpen() && topicNotesPopoverTopicId && topicNotesPopoverTopicId !== nextTopicId) {
+          closeTopicNotesPopover();
         }
         currentPageRef = page;
         const sectionId = page.dataset.sectionId || 'seccion-default';
@@ -582,6 +589,410 @@ export function initializeEditor() {
 
       let topicMenuContext = null;
       let topicMenuJustOpened = false;
+
+      const topicNotesPopover = document.createElement('div');
+      topicNotesPopover.id = 'topicNotesPopover';
+      topicNotesPopover.className = 'topic-notes-popover';
+      topicNotesPopover.setAttribute('aria-hidden', 'true');
+      topicNotesPopover.innerHTML = `
+        <div class="topic-notes-header">
+          <span class="topic-notes-title" data-topic-notes-title></span>
+          <button type="button" class="topic-notes-close" data-topic-notes-close aria-label="Cerrar panel de notas">✕</button>
+        </div>
+        <div class="topic-notes-actions">
+          <button type="button" class="topic-notes-add" data-topic-notes-add>➕ Nueva nota</button>
+          <button type="button" class="topic-notes-open-panel" data-topic-notes-open-panel>📚 Ver notas</button>
+        </div>
+        <div class="topic-notes-empty" data-topic-notes-empty>Este tema aún no tiene notas.</div>
+        <div class="topic-notes-list" data-topic-notes-list role="list"></div>
+      `;
+      topicNotesPopover.setAttribute('role', 'dialog');
+      topicNotesPopover.setAttribute('aria-modal', 'false');
+      document.body.appendChild(topicNotesPopover);
+
+      const topicNotesTitleEl = topicNotesPopover.querySelector('[data-topic-notes-title]');
+      const topicNotesListEl = topicNotesPopover.querySelector('[data-topic-notes-list]');
+      const topicNotesEmptyEl = topicNotesPopover.querySelector('[data-topic-notes-empty]');
+      const topicNotesAddBtn = topicNotesPopover.querySelector('[data-topic-notes-add]');
+      const topicNotesOpenPanelBtn = topicNotesPopover.querySelector('[data-topic-notes-open-panel]');
+      const topicNotesCloseBtn = topicNotesPopover.querySelector('[data-topic-notes-close]');
+      let topicNotesAnchor = null;
+      let topicNotesPopoverTopicId = '';
+
+      if (topicNotesTitleEl) {
+        topicNotesTitleEl.id = 'topicNotesPopoverTitle';
+        topicNotesPopover.setAttribute('aria-labelledby', topicNotesTitleEl.id);
+      }
+
+      function isTopicNotesPopoverOpen() {
+        return topicNotesPopover.classList.contains('open');
+      }
+
+      function closeTopicNotesPopover() {
+        if (topicNotesAnchor) {
+          topicNotesAnchor.classList.remove('is-open');
+          topicNotesAnchor.setAttribute('aria-expanded', 'false');
+        }
+        topicNotesAnchor = null;
+        topicNotesPopoverTopicId = '';
+        topicNotesPopover.classList.remove('open');
+        topicNotesPopover.removeAttribute('data-topic-id');
+        topicNotesPopover.setAttribute('aria-hidden', 'true');
+      }
+
+      function positionTopicNotesPopover(anchor) {
+        if (!anchor || !isTopicNotesPopoverOpen()) return;
+        const anchorRect = anchor.getBoundingClientRect();
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const popRect = topicNotesPopover.getBoundingClientRect();
+        let left = anchorRect.right + 12;
+        let top = anchorRect.top - 6;
+        if (left + popRect.width > viewportWidth - 12) {
+          left = Math.max(12, anchorRect.left - popRect.width - 12);
+        }
+        if (left < 12) {
+          left = 12;
+        }
+        if (top + popRect.height > viewportHeight - 12) {
+          top = Math.max(12, viewportHeight - popRect.height - 12);
+        }
+        if (top < 12) {
+          top = 12;
+        }
+        topicNotesPopover.style.left = `${Math.round(left)}px`;
+        topicNotesPopover.style.top = `${Math.round(top)}px`;
+      }
+
+      function collectTopicNoteCounts() {
+        const counts = new Map();
+        notesRegistry.forEach(note => {
+          if (!note || note.type !== NOTE_TYPES.FLOATING) return;
+          const topicId = note.topicId ? String(note.topicId).trim() : '';
+          if (!topicId) return;
+          counts.set(topicId, (counts.get(topicId) || 0) + 1);
+        });
+        return counts;
+      }
+
+      function getTopicNotesForTopic(topicId) {
+        if (!topicId) return [];
+        const notes = [];
+        notesRegistry.forEach(note => {
+          if (!note || note.type !== NOTE_TYPES.FLOATING) return;
+          const noteTopic = note.topicId ? String(note.topicId).trim() : '';
+          if (noteTopic === topicId) {
+            notes.push(note);
+          }
+        });
+        notes.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+        return notes;
+      }
+
+      function focusFloatingNoteById(noteId) {
+        if (!noteId || !floatingNotesLayer) return;
+        let element = floatingNotesLayer.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteId)}"]`);
+        const noteData = notesRegistry.get(noteId);
+        if (!element && noteData) {
+          element = createFloatingNote({ id: noteData.id, meta: noteData, focus: true });
+        }
+        if (!element) return;
+        if (floatingNotesHidden) {
+          setFloatingNotesVisibility(false);
+        }
+        bringNoteToFront(element);
+        element.classList.add('pulse-highlight');
+        setTimeout(() => element.classList.remove('pulse-highlight'), 1600);
+      }
+
+      function promptMoveNoteToTopic(noteData) {
+        if (!noteData) return;
+        const topics = [];
+        sections.forEach(section => {
+          section.temas.forEach(tema => {
+            const label = `${section.nombre || 'Sección'} › ${tema.titulo || 'Tema'}`;
+            topics.push({
+              id: tema.id,
+              label,
+              sectionId: section.id
+            });
+          });
+        });
+        if (!topics.length) {
+          alert('No hay temas disponibles para mover la nota.');
+          return;
+        }
+        const currentTopic = topics.find(topic => topic.id === noteData.topicId);
+        const options = topics.map((topic, index) => `${index + 1}. ${topic.label}`).join('\n');
+        const response = prompt(
+          `Mover nota a tema:\n${options}\nEscribe el número o el nombre del tema destino:`,
+          currentTopic ? currentTopic.label : ''
+        );
+        if (response === null) {
+          return;
+        }
+        const trimmed = response.trim();
+        if (!trimmed) {
+          return;
+        }
+        let target = null;
+        const numeric = Number.parseInt(trimmed, 10);
+        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= topics.length) {
+          target = topics[numeric - 1];
+        }
+        if (!target) {
+          target = topics.find(topic => topic.label.toLowerCase() === trimmed.toLowerCase());
+        }
+        if (!target) {
+          alert('No se encontró el tema especificado.');
+          return;
+        }
+        if (target.id === noteData.topicId) {
+          alert('La nota ya pertenece a ese tema.');
+          return;
+        }
+        const updated = updateNoteData(noteData.id, { topicId: target.id, sectionId: target.sectionId });
+        const element = floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteData.id)}"]`);
+        if (element) {
+          syncNoteElementMeta(element, updated);
+          applyFloatingNoteTopicVisibility(element);
+        }
+        scheduleFloatingNotesViewportRefresh();
+        scheduleNotesViewRefresh();
+        const targetPage = findPageByTopicId(target.id);
+        if (targetPage) {
+          const message = `Nota movida a "${target.label}".`;
+          console.info(message);
+        }
+      }
+
+      function createTopicNoteListItem(noteData) {
+        const item = document.createElement('div');
+        item.className = 'topic-notes-item';
+        item.setAttribute('role', 'listitem');
+        item.dataset.noteId = noteData.id;
+
+        const text = document.createElement('div');
+        text.className = 'topic-notes-item-text';
+
+        const category = getNoteCategoryInfo(noteData.category);
+        const displayTitle = getNoteDisplayTitle(noteData.title, '');
+        const titleLine = document.createElement('div');
+        titleLine.className = 'topic-notes-item-title';
+        titleLine.textContent = displayTitle ? `${category.icon} ${displayTitle}` : category.icon;
+        text.appendChild(titleLine);
+
+        const snippetContent = getNotePlainTextFromHtml(noteData.html || noteData.content || '').replace(/[\s\u00A0]+/g, ' ').trim();
+        if (snippetContent) {
+          const snippet = document.createElement('div');
+          snippet.className = 'topic-notes-item-snippet';
+          snippet.textContent = snippetContent.length > 140 ? snippetContent.slice(0, 140) + '…' : snippetContent;
+          text.appendChild(snippet);
+        }
+
+        item.appendChild(text);
+
+        const actions = document.createElement('div');
+        actions.className = 'topic-notes-item-actions';
+
+        const viewBtn = document.createElement('button');
+        viewBtn.type = 'button';
+        viewBtn.className = 'topic-notes-item-action';
+        viewBtn.title = 'Mostrar nota';
+        viewBtn.textContent = '👁️';
+        viewBtn.addEventListener('click', () => {
+          focusFloatingNoteById(noteData.id);
+        });
+        actions.appendChild(viewBtn);
+
+        const moveBtn = document.createElement('button');
+        moveBtn.type = 'button';
+        moveBtn.className = 'topic-notes-item-action';
+        moveBtn.title = 'Mover a otro tema';
+        moveBtn.textContent = '↔️';
+        moveBtn.addEventListener('click', () => {
+          promptMoveNoteToTopic(noteData);
+          if (topicNotesPopoverTopicId) {
+            renderTopicNotesPopover(topicNotesPopoverTopicId);
+          }
+        });
+        actions.appendChild(moveBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'topic-notes-item-action topic-notes-item-danger';
+        deleteBtn.title = 'Eliminar nota';
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.addEventListener('click', () => {
+          if (!confirm('¿Eliminar esta nota?')) return;
+          const element = floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteData.id)}"]`);
+          if (element) {
+            deleteFloatingNote(element);
+          } else {
+            removeNoteAnchor(noteData.id);
+            removeNoteData(noteData.id);
+            scheduleNotesViewRefresh();
+          }
+          if (topicNotesPopoverTopicId) {
+            renderTopicNotesPopover(topicNotesPopoverTopicId);
+          }
+        });
+        actions.appendChild(deleteBtn);
+
+        item.appendChild(actions);
+        return item;
+      }
+
+      function renderTopicNotesPopover(topicId) {
+        if (!topicNotesListEl || !topicNotesEmptyEl) return;
+        const notes = getTopicNotesForTopic(topicId);
+        topicNotesListEl.innerHTML = '';
+        if (!notes.length) {
+          topicNotesEmptyEl.hidden = false;
+          topicNotesListEl.hidden = true;
+        } else {
+          topicNotesEmptyEl.hidden = true;
+          topicNotesListEl.hidden = false;
+          notes.forEach(note => {
+            topicNotesListEl.appendChild(createTopicNoteListItem(note));
+          });
+        }
+      }
+
+      function openTopicNotesPopover(page, anchor) {
+        if (!page || !anchor) return;
+        const topicId = page.dataset.topicId || '';
+        if (!topicId) return;
+        if (topicNotesAnchor && topicNotesAnchor !== anchor) {
+          topicNotesAnchor.classList.remove('is-open');
+          topicNotesAnchor.setAttribute('aria-expanded', 'false');
+        }
+        topicNotesAnchor = anchor;
+        topicNotesPopoverTopicId = topicId;
+        topicNotesPopover.dataset.topicId = topicId;
+        anchor.classList.add('is-open');
+        anchor.setAttribute('aria-expanded', 'true');
+        const title = getTopicTitle(page) || 'Tema';
+        if (topicNotesTitleEl) {
+          topicNotesTitleEl.textContent = title;
+        }
+        renderTopicNotesPopover(topicId);
+        topicNotesPopover.style.visibility = 'hidden';
+        topicNotesPopover.classList.add('open');
+        topicNotesPopover.setAttribute('aria-hidden', 'false');
+        positionTopicNotesPopover(anchor);
+        topicNotesPopover.style.visibility = '';
+      }
+
+      function toggleTopicNotesPopover(page, anchor) {
+        const topicId = page?.dataset.topicId || '';
+        if (!topicId) return;
+        if (isTopicNotesPopoverOpen() && topicNotesPopoverTopicId === topicId) {
+          closeTopicNotesPopover();
+        } else {
+          openTopicNotesPopover(page, anchor);
+        }
+      }
+
+      function refreshTopicNoteIndicators() {
+        const counts = collectTopicNoteCounts();
+        pages.forEach(page => {
+          const topicId = (page.dataset.topicId || '').trim();
+          const icon = page.querySelector('.topic-note-icon');
+          if (!icon) return;
+          const count = counts.get(topicId) || 0;
+          icon.classList.toggle('has-notes', count > 0);
+          icon.dataset.noteCount = String(count);
+          icon.setAttribute('aria-label', count > 0
+            ? `${count} nota${count === 1 ? '' : 's'} en este tema`
+            : 'Notas del tema');
+          icon.title = count > 0
+            ? `${count === 1 ? '1 nota' : `${count} notas`} en este tema`
+            : 'Agregar nota en este tema';
+          const iconIsOpen = isTopicNotesPopoverOpen() && topicNotesPopoverTopicId === topicId;
+          icon.setAttribute('aria-expanded', iconIsOpen ? 'true' : 'false');
+          icon.classList.toggle('is-open', iconIsOpen);
+          if (topicNotesPopoverTopicId === topicId && topicNotesAnchor !== icon && isTopicNotesPopoverOpen()) {
+            topicNotesAnchor = icon;
+            icon.classList.add('is-open');
+            icon.setAttribute('aria-expanded', 'true');
+            positionTopicNotesPopover(icon);
+          }
+        });
+        if (sectionsContainer) {
+          sectionsContainer.querySelectorAll('.topic-list li').forEach(li => {
+            const topicId = (li.dataset.topicId || '').trim();
+            const count = counts.get(topicId) || 0;
+            li.classList.toggle('has-notes', count > 0);
+            const indicator = li.querySelector('.topic-note-indicator');
+            if (indicator) {
+              indicator.hidden = count === 0;
+              indicator.dataset.count = String(count);
+              indicator.setAttribute('aria-hidden', count > 0 ? 'false' : 'true');
+              indicator.title = count === 0
+                ? 'Sin notas en este tema'
+                : `${count === 1 ? '1 nota' : `${count} notas`} en este tema`;
+            }
+          });
+        }
+        if (isTopicNotesPopoverOpen() && topicNotesPopoverTopicId) {
+          renderTopicNotesPopover(topicNotesPopoverTopicId);
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
+      }
+
+      function scheduleTopicNoteIndicatorRefresh() {
+        if (pendingTopicNoteIndicatorUpdate) return;
+        pendingTopicNoteIndicatorUpdate = true;
+        requestAnimationFrame(() => {
+          pendingTopicNoteIndicatorUpdate = false;
+          refreshTopicNoteIndicators();
+        });
+      }
+
+      function safeCssEscape(value) {
+        if (typeof value !== 'string') {
+          return '';
+        }
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+          return window.CSS.escape(value);
+        }
+        return value.replace(/[^a-zA-Z0-9_\-]/g, (char) => `\\${char}`);
+      }
+
+      topicNotesAddBtn?.addEventListener('click', () => {
+        if (!topicNotesPopoverTopicId) return;
+        const page = findPageByTopicId(topicNotesPopoverTopicId) || currentPageRef;
+        if (!page) return;
+        if (floatingNotesHidden) {
+          setFloatingNotesVisibility(false);
+        }
+        const payload = {
+          topicId: topicNotesPopoverTopicId,
+          sectionId: page.dataset.sectionId || currentSectionId || null,
+          focus: true
+        };
+        if (floatingNotesLayer && topicNotesAnchor) {
+          const layerRect = floatingNotesLayer.getBoundingClientRect();
+          const anchorRect = topicNotesAnchor.getBoundingClientRect();
+          const anchorCenter = anchorRect.left + (anchorRect.width / 2);
+          payload.left = Math.max(0, anchorCenter - layerRect.left - (FLOATING_NOTE_DEFAULT_WIDTH / 2));
+          payload.top = Math.max(0, anchorRect.bottom - layerRect.top + 12);
+        }
+        createFloatingNote(payload);
+        closeTopicNotesPopover();
+      });
+
+      topicNotesOpenPanelBtn?.addEventListener('click', () => {
+        if (notesViewController) {
+          notesViewController.open('topic');
+        }
+        closeTopicNotesPopover();
+      });
+
+      topicNotesCloseBtn?.addEventListener('click', () => {
+        closeTopicNotesPopover();
+      });
 
       function hideTopicMenu() {
         topicMenu.classList.remove('show');
@@ -857,6 +1268,9 @@ export function initializeEditor() {
 
       function applyDocumentShift() {
         document.documentElement.style.setProperty('--document-horizontal-shift', `${documentHorizontalShift}px`);
+        if (isTopicNotesPopoverOpen()) {
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
       }
 
       function adjustDocumentShift(delta) {
@@ -870,6 +1284,9 @@ export function initializeEditor() {
         documentHorizontalShift = nextValue;
         applyDocumentShift();
         scheduleFloatingNotesViewportRefresh();
+        if (isTopicNotesPopoverOpen()) {
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
       }
 
       function updateZoom(delta) {
@@ -2804,6 +3221,32 @@ export function initializeEditor() {
             h1.appendChild(magicIcon);
           }
 
+          let noteIcon = h1.querySelector('.topic-note-icon');
+          if (!noteIcon) {
+            noteIcon = document.createElement('span');
+            noteIcon.className = 'topic-note-icon';
+            noteIcon.textContent = '📝';
+            h1.appendChild(noteIcon);
+          }
+          noteIcon.setAttribute('role', 'button');
+          noteIcon.setAttribute('tabindex', '0');
+          noteIcon.setAttribute('aria-haspopup', 'true');
+          if (!noteIcon.dataset.bound) {
+            noteIcon.title = 'Notas del tema';
+            noteIcon.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              toggleTopicNotesPopover(page, noteIcon);
+            });
+            noteIcon.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleTopicNotesPopover(page, noteIcon);
+              }
+            });
+            noteIcon.dataset.bound = 'true';
+          }
+
           const getTitle = () => (titleSpan?.textContent || '').trim() || getTopicTitle(page) || 'Tema';
 
           if (!magicIcon.dataset.bound) {
@@ -2827,9 +3270,18 @@ export function initializeEditor() {
           }
 
           if (titleSpan.nextSibling !== magicIcon) {
-            h1.appendChild(magicIcon);
+            h1.insertBefore(magicIcon, titleSpan.nextSibling);
           }
+          if (magicIcon.nextSibling !== noteIcon) {
+            if (magicIcon.nextSibling) {
+              h1.insertBefore(noteIcon, magicIcon.nextSibling);
+            } else {
+              h1.appendChild(noteIcon);
+            }
+          }
+          noteIcon.setAttribute('aria-expanded', isTopicNotesPopoverOpen() && topicNotesPopoverTopicId === (page.dataset.topicId || '') ? 'true' : 'false');
         });
+        refreshTopicNoteIndicators();
       }
 
       setupMagicIcons();
@@ -2837,6 +3289,7 @@ export function initializeEditor() {
       /* === MODO LECTURA === */
       function toggleReadingMode() {
         isReadingMode = !isReadingMode;
+        closeTopicNotesPopover();
         document.body.classList.toggle('reading-mode', isReadingMode);
         readingModeBtn.classList.toggle('active', isReadingMode);
         
@@ -3262,9 +3715,15 @@ export function initializeEditor() {
       window.addEventListener('resize', repositionTemplateToolbar);
       window.addEventListener('scroll', () => {
         closeFloatingNoteStyleMenu();
+        if (isTopicNotesPopoverOpen()) {
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
       }, { passive: true });
       window.addEventListener('resize', () => {
         closeFloatingNoteStyleMenu();
+        if (isTopicNotesPopoverOpen()) {
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
       });
 
       imageCropPreview?.addEventListener('load', updateCropScale);
@@ -3899,6 +4358,7 @@ export function initializeEditor() {
 
       function clearFloatingNotes() {
         if (!floatingNotesLayer) return;
+        closeTopicNotesPopover();
         closeFloatingNoteStyleMenu();
         floatingNotesLayer.innerHTML = '';
         document.querySelectorAll('.note-options-menu').forEach(menu => menu.remove());
@@ -3910,6 +4370,7 @@ export function initializeEditor() {
         document.querySelectorAll('.note-anchor').forEach(anchor => anchor.remove());
         notesRegistry.clear({ silent: true });
         scheduleNotesViewRefresh();
+        scheduleTopicNoteIndicatorRefresh();
       }
 
       function clampAllFloatingNotes() {
@@ -4997,6 +5458,7 @@ export function initializeEditor() {
         }
         setFloatingNotesVisibility(hidden);
         scheduleFloatingNotesViewportRefresh();
+        scheduleTopicNoteIndicatorRefresh();
       }
 
       class NotesViewController {
@@ -5531,6 +5993,7 @@ export function initializeEditor() {
 
       notesViewBtn?.addEventListener('click', () => {
         if (!notesViewController) return;
+        closeTopicNotesPopover();
         if (notesViewController.isOpen()) {
           notesViewController.close();
         } else {
@@ -5552,6 +6015,9 @@ export function initializeEditor() {
       });
       window.addEventListener('scroll', () => {
         scheduleFloatingNotesViewportRefresh();
+        if (isTopicNotesPopoverOpen()) {
+          positionTopicNotesPopover(topicNotesAnchor);
+        }
       }, { passive: true });
 
       refreshToggleNotesButton();
@@ -6250,6 +6716,7 @@ export function initializeEditor() {
 
       /* === PANEL LATERAL === */
       function openPanel() {
+        closeTopicNotesPopover();
         closeTopbarDropdowns();
         buildSectionsPanel();
         panel.classList.add('open');
@@ -6263,6 +6730,7 @@ export function initializeEditor() {
       }
 
       function closePanel() {
+        closeTopicNotesPopover();
         panel.classList.remove('open');
         panelBackdrop.classList.remove('show');
         closeTopbarDropdowns();
@@ -6512,6 +6980,7 @@ export function initializeEditor() {
         let matchedTopics = 0;
         let renderedSections = 0;
         const hasFilter = Boolean(panelFilterNormalized);
+        const topicNoteCounts = collectTopicNoteCounts();
 
         sections.forEach((section) => {
           totalTopics += section.temas.length;
@@ -6618,7 +7087,8 @@ export function initializeEditor() {
 
           topicsToRender.forEach((tema) => {
             const li = document.createElement('li');
-            li.dataset.topicId = tema.id;
+            const topicIdValue = (tema.id || '').trim();
+            li.dataset.topicId = topicIdValue;
 
             const numSpan = document.createElement('span');
             numSpan.className = 'topic-number';
@@ -6654,6 +7124,18 @@ export function initializeEditor() {
               openTopic();
             });
 
+            const noteIndicator = document.createElement('span');
+            noteIndicator.className = 'topic-note-indicator';
+            noteIndicator.textContent = '📝';
+            const topicNoteCount = topicNoteCounts.get(topicIdValue) || 0;
+            noteIndicator.hidden = topicNoteCount === 0;
+            noteIndicator.dataset.count = String(topicNoteCount);
+            noteIndicator.setAttribute('aria-hidden', topicNoteCount > 0 ? 'false' : 'true');
+            noteIndicator.title = topicNoteCount === 0
+              ? 'Sin notas en este tema'
+              : `${topicNoteCount === 1 ? '1 nota' : `${topicNoteCount} notas`} en este tema`;
+            li.classList.toggle('has-notes', topicNoteCount > 0);
+
             if (hasFilter) {
               const topicMatchesFilter = normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized);
               li.classList.toggle('matches-filter', topicMatchesFilter);
@@ -6662,6 +7144,7 @@ export function initializeEditor() {
             li.appendChild(numSpan);
             li.appendChild(btnMain);
             li.appendChild(titleSpan);
+            li.appendChild(noteIndicator);
             topicList.appendChild(li);
           });
 
@@ -6709,6 +7192,7 @@ export function initializeEditor() {
             panelTopicCount.title = `${visibleLabel} visibles de ${totalLabel}`;
           }
         }
+        refreshTopicNoteIndicators();
       }
 
       function togglePanelEditMode() {
@@ -7014,6 +7498,7 @@ export function initializeEditor() {
           closePanel();
           closeTopbarDropdowns();
           notesViewController?.close();
+          closeTopicNotesPopover();
           hideModal();
           hideImageToolbar();
           hideTemplateToolbar();
@@ -7024,6 +7509,13 @@ export function initializeEditor() {
           hideIconPicker();
           savedSelection = null;
         }
+      });
+
+      document.addEventListener('pointerdown', (event) => {
+        if (!isTopicNotesPopoverOpen()) return;
+        if (topicNotesPopover.contains(event.target)) return;
+        if (event.target.closest('.topic-note-icon')) return;
+        closeTopicNotesPopover();
       });
 
       /* === TEMA DE COLORES === */
@@ -7794,7 +8286,8 @@ ${inlineStyles}
       magicContainerHtml: magicContainer ? magicContainer.innerHTML : '',
       magicTopics: exportedMagicTopics,
       floatingNotes: exportedNotes,
-      notesHidden: floatingNotesHidden
+      notesHidden: floatingNotesHidden,
+      documentShift: documentHorizontalShift
     };
   }
 
@@ -7808,6 +8301,7 @@ ${inlineStyles}
         version: 1,
         savedAt: new Date().toISOString(),
         zoom: isMagicViewActive ? lastRegularZoom : currentZoom,
+        documentShift: documentHorizontalShift,
         data: collectDocumentData()
       };
 
@@ -7860,6 +8354,18 @@ ${inlineStyles}
         applyZoom(currentZoom);
       }
 
+      if (!Number.isFinite(parsed.data?.documentShift)) {
+        if (Number.isFinite(parsed.documentShift)) {
+          documentHorizontalShift = Math.min(
+            DOCUMENT_SHIFT_MAX,
+            Math.max(DOCUMENT_SHIFT_MIN, parsed.documentShift)
+          );
+          applyDocumentShift();
+        } else if (!restored) {
+          applyDocumentShift();
+        }
+      }
+
       return restored;
     } catch (error) {
       console.error('Error al restaurar desde caché:', error);
@@ -7895,6 +8401,19 @@ ${inlineStyles}
     if (!data || !Array.isArray(data.sections)) {
       throw new Error('El archivo no contiene secciones válidas.');
     }
+
+    closeTopicNotesPopover();
+
+    const rawShift = Number.parseFloat(data.documentShift);
+    if (Number.isFinite(rawShift)) {
+      documentHorizontalShift = Math.min(
+        DOCUMENT_SHIFT_MAX,
+        Math.max(DOCUMENT_SHIFT_MIN, rawShift)
+      );
+    } else {
+      documentHorizontalShift = 0;
+    }
+    applyDocumentShift();
 
     const mainContainer = document.body;
     const scriptTag = document.querySelector('script');
