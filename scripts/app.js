@@ -1,5 +1,6 @@
-import { initializeEditor } from './editor.js';
+import { EditorApp } from './modules/app/EditorApp.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-  initializeEditor();
+  const app = new EditorApp();
+  app.init();
 });
