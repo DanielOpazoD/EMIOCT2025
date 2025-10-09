@@ -1335,39 +1335,11 @@ export function initializeEditor() {
         if (!floatingNotesLayer) return;
         if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
         if (!Number.isFinite(nextZoom) || nextZoom <= 0) return;
-
-        const ratio = nextZoom / prevZoom;
-        const shouldScalePositions = Math.abs(ratio - 1) >= 0.0001;
-
-        floatingNotesViewportRelaxedMatching = true;
-
-        if (shouldScalePositions) {
-          const notes = floatingNotesLayer.querySelectorAll('.floating-note');
-          notes.forEach(note => {
-            const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '');
-            const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '');
-            const noteId = note.dataset.noteId;
-
-            if (Number.isFinite(currentLeft) || Number.isFinite(currentTop)) {
-              const scaledLeft = Number.isFinite(currentLeft) ? currentLeft * ratio : currentLeft;
-              const scaledTop = Number.isFinite(currentTop) ? currentTop * ratio : currentTop;
-              positionFloatingNote(note, scaledLeft, scaledTop, { skipClamp: true });
-            }
-
-            const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
-            if (Number.isFinite(storedOffset)) {
-              const scaledOffset = Math.round(storedOffset * ratio);
-              note.dataset.pageOffsetTop = String(scaledOffset);
-              if (noteId) {
-                updateNoteData(noteId, { pageOffsetTop: scaledOffset }, { silent: true });
-              }
-            }
-          });
-
-          clampAllFloatingNotes();
+        if (Math.abs(nextZoom - prevZoom) < 0.0001) {
+          return;
         }
-
-        scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
+        floatingNotesViewportRelaxedMatching = true;
+        scheduleFloatingNotesViewportRefresh();
       }
 
       function applyDocumentShift() {
