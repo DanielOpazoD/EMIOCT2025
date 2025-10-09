@@ -42,5 +42,6 @@ export function getNoteDisplayTitle(title, fallback = '') {
   if (title === null || title === undefined) {
     return fallback;
   }
-  return title;
+  const normalized = typeof title === 'string' ? title.trim() : '';
+  return normalized.length ? normalized : fallback;
 }
