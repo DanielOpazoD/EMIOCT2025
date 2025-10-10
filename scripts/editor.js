@@ -7928,15 +7928,23 @@ export async function initializeEditor() {
       }
       clearAllBtn?.addEventListener('click', clearAllContent);
 
+      const TOPIC_OBSERVER_THRESHOLDS = [0, 0.1, 0.25, 0.5, 0.75, 1];
       const io = new IntersectionObserver((entries) => {
-        const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!visible) return;
-        const tid = visible.target.dataset.topicId || '';
+        const visibleEntries = entries
+          .filter(entry => entry.isIntersecting || entry.intersectionRatio > 0)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        const candidate = visibleEntries[0];
+        if (!candidate) return;
+        const tid = candidate.target.dataset.topicId || '';
         sectionsContainer.querySelectorAll('li').forEach(li =>
           li.classList.toggle('active', li.dataset.topicId === tid)
         );
-        setActivePage(visible.target);
-      }, { root: null, threshold: [0.5, 0.75, 1] });
+        setActivePage(candidate.target);
+      }, {
+        root: null,
+        threshold: TOPIC_OBSERVER_THRESHOLDS,
+        rootMargin: '-40px 0px -30% 0px'
+      });
 
       pages.forEach(p => io.observe(p));
 
