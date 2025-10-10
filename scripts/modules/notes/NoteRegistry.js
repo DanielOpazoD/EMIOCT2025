@@ -10,7 +10,8 @@ import {
 import {
   normalizePriority,
   sanitizeTags,
-  getNotePlainTextFromHtml
+  getNotePlainTextFromHtml,
+  sanitizeNoteTitleHtml
 } from './noteUtils.js';
 
 function createNormalizedNotePage(rawPage = {}, {
@@ -111,11 +112,23 @@ export function createEnhancedNote(options = {}) {
   const createdAt = options.createdAt ? String(options.createdAt) : nowIso;
   const updatedAt = options.updatedAt ? String(options.updatedAt) : nowIso;
 
+  let titleHtml = null;
+  if (typeof options.titleHtml === 'string') {
+    const sanitized = sanitizeNoteTitleHtml(options.titleHtml);
+    const derivedFromHtml = getNotePlainTextFromHtml(sanitized);
+    titleHtml = derivedFromHtml.length ? sanitized : null;
+  } else if (options.titleHtml === null) {
+    titleHtml = null;
+  }
+
   let title = null;
   if (typeof options.title === 'string') {
     title = options.title.trim();
   } else if (options.title === null) {
     title = null;
+  } else if (titleHtml) {
+    const derived = getNotePlainTextFromHtml(titleHtml);
+    title = derived.length ? derived : null;
   }
 
   const base = {
@@ -127,6 +140,7 @@ export function createEnhancedNote(options = {}) {
       ? options.borderColor.trim()
       : null,
     title,
+    titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
     html: typeof options.html === 'string' ? options.html : '',
     linkedTo: options.linkedTo || null,
@@ -241,6 +255,20 @@ export class NoteRegistry {
             merged.title = overrides.title.trim();
           } else if (overrides.title === null) {
             merged.title = null;
+          }
+        } else if (key === 'titleHtml') {
+          if (typeof overrides.titleHtml === 'string') {
+            const sanitized = sanitizeNoteTitleHtml(overrides.titleHtml);
+            const derived = getNotePlainTextFromHtml(sanitized);
+            merged.titleHtml = derived.length ? sanitized : null;
+            if (!Object.prototype.hasOwnProperty.call(overrides, 'title')) {
+              merged.title = derived.length ? derived : merged.title;
+            }
+          } else if (overrides.titleHtml === null) {
+            merged.titleHtml = null;
+            if (!Object.prototype.hasOwnProperty.call(overrides, 'title')) {
+              merged.title = null;
+            }
           }
         } else if (
           key === 'left' ||

@@ -5,6 +5,7 @@
   --theme-primary-light: #6ea8fe;
   --base-font-size: 10.5px;
   --zoom-level: 1;
+  --floating-note-font-size-base: var(--base-font-size);
   --topbar-height: 36px;
   --document-horizontal-shift: 0px;
   font-size: calc(var(--base-font-size) * var(--zoom-level));
@@ -3383,7 +3384,7 @@ body.reading-mode .floating-notes-layer {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: calc(var(--floating-note-font-size-base) * 1);
   line-height: 1;
   padding: 2px;
   color: inherit;
@@ -3430,7 +3431,7 @@ body.reading-mode .floating-notes-layer {
 }
 
 .note-menu-title {
-  font-size: 0.8rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.8);
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -3470,7 +3471,7 @@ body.reading-mode .floating-notes-layer {
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  font-size: 0.85rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.85);
   padding: 6px 8px;
   border-radius: 6px;
   background: #f8fafc;
@@ -3503,7 +3504,7 @@ body.reading-mode .floating-notes-layer {
   height: 32px;
   padding: 0;
   border-radius: 8px;
-  font-size: 1.1rem;
+  font-size: calc(var(--floating-note-font-size-base) * 1.1);
   background: #f1f5f9;
   border: 1px solid transparent;
   transition: transform 0.2s ease;
@@ -3547,7 +3548,7 @@ body.reading-mode .floating-notes-layer {
 }
 
 .note-style-label {
-  font-size: 0.7rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.7);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3593,7 +3594,7 @@ body.reading-mode .floating-notes-layer {
 
 .note-border-reset {
   align-self: flex-start;
-  font-size: 0.72rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.72);
   padding: 3px 6px;
 }
 
@@ -3601,12 +3602,12 @@ body.reading-mode .floating-notes-layer {
   margin-top: 4px;
   font-weight: 600;
   justify-content: center;
-  font-size: 0.78rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.78);
 }
 
 .floating-note-body {
   flex: 1;
-  font-size: 0.95rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.95);
   line-height: 1.35;
   outline: none;
   border-radius: 6px;
@@ -3639,13 +3640,13 @@ body.reading-mode .floating-notes-layer {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.9);
   cursor: pointer;
   flex: 1 1 auto;
 }
 
 .enhanced-note .note-category .note-icon {
-  font-size: 1rem;
+  font-size: calc(var(--floating-note-font-size-base) * 1);
 }
 
 .enhanced-note .note-category .note-label {
@@ -3681,7 +3682,7 @@ body.reading-mode .floating-notes-layer {
   gap: 4px;
   margin-left: auto;
   margin-right: auto;
-  font-size: 0.78rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.78);
   color: rgba(15, 23, 42, 0.65);
 }
 
@@ -3722,7 +3723,7 @@ body.reading-mode .floating-notes-layer {
   gap: 6px;
   align-items: center;
   padding: 8px 10px 10px;
-  font-size: 0.78rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.78);
   color: rgba(15, 23, 42, 0.7);
 }
 
@@ -3736,16 +3737,16 @@ body.reading-mode .floating-notes-layer {
   background: rgba(15, 23, 42, 0.08);
   border-radius: 999px;
   padding: 2px 8px;
-  font-size: 0.72rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.72);
 }
 
 .enhanced-note .note-actions button {
-  font-size: 0.95rem;
+  font-size: calc(var(--floating-note-font-size-base) * 0.95);
   padding: 3px;
 }
 
 .enhanced-note .note-actions .note-menu {
-  font-size: 1.1rem;
+  font-size: calc(var(--floating-note-font-size-base) * 1.1);
 }
 
 .enhanced-note .note-priority.high {
