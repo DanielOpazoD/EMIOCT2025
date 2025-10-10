@@ -708,10 +708,10 @@ export async function initializeEditor() {
       const tableResizeOverlay = document.getElementById('tableResizeOverlay');
 
       const highlightColors = [
-        '#f59aa5', '#f6a475', '#f5ba62', '#f6cf59', '#d6e36f', '#9fd48d', '#6fcdc9', '#7fb6eb',
-        '#a59bf4', '#e19ad2', '#f0a9a4', '#d3a978', '#b2c1cf', '#8fa6f1', '#c19fe6', '#b58b74',
-        '#e2a3c3', '#f0b88f', '#f4d48a', '#c3df92', '#7fc4ab', '#66a9c9', '#7c90d4', '#dea1c8',
-        '#ed957f', '#f3c07a', '#f7dfa1', '#acd78b', '#6bbfa3', '#5aa8c5', '#8793d9', '#eaaccf'
+        '#fff1f2', '#ffe4e6', '#ffdce5', '#ffd6e0', '#ffe5d3', '#ffe8c7', '#fef3c7', '#fef9c3',
+        '#f1f8d7', '#e9fbdc', '#dcfce7', '#ccfbf1', '#cffafe', '#dbeafe', '#e0f2fe', '#e0f2ff',
+        '#e0e7ff', '#ede9fe', '#f3e8ff', '#fae8ff', '#fde7f5', '#fde2ff', '#fce7f3', '#fdf2f8',
+        '#f4f4f5', '#f3f4f6', '#eef2ff', '#e2e8f0', '#e7f0ff', '#e6fffa', '#f0fdf4', '#f8fafc'
       ];
 
       const textAccentColors = [
@@ -730,12 +730,20 @@ export async function initializeEditor() {
       let iconPicker = null;
       let iconPickerAnchor = null;
 
+      function stopIconPickerPropagation(event) {
+        event.stopPropagation();
+      }
+
       function buildIconPicker() {
-        const picker = document.createElement('div');
+        const existing = document.getElementById('iconPicker');
+        const picker = existing || document.createElement('div');
         picker.id = 'iconPicker';
         picker.className = 'icon-picker';
         picker.setAttribute('role', 'menu');
         picker.setAttribute('aria-label', 'Insertar icono');
+
+        picker.innerHTML = '';
+
         NOTE_ICON_SYMBOLS.forEach(symbol => {
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -752,6 +760,13 @@ export async function initializeEditor() {
           });
           picker.appendChild(btn);
         });
+
+        if (!picker.dataset.stopPropagationAttached) {
+          picker.addEventListener('pointerdown', stopIconPickerPropagation);
+          picker.addEventListener('click', stopIconPickerPropagation);
+          picker.dataset.stopPropagationAttached = 'true';
+        }
+
         return picker;
       }
 
@@ -772,14 +787,14 @@ export async function initializeEditor() {
         if (!ICON_FEATURE_ENABLED) {
           return null;
         }
-        if (iconPicker && iconPicker.isConnected) {
-          return iconPicker;
-        }
-        const picker = iconPicker || buildIconPicker();
+
+        const picker = buildIconPicker();
         iconPicker = mountIconPicker(picker);
+
         if (iconPicker && insertIconBtn) {
           insertIconBtn.setAttribute('aria-controls', iconPicker.id);
         }
+
         return iconPicker;
       }
 
@@ -8306,6 +8321,10 @@ export async function initializeEditor() {
           event.preventDefault();
           event.stopPropagation();
           saveCurrentSelection();
+          const picker = ensureIconPicker();
+          if (!picker) {
+            return;
+          }
           toggleIconPicker(insertIconBtn);
         });
 
