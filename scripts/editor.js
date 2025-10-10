@@ -75,7 +75,7 @@ export async function initializeEditor() {
         '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
-      const ICON_FEATURE_ENABLED = false;
+      const ICON_FEATURE_ENABLED = true;
 
       let floatingNotesHidden = false;
       let floatingNoteZIndex = 10;
