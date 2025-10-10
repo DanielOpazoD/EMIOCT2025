@@ -4366,7 +4366,7 @@ export async function initializeEditor() {
         if (shouldShow) {
           viewportState = getActiveTopicViewportState();
           if (!viewportState) {
-            shouldShow = true;
+            shouldShow = relaxMatching;
           } else if (!relaxMatching) {
             const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
             const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');

@@ -3164,10 +3164,15 @@ body.magic-open .magic-view {
   bottom: 0;
   pointer-events: none;
   z-index: 3600;
+  transform: none !important;
 }
 
 body.reading-mode .floating-notes-layer {
   top: 0;
+}
+
+#floatingNotesLayer {
+  transform: none !important;
 }
 
 .page,
@@ -3192,7 +3197,7 @@ body.reading-mode .floating-notes-layer {
   transition: box-shadow 0.2s ease, transform 0.2s ease;
   resize: both;
   overflow: auto;
-  font-size: var(--base-font-size);
+  font-size: 14px;
 }
 
 /* ===== Panel de notas por tema ===== */
@@ -3367,6 +3372,7 @@ body.reading-mode .floating-notes-layer {
   padding: 6px 8px;
   cursor: grab;
   user-select: none;
+  font-size: 14px;
 }
 
 .floating-note-header:active {
@@ -3411,7 +3417,7 @@ body.reading-mode .floating-notes-layer {
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   z-index: 5200;
-  font-size: var(--base-font-size);
+  font-size: 14px;
 }
 
 .note-options-menu {
@@ -3608,7 +3614,7 @@ body.reading-mode .floating-notes-layer {
 
 .floating-note-body {
   flex: 1;
-  font-size: 0.95em;
+  font-size: 12px;
   line-height: 1.35;
   outline: none;
   border-radius: 6px;
@@ -3641,7 +3647,7 @@ body.reading-mode .floating-notes-layer {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: 0.9em;
+  font-size: 13px;
   cursor: pointer;
   flex: 1 1 auto;
 }
