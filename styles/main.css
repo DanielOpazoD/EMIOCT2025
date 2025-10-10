@@ -2101,9 +2101,39 @@ body.panel-filter-active .panel-topic-count {
   align-items: center;
   justify-content: center;
   font-size: 1rem;
-  margin-left: auto;
   opacity: 0.55;
   transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.topic-list .topic-trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topic-list .topic-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topic-list .topic-edit-btn {
+  font-size: 0.85rem;
+  border: 1px solid #d0d7de;
+  background: #fff;
+  border-radius: 3px;
+  padding: 2px 5px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.topic-list .topic-edit-btn:hover {
+  background: #f8f9fa;
+}
+
+.topic-list .topic-edit-btn-danger {
+  color: #dc3545;
 }
 
 .topic-list .topic-note-indicator[hidden] {
