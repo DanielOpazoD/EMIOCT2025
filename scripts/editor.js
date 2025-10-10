@@ -493,6 +493,21 @@ export async function initializeEditor() {
         });
       }
 
+      function setActiveTopicListHighlight(topicId) {
+        if (!sectionsContainer) return;
+        const normalizedTopicId = (topicId || '').trim();
+        sectionsContainer.querySelectorAll('.topic-list li').forEach((item) => {
+          const itemTopicId = (item.dataset.topicId || '').trim();
+          const isActive = normalizedTopicId && itemTopicId === normalizedTopicId;
+          item.classList.toggle('active', isActive);
+          if (isActive) {
+            item.setAttribute('aria-current', 'true');
+          } else if (item.hasAttribute('aria-current')) {
+            item.removeAttribute('aria-current');
+          }
+        });
+      }
+
       function ensureVisibleSection({ force = false } = {}) {
         const availableIds = sections.map((section) => normalizeSectionId(section.id));
         let targetId = getVisibleSectionId();
@@ -535,12 +550,14 @@ export async function initializeEditor() {
           refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
           ensureVisibleSection({ force: true });
+          setActiveTopicListHighlight('');
           return;
         }
         const nextTopicId = page.dataset.topicId || '';
         if (isTopicNotesPopoverOpen() && topicNotesPopoverTopicId && topicNotesPopoverTopicId !== nextTopicId) {
           closeTopicNotesPopover();
         }
+        setActiveTopicListHighlight(nextTopicId);
         currentPageRef = page;
         const sectionId = page.dataset.sectionId || 'seccion-default';
         currentSectionId = sectionId;
@@ -790,6 +807,9 @@ export async function initializeEditor() {
           return;
         }
         iconPickerAnchor = anchor;
+        if (!restoreSelection()) {
+          ensureEditableSelection();
+        }
         const rect = anchor.getBoundingClientRect();
         const offsetTop = rect.bottom + window.scrollY + 6;
         const offsetLeft = rect.left + window.scrollX;
@@ -7630,6 +7650,10 @@ export async function initializeEditor() {
         }
         updateSectionsPanelActiveState();
         refreshTopicNoteIndicators();
+        const activeTopicId = (currentPageRef && currentPageRef.dataset)
+          ? currentPageRef.dataset.topicId || ''
+          : '';
+        setActiveTopicListHighlight(activeTopicId);
       }
 
       function togglePanelEditMode() {
@@ -7929,17 +7953,115 @@ export async function initializeEditor() {
       clearAllBtn?.addEventListener('click', clearAllContent);
 
       const TOPIC_OBSERVER_THRESHOLDS = [0, 0.1, 0.25, 0.5, 0.75, 1];
+      let pendingActiveTopicResolution = false;
+
+      function scheduleActiveTopicResolution() {
+        if (pendingActiveTopicResolution) {
+          return;
+        }
+        pendingActiveTopicResolution = true;
+        requestAnimationFrame(() => {
+          pendingActiveTopicResolution = false;
+          resolveActiveTopicFromViewport();
+        });
+      }
+
+      function resolveActiveTopicFromViewport() {
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (viewportHeight <= 0) {
+          return;
+        }
+
+        const viewportCenter = viewportHeight * 0.45;
+        let centerCandidate = null;
+        let centerDistance = Infinity;
+        let fallbackCandidate = null;
+        let fallbackRatio = 0;
+        let fallbackDistance = Infinity;
+
+        const current = currentPageRef && currentPageRef.isConnected ? currentPageRef : null;
+        let currentRatio = 0;
+        let currentDistance = Infinity;
+
+        pages.forEach((page) => {
+          if (!page || !page.isConnected) {
+            return;
+          }
+          const rect = page.getBoundingClientRect();
+          const height = rect.height || page.offsetHeight || 0;
+          if (height <= 0) {
+            return;
+          }
+
+          const visibleTop = Math.max(rect.top, 0);
+          const visibleBottom = Math.min(rect.bottom, viewportHeight);
+          const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+          if (visibleHeight <= 0) {
+            return;
+          }
+
+          const ratio = Math.max(0, Math.min(1, visibleHeight / height));
+          const pageCenter = rect.top + (height * 0.5);
+          const distance = Math.abs(pageCenter - viewportCenter);
+          const containsCenter = rect.top <= viewportCenter && rect.bottom >= viewportCenter;
+
+          if (page === current) {
+            currentRatio = ratio;
+            currentDistance = distance;
+          }
+
+          if (containsCenter) {
+            if (!centerCandidate || distance < centerDistance) {
+              centerCandidate = page;
+              centerDistance = distance;
+            }
+            return;
+          }
+
+          if (
+            ratio > fallbackRatio + 0.02
+            || (Math.abs(ratio - fallbackRatio) <= 0.02 && distance < fallbackDistance)
+          ) {
+            fallbackCandidate = page;
+            fallbackRatio = ratio;
+            fallbackDistance = distance;
+          }
+        });
+
+        let candidate = centerCandidate || fallbackCandidate || current;
+        if (!candidate) {
+          setActiveTopicListHighlight('');
+          return;
+        }
+
+        if (
+          candidate !== current
+          && current
+          && currentRatio > 0
+          && !centerCandidate
+        ) {
+          const ratioAdvantage = fallbackRatio - currentRatio;
+          if (
+            ratioAdvantage < 0.08
+            || (Math.abs(ratioAdvantage) <= 0.08 && currentDistance <= fallbackDistance + 48)
+          ) {
+            candidate = current;
+          }
+        }
+
+        const topicId = candidate.dataset.topicId || '';
+        if (candidate !== currentPageRef) {
+          setActivePage(candidate);
+        } else {
+          setActiveTopicListHighlight(topicId);
+        }
+      }
+
       const io = new IntersectionObserver((entries) => {
-        const visibleEntries = entries
-          .filter(entry => entry.isIntersecting || entry.intersectionRatio > 0)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        const candidate = visibleEntries[0];
-        if (!candidate) return;
-        const tid = candidate.target.dataset.topicId || '';
-        sectionsContainer.querySelectorAll('li').forEach(li =>
-          li.classList.toggle('active', li.dataset.topicId === tid)
-        );
-        setActivePage(candidate.target);
+        if (!entries || entries.length === 0) {
+          return;
+        }
+        scheduleActiveTopicResolution();
       }, {
         root: null,
         threshold: TOPIC_OBSERVER_THRESHOLDS,
@@ -7947,6 +8069,8 @@ export async function initializeEditor() {
       });
 
       pages.forEach(p => io.observe(p));
+      scheduleActiveTopicResolution();
+      window.addEventListener('resize', scheduleActiveTopicResolution);
 
       plusBtn?.addEventListener('click', () => {
         if (panel.classList.contains('open')) {
