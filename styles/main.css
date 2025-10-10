@@ -618,6 +618,17 @@ body.reading-mode .reading-mode-exit {
   line-height: 1.2;
 }
 
+.edit-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.edit-toolbar button:disabled:hover {
+  background: #f1f5f9;
+}
+
 .edit-toolbar button:hover {
   background: #f8f9fa;
 }
@@ -3086,7 +3097,6 @@ body.magic-open .magic-view {
 
 .magic-page {
   width: 75.6rem;
-  min-height: 106.9rem;
   padding: 4.32rem;
   margin: 1.9rem auto;
   background: #fff;

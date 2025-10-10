@@ -16,7 +16,7 @@ import {
   getNoteDisplayTitle
 } from './modules/notes/noteUtils.js';
 
-export function initializeEditor() {
+export async function initializeEditor() {
       let isEditMode = false;
       let isPanelEditMode = false;
       let isReadingMode = false;
@@ -75,6 +75,8 @@ export function initializeEditor() {
         '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
+      const ICON_FEATURE_ENABLED = false;
+
       let floatingNotesHidden = false;
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
@@ -96,6 +98,111 @@ export function initializeEditor() {
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
+      const EXTENDED_CACHE_DB_NAME = 'emi2025-editor-cache';
+      const EXTENDED_CACHE_STORE_NAME = 'snapshots';
+      let extendedCacheDbPromise = null;
+      let usingExtendedCache = false;
+
+      function isQuotaExceededError(error) {
+        if (!error) {
+          return false;
+        }
+        const quotaNames = ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'];
+        if (quotaNames.includes(error.name)) {
+          return true;
+        }
+        if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+          return quotaNames.includes(error.name);
+        }
+        return false;
+      }
+
+      function openExtendedCacheDb() {
+        if (!('indexedDB' in window)) {
+          return Promise.reject(new Error('IndexedDB no está disponible'));
+        }
+        if (extendedCacheDbPromise) {
+          return extendedCacheDbPromise;
+        }
+        extendedCacheDbPromise = new Promise((resolve, reject) => {
+          const request = window.indexedDB.open(EXTENDED_CACHE_DB_NAME, 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(EXTENDED_CACHE_STORE_NAME)) {
+              db.createObjectStore(EXTENDED_CACHE_STORE_NAME);
+            }
+          };
+          request.onsuccess = () => {
+            const db = request.result;
+            db.onversionchange = () => {
+              db.close();
+            };
+            resolve(db);
+          };
+          request.onerror = () => {
+            const err = request.error || new Error('No se pudo abrir IndexedDB');
+            extendedCacheDbPromise = null;
+            reject(err);
+          };
+          request.onblocked = () => {
+            console.warn('Actualización de la caché extendida bloqueada por otra pestaña.');
+          };
+        });
+        return extendedCacheDbPromise;
+      }
+
+      async function writeExtendedCacheValue(value) {
+        try {
+          const db = await openExtendedCacheDb();
+          return await new Promise((resolve, reject) => {
+            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readwrite');
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error || new Error('No se pudo guardar en almacenamiento extendido'));
+            tx.onabort = () => reject(tx.error || new Error('Se canceló el guardado en almacenamiento extendido'));
+            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
+            store.put(value, CACHE_STORAGE_KEY);
+          });
+        } catch (error) {
+          console.error('Error al escribir en la caché extendida:', error);
+          throw error;
+        }
+      }
+
+      async function readExtendedCacheValue() {
+        try {
+          const db = await openExtendedCacheDb();
+          return await new Promise((resolve, reject) => {
+            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readonly');
+            tx.onerror = () => reject(tx.error || new Error('No se pudo leer la caché extendida'));
+            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
+            const request = store.get(CACHE_STORAGE_KEY);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error || new Error('Error leyendo la caché extendida'));
+          });
+        } catch (error) {
+          console.error('Error al leer la caché extendida:', error);
+          return null;
+        }
+      }
+
+      async function clearExtendedCacheValue() {
+        if (!('indexedDB' in window)) {
+          return;
+        }
+        try {
+          const db = await openExtendedCacheDb();
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readwrite');
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la caché extendida'));
+            tx.onabort = () => reject(tx.error || new Error('Se canceló la limpieza de la caché extendida'));
+            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
+            store.delete(CACHE_STORAGE_KEY);
+          });
+        } catch (error) {
+          console.error('Error al limpiar la caché extendida:', error);
+        }
+      }
 
       async function getStylesheetTextForExport() {
         if (cachedStylesheetForExport !== null) {
@@ -601,33 +708,36 @@ export function initializeEditor() {
 
       const tableResizers = new WeakMap();
 
-      const iconPicker = document.createElement('div');
-      iconPicker.id = 'iconPicker';
-      iconPicker.className = 'icon-picker';
-      iconPicker.setAttribute('role', 'menu');
-      iconPicker.setAttribute('aria-label', 'Insertar icono');
-      NOTE_ICON_SYMBOLS.forEach(symbol => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'icon-picker-btn';
-        btn.textContent = symbol;
-        btn.title = `Insertar ${symbol}`;
-        btn.addEventListener('click', (event) => {
-          event.preventDefault();
-          const inserted = insertTextAtSelection(`${symbol} `);
-          if (!inserted) {
-            alert('Selecciona un área editable antes de insertar iconos.');
-          }
-          hideIconPicker();
-        });
-        iconPicker.appendChild(btn);
-      });
-      document.body.appendChild(iconPicker);
-
+      let iconPicker = null;
       let iconPickerAnchor = null;
 
+      if (ICON_FEATURE_ENABLED) {
+        iconPicker = document.createElement('div');
+        iconPicker.id = 'iconPicker';
+        iconPicker.className = 'icon-picker';
+        iconPicker.setAttribute('role', 'menu');
+        iconPicker.setAttribute('aria-label', 'Insertar icono');
+        NOTE_ICON_SYMBOLS.forEach(symbol => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'icon-picker-btn';
+          btn.textContent = symbol;
+          btn.title = `Insertar ${symbol}`;
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const inserted = insertTextAtSelection(`${symbol} `);
+            if (!inserted) {
+              alert('Selecciona un área editable antes de insertar iconos.');
+            }
+            hideIconPicker();
+          });
+          iconPicker.appendChild(btn);
+        });
+        document.body.appendChild(iconPicker);
+      }
+
       function hideIconPicker() {
-        if (!iconPicker.classList.contains('show')) {
+        if (!ICON_FEATURE_ENABLED || !iconPicker || !iconPicker.classList.contains('show')) {
           return;
         }
         iconPicker.classList.remove('show');
@@ -635,7 +745,7 @@ export function initializeEditor() {
       }
 
       function showIconPicker(anchor) {
-        if (!anchor) {
+        if (!ICON_FEATURE_ENABLED || !iconPicker || !anchor) {
           return;
         }
         iconPickerAnchor = anchor;
@@ -7957,48 +8067,54 @@ export function initializeEditor() {
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
-      insertIconBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
+      if (ICON_FEATURE_ENABLED && insertIconBtn && iconPicker) {
+        insertIconBtn.addEventListener('pointerdown', () => {
+          saveCurrentSelection();
+        });
 
-      insertIconBtn?.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        saveCurrentSelection();
-        if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
-          hideIconPicker();
-        } else {
-          showIconPicker(insertIconBtn);
-        }
-      });
-
-      insertIconBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        insertIconBtn.addEventListener('click', (event) => {
           event.preventDefault();
+          event.stopPropagation();
           saveCurrentSelection();
           if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
             hideIconPicker();
           } else {
             showIconPicker(insertIconBtn);
           }
-        }
-      });
+        });
 
-      document.addEventListener('pointerdown', (event) => {
-        if (!iconPicker.classList.contains('show')) {
-          return;
-        }
-        if (iconPicker.contains(event.target)) {
-          return;
-        }
-        if (event.target === insertIconBtn) {
-          return;
-        }
-        hideIconPicker();
-      });
+        insertIconBtn.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            saveCurrentSelection();
+            if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
+              hideIconPicker();
+            } else {
+              showIconPicker(insertIconBtn);
+            }
+          }
+        });
 
-      window.addEventListener('resize', hideIconPicker);
-      document.addEventListener('scroll', hideIconPicker, true);
+        document.addEventListener('pointerdown', (event) => {
+          if (!iconPicker || !iconPicker.classList.contains('show')) {
+            return;
+          }
+          if (iconPicker.contains(event.target)) {
+            return;
+          }
+          if (event.target === insertIconBtn) {
+            return;
+          }
+          hideIconPicker();
+        });
+
+        window.addEventListener('resize', hideIconPicker);
+        document.addEventListener('scroll', hideIconPicker, true);
+      } else if (insertIconBtn) {
+        insertIconBtn.disabled = true;
+        insertIconBtn.setAttribute('aria-disabled', 'true');
+        insertIconBtn.title = 'La inserción de iconos no está disponible en esta versión.';
+      }
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
@@ -8553,51 +8669,115 @@ ${inlineStyles}
     };
   }
 
-  function saveToLocalCache(showFeedback = true) {
+  function showCacheButtonFeedback(icon, label, duration = 2000) {
+    if (!cacheSaveBtn) {
+      return;
+    }
+    const oldHtml = cacheSaveBtn.innerHTML;
+    cacheSaveBtn.innerHTML = `<span>${icon}</span> <span class="topbar-btn-label">${label}</span>`;
+    setTimeout(() => {
+      cacheSaveBtn.innerHTML = oldHtml;
+    }, duration);
+  }
+
+  async function saveToLocalCache(showFeedback = true) {
+    const snapshot = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      zoom: isMagicViewActive ? lastRegularZoom : currentZoom,
+      documentShift: documentHorizontalShift,
+      data: collectDocumentData()
+    };
+
+    const snapshotJson = JSON.stringify(snapshot);
+
     try {
       if (!window.localStorage) {
         throw new Error('Almacenamiento local no disponible');
       }
 
-      const snapshot = {
-        version: 1,
-        savedAt: new Date().toISOString(),
-        zoom: isMagicViewActive ? lastRegularZoom : currentZoom,
-        documentShift: documentHorizontalShift,
-        data: collectDocumentData()
-      };
+      try {
+        window.localStorage.removeItem(CACHE_STORAGE_KEY);
+      } catch (cleanupError) {
+        console.warn('No se pudo limpiar la caché previa antes de guardar:', cleanupError);
+      }
 
-      window.localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(snapshot));
+      const shouldClearExtended = usingExtendedCache || !!extendedCacheDbPromise;
+      window.localStorage.setItem(CACHE_STORAGE_KEY, snapshotJson);
+      if (shouldClearExtended) {
+        await clearExtendedCacheValue();
+      }
+      usingExtendedCache = false;
 
-      if (showFeedback && cacheSaveBtn) {
-        const oldHtml = cacheSaveBtn.innerHTML;
-        cacheSaveBtn.innerHTML = '<span>✅</span> <span class="topbar-btn-label">Guardado</span>';
-        setTimeout(() => {
-          cacheSaveBtn.innerHTML = oldHtml;
-        }, 2000);
+      if (showFeedback) {
+        if (cacheSaveBtn) {
+          showCacheButtonFeedback('✅', 'Guardado');
+        } else {
+          console.info('Cambios guardados en caché.');
+        }
       }
 
       return true;
     } catch (error) {
+      if (isQuotaExceededError(error) && ('indexedDB' in window)) {
+        try {
+          await writeExtendedCacheValue(snapshotJson);
+          usingExtendedCache = true;
+          if (showFeedback) {
+            if (cacheSaveBtn) {
+              showCacheButtonFeedback('📦', 'Guardado extendido');
+            } else {
+              alert('El contenido se guardó en almacenamiento extendido.');
+            }
+          }
+          return true;
+        } catch (extendedError) {
+          console.error('Error al usar almacenamiento extendido:', extendedError);
+          if (showFeedback) {
+            alert('El documento es demasiado grande para guardarse automáticamente. Exporta una copia para no perder información.');
+          }
+          return false;
+        }
+      }
+
       console.error('Error al guardar en caché:', error);
       if (showFeedback) {
-        alert('No se pudo guardar en caché: ' + error.message);
+        alert('No se pudo guardar en caché: ' + (error && error.message ? error.message : error));
       }
       return false;
     }
   }
 
-  function restoreFromLocalCache() {
+  async function restoreFromLocalCache() {
+    let raw = null;
+    let source = 'local';
+
     try {
-      if (!window.localStorage) {
-        return false;
+      if (window.localStorage) {
+        raw = window.localStorage.getItem(CACHE_STORAGE_KEY);
       }
+    } catch (error) {
+      console.error('No se pudo acceder al almacenamiento local:', error);
+      raw = null;
+    }
 
-      const raw = window.localStorage.getItem(CACHE_STORAGE_KEY);
-      if (!raw) {
-        return false;
+    if (!raw && ('indexedDB' in window)) {
+      try {
+        raw = await readExtendedCacheValue();
+        if (raw) {
+          source = 'extended';
+          usingExtendedCache = true;
+        }
+      } catch (error) {
+        console.error('No se pudo leer la caché extendida:', error);
       }
+    }
 
+    if (!raw) {
+      return false;
+    }
+
+    try {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') {
         return false;
@@ -8626,6 +8806,11 @@ ${inlineStyles}
         } else if (!restored) {
           applyDocumentShift();
         }
+      }
+
+      if (source === 'local' && usingExtendedCache) {
+        await clearExtendedCacheValue();
+        usingExtendedCache = false;
       }
 
       return restored;
@@ -9193,11 +9378,15 @@ ${inlineStyles}
     }
   });
 
-  cacheSaveBtn?.addEventListener('click', () => saveToLocalCache(true));
+  cacheSaveBtn?.addEventListener('click', () => {
+    void saveToLocalCache(true);
+  });
 
-  window.addEventListener('beforeunload', () => saveToLocalCache(false));
+  window.addEventListener('beforeunload', () => {
+    void saveToLocalCache(false);
+  });
 
-  const restoredFromCache = restoreFromLocalCache();
+  const restoredFromCache = await restoreFromLocalCache();
   if (!restoredFromCache) {
     buildSectionsPanel();
     applyZoom(currentZoom);
