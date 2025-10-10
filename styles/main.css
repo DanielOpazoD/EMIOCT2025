@@ -673,13 +673,13 @@ body.reading-mode .reading-mode-exit {
   display: grid;
   grid-template-columns: repeat(8, 20px);
   gap: 3px;
-  padding: 6px;
-  background: #fff;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
   position: fixed;
   z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
   display: none;
 }
 
@@ -690,16 +690,16 @@ body.reading-mode .reading-mode-exit {
 .color-swatch {
   width: 20px;
   height: 20px;
-  border: 1px solid #dee2e6;
-  border-radius: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 4px;
   cursor: pointer;
-  transition: transform 0.1s;
+  transition: transform 0.1s, box-shadow 0.1s, border-color 0.1s;
 }
 
 .color-swatch:hover {
   transform: scale(1.15);
-  border-color: #495057;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  border-color: rgba(71, 85, 105, 0.8);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
 }
 
 .icon-picker {
@@ -735,7 +735,7 @@ body.reading-mode .reading-mode-exit {
 
 .icon-picker button:hover,
 .icon-picker button:focus {
-  background: rgba(13, 110, 253, 0.12);
+  background: rgba(59, 130, 246, 0.18);
   outline: none;
   transform: translateY(-1px);
 }
