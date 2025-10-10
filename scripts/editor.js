@@ -736,6 +736,19 @@ export async function initializeEditor() {
         return picker;
       }
 
+      function mountIconPicker(picker) {
+        if (!picker || picker.isConnected) {
+          return picker;
+        }
+        const appendTarget = document.body || document.documentElement;
+        if (!appendTarget) {
+          window.addEventListener('DOMContentLoaded', () => mountIconPicker(picker), { once: true });
+          return picker;
+        }
+        appendTarget.appendChild(picker);
+        return picker;
+      }
+
       function ensureIconPicker() {
         if (!ICON_FEATURE_ENABLED) {
           return null;
@@ -743,16 +756,12 @@ export async function initializeEditor() {
         if (iconPicker && iconPicker.isConnected) {
           return iconPicker;
         }
-        if (!document.body) {
-          return null;
+        const picker = iconPicker || buildIconPicker();
+        iconPicker = mountIconPicker(picker);
+        if (iconPicker && insertIconBtn) {
+          insertIconBtn.setAttribute('aria-controls', iconPicker.id);
         }
-        const picker = buildIconPicker();
-        document.body.appendChild(picker);
-        iconPicker = picker;
-        if (insertIconBtn) {
-          insertIconBtn.setAttribute('aria-controls', picker.id);
-        }
-        return picker;
+        return iconPicker;
       }
 
       function hideIconPicker() {
@@ -786,6 +795,18 @@ export async function initializeEditor() {
         picker.style.left = `${offsetLeft}px`;
         picker.classList.add('show');
         anchor.setAttribute('aria-expanded', 'true');
+      }
+
+      function toggleIconPicker(anchor) {
+        const picker = ensureIconPicker();
+        if (!picker) {
+          return;
+        }
+        if (picker.classList.contains('show') && iconPickerAnchor === anchor) {
+          hideIconPicker();
+          return;
+        }
+        showIconPicker(anchor);
       }
 
       if (cropImageBtn) {
@@ -8086,7 +8107,7 @@ export async function initializeEditor() {
         if (targets.size === 0) {
           return;
         }
-        const delta = command === 'indent' ? 10 : -10;
+        const delta = command === 'indent' ? 5 : -5;
         applyIndentSnapshot(targets, delta);
       }
 
@@ -8125,30 +8146,14 @@ export async function initializeEditor() {
           event.preventDefault();
           event.stopPropagation();
           saveCurrentSelection();
-          const picker = ensureIconPicker();
-          if (!picker) {
-            return;
-          }
-          if (picker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
-            hideIconPicker();
-          } else {
-            showIconPicker(insertIconBtn);
-          }
+          toggleIconPicker(insertIconBtn);
         });
 
         insertIconBtn.addEventListener('keydown', (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             saveCurrentSelection();
-            const picker = ensureIconPicker();
-            if (!picker) {
-              return;
-            }
-            if (picker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
-              hideIconPicker();
-            } else {
-              showIconPicker(insertIconBtn);
-            }
+            toggleIconPicker(insertIconBtn);
           }
         });
 
