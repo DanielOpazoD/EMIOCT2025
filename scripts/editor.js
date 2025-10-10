@@ -1338,6 +1338,37 @@ export function initializeEditor() {
         if (Math.abs(nextZoom - prevZoom) < 0.0001) {
           return;
         }
+
+        const scaleFactor = nextZoom / prevZoom;
+
+        floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
+          const noteId = note.dataset.noteId;
+          if (!noteId) return;
+
+          const noteData = notesRegistry.get(noteId);
+          if (!noteData) return;
+
+          const updates = {};
+
+          if (Number.isFinite(noteData.pageOffsetTop)) {
+            const scaledTop = Math.round(noteData.pageOffsetTop * scaleFactor);
+            updates.pageOffsetTop = scaledTop;
+            note.dataset.pageOffsetTop = String(scaledTop);
+          }
+
+          if (Number.isFinite(noteData.pageOffsetLeft)) {
+            const scaledLeft = Math.round(noteData.pageOffsetLeft * scaleFactor);
+            updates.pageOffsetLeft = scaledLeft;
+            note.dataset.pageOffsetLeft = String(scaledLeft);
+          }
+
+          // relativeTop/relativeLeft representan proporciones (0-1) y no se escalan
+
+          if (Object.keys(updates).length > 0) {
+            updateNoteData(noteId, updates, { silent: true });
+          }
+        });
+
         floatingNotesViewportRelaxedMatching = true;
         scheduleFloatingNotesViewportRefresh();
       }
@@ -4442,6 +4473,18 @@ export function initializeEditor() {
         toggleNotesBtn.textContent = floatingNotesHidden ? '🙈' : '👁️';
       }
 
+      function updateNotesViewButtonState(isOpen) {
+        if (!notesViewBtn) return;
+        const baseTitle = notesViewBtn.dataset.baseTitle || notesViewBtn.title || 'Vista de notas';
+        if (!notesViewBtn.dataset.baseTitle) {
+          notesViewBtn.dataset.baseTitle = baseTitle;
+        }
+        const active = !!isOpen;
+        notesViewBtn.classList.toggle('active', active);
+        notesViewBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        notesViewBtn.title = active ? 'Cerrar vista de notas' : baseTitle;
+      }
+
       function setFloatingNotesVisibility(hidden) {
         floatingNotesHidden = !!hidden;
         document.body.classList.toggle('notes-hidden', floatingNotesHidden);
@@ -5660,6 +5703,10 @@ export function initializeEditor() {
           this.bindEvents();
           this.updateBadge();
           this.updateScopeCounts();
+          if (this.panel) {
+            this.panel.setAttribute('aria-hidden', 'true');
+          }
+          updateNotesViewButtonState(false);
         }
 
         bindEvents() {
@@ -5740,7 +5787,11 @@ export function initializeEditor() {
           this.updateScopeButtons();
           this.updateScopeCounts();
           this.render();
-          this.panel?.classList.add('open');
+          if (this.panel) {
+            this.panel.classList.add('open');
+            this.panel.setAttribute('aria-hidden', 'false');
+          }
+          updateNotesViewButtonState(true);
         }
 
         close() {
@@ -5748,7 +5799,11 @@ export function initializeEditor() {
             this.deleteEnabled = false;
             this.render();
           }
-          this.panel?.classList.remove('open');
+          if (this.panel) {
+            this.panel.classList.remove('open');
+            this.panel.setAttribute('aria-hidden', 'true');
+          }
+          updateNotesViewButtonState(false);
         }
 
         notifyNotesUpdated() {
@@ -6173,13 +6228,15 @@ export function initializeEditor() {
         });
       }
 
-      notesViewBtn?.addEventListener('click', () => {
-        if (!notesViewController) return;
+      notesViewBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        const controller = notesViewController || (notesViewController = new NotesViewController());
+        if (!controller) return;
         closeTopicNotesPopover();
-        if (notesViewController.isOpen()) {
-          notesViewController.close();
+        if (controller.isOpen()) {
+          controller.close();
         } else {
-          notesViewController.open('all');
+          controller.open('all');
         }
       });
 
