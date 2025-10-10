@@ -10,7 +10,10 @@ import {
 import {
   normalizePriority,
   sanitizeTags,
-  getNotePlainTextFromHtml
+  getNotePlainTextFromHtml,
+  sanitizeNoteTitleHtml,
+  getNoteTitlePlainText,
+  escapeHtml
 } from './noteUtils.js';
 
 function createNormalizedNotePage(rawPage = {}, {
@@ -111,11 +114,32 @@ export function createEnhancedNote(options = {}) {
   const createdAt = options.createdAt ? String(options.createdAt) : nowIso;
   const updatedAt = options.updatedAt ? String(options.updatedAt) : nowIso;
 
+  let titleHtml = '';
+  if (typeof options.titleHtml === 'string') {
+    titleHtml = sanitizeNoteTitleHtml(options.titleHtml);
+  }
+
   let title = null;
   if (typeof options.title === 'string') {
     title = options.title.trim();
   } else if (options.title === null) {
     title = null;
+  }
+
+  if (!titleHtml && title) {
+    titleHtml = escapeHtml(title);
+  }
+
+  if (titleHtml) {
+    const normalizedText = getNoteTitlePlainText(titleHtml).replace(/[\s\u00A0]+/g, ' ').trim();
+    if (normalizedText) {
+      title = normalizedText;
+    } else {
+      titleHtml = '';
+      title = null;
+    }
+  } else if (title) {
+    titleHtml = escapeHtml(title);
   }
 
   const base = {
@@ -127,6 +151,7 @@ export function createEnhancedNote(options = {}) {
       ? options.borderColor.trim()
       : null,
     title,
+    titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
     html: typeof options.html === 'string' ? options.html : '',
     linkedTo: options.linkedTo || null,
@@ -236,11 +261,30 @@ export class NoteRegistry {
           merged.reviewCount = Number.isFinite(overrides.reviewCount)
             ? Number(overrides.reviewCount)
             : merged.reviewCount;
+        } else if (key === 'titleHtml') {
+          if (typeof overrides.titleHtml === 'string') {
+            const sanitizedHtml = sanitizeNoteTitleHtml(overrides.titleHtml);
+            merged.titleHtml = sanitizedHtml;
+            const normalized = getNoteTitlePlainText(sanitizedHtml).replace(/[\s\u00A0]+/g, ' ').trim();
+            merged.title = normalized.length ? normalized : null;
+          } else if (overrides.titleHtml === null) {
+            merged.titleHtml = '';
+            merged.title = null;
+          }
         } else if (key === 'title') {
           if (typeof overrides.title === 'string') {
-            merged.title = overrides.title.trim();
+            const trimmed = overrides.title.trim();
+            merged.title = trimmed.length ? trimmed : null;
+            if (trimmed.length) {
+              merged.titleHtml = sanitizeNoteTitleHtml(overrides.titleHtml ?? escapeHtml(trimmed));
+              const normalized = getNoteTitlePlainText(merged.titleHtml).replace(/[\s\u00A0]+/g, ' ').trim();
+              merged.title = normalized.length ? normalized : null;
+            } else {
+              merged.titleHtml = '';
+            }
           } else if (overrides.title === null) {
             merged.title = null;
+            merged.titleHtml = '';
           }
         } else if (
           key === 'left' ||

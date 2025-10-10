@@ -13,7 +13,9 @@ import {
   escapeHtml,
   getNotePlainTextFromHtml,
   getNoteCategoryInfo,
-  getNoteDisplayTitle
+  getNoteDisplayTitle,
+  sanitizeNoteTitleHtml,
+  getNoteTitlePlainText
 } from './modules/notes/noteUtils.js';
 
 export async function initializeEditor() {
@@ -491,6 +493,21 @@ export async function initializeEditor() {
         });
       }
 
+      function setActiveTopicListHighlight(topicId) {
+        if (!sectionsContainer) return;
+        const normalizedTopicId = (topicId || '').trim();
+        sectionsContainer.querySelectorAll('.topic-list li').forEach((item) => {
+          const itemTopicId = (item.dataset.topicId || '').trim();
+          const isActive = normalizedTopicId && itemTopicId === normalizedTopicId;
+          item.classList.toggle('active', isActive);
+          if (isActive) {
+            item.setAttribute('aria-current', 'true');
+          } else if (item.hasAttribute('aria-current')) {
+            item.removeAttribute('aria-current');
+          }
+        });
+      }
+
       function ensureVisibleSection({ force = false } = {}) {
         const availableIds = sections.map((section) => normalizeSectionId(section.id));
         let targetId = getVisibleSectionId();
@@ -533,12 +550,14 @@ export async function initializeEditor() {
           refreshFloatingNotesTopicVisibility();
           scheduleFloatingNotesViewportRefresh();
           ensureVisibleSection({ force: true });
+          setActiveTopicListHighlight('');
           return;
         }
         const nextTopicId = page.dataset.topicId || '';
         if (isTopicNotesPopoverOpen() && topicNotesPopoverTopicId && topicNotesPopoverTopicId !== nextTopicId) {
           closeTopicNotesPopover();
         }
+        setActiveTopicListHighlight(nextTopicId);
         currentPageRef = page;
         const sectionId = page.dataset.sectionId || 'seccion-default';
         currentSectionId = sectionId;
@@ -788,6 +807,9 @@ export async function initializeEditor() {
           return;
         }
         iconPickerAnchor = anchor;
+        if (!restoreSelection()) {
+          ensureEditableSelection();
+        }
         const rect = anchor.getBoundingClientRect();
         const offsetTop = rect.bottom + window.scrollY + 6;
         const offsetLeft = rect.left + window.scrollX;
@@ -4364,7 +4386,7 @@ export async function initializeEditor() {
         if (shouldShow) {
           viewportState = getActiveTopicViewportState();
           if (!viewportState) {
-            shouldShow = false;
+            shouldShow = relaxMatching;
           } else if (!relaxMatching) {
             const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
             const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');
@@ -4637,7 +4659,7 @@ export async function initializeEditor() {
             label.spellcheck = false;
             if (!editable) {
               label.dataset.editing = 'false';
-              delete label.dataset.initialTitleText;
+              delete label.dataset.initialTitleHtml;
             }
           }
           const category = note.querySelector('.note-category');
@@ -4760,6 +4782,19 @@ export async function initializeEditor() {
           return null;
         })();
 
+        const initialTitleHtml = (() => {
+          if (typeof data.titleHtml === 'string') {
+            return data.titleHtml;
+          }
+          if (typeof metaSource.titleHtml === 'string') {
+            return metaSource.titleHtml;
+          }
+          if (typeof initialTitle === 'string' && initialTitle.length) {
+            return escapeHtml(initialTitle);
+          }
+          return '';
+        })();
+
         const topicId = data.topicId || metaSource.topicId || currentPageRef?.dataset.topicId || null;
         const sectionId = data.sectionId || metaSource.sectionId || currentSectionId || currentPageRef?.dataset.sectionId || null;
         const noteType = data.type || metaSource.type || DEFAULT_NOTE_TYPE;
@@ -4812,6 +4847,7 @@ export async function initializeEditor() {
           id: noteId,
           style: resolvedStyleId,
           title: initialTitle,
+          titleHtml: initialTitleHtml,
           html: htmlContent,
           content: getNotePlainTextFromHtml(htmlContent),
           type: noteType,
@@ -5037,23 +5073,29 @@ export async function initializeEditor() {
           }
           categoryLabel.dataset.editing = 'false';
           const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
-          const initialNormalized = (categoryLabel.dataset.initialTitleText || '').replace(/[\s\u00A0]+/g, ' ').trim();
-          delete categoryLabel.dataset.initialTitleText;
+          const initialStoredHtml = categoryLabel.dataset.initialTitleHtml || '';
+          delete categoryLabel.dataset.initialTitleHtml;
           if (restoreOriginal) {
             syncNoteElementMeta(note, currentData);
             return;
           }
-          const raw = categoryLabel.textContent || '';
-          const normalized = raw.replace(/[\s\u00A0]+/g, ' ').trim();
-          if (normalized !== raw) {
-            categoryLabel.textContent = normalized;
+          const rawHtml = categoryLabel.innerHTML;
+          const sanitizedHtml = sanitizeNoteTitleHtml(rawHtml);
+          const normalized = getNoteTitlePlainText(sanitizedHtml).replace(/[\s\u00A0]+/g, ' ').trim();
+          const initialSanitized = sanitizeNoteTitleHtml(initialStoredHtml);
+          const initialNormalized = getNoteTitlePlainText(initialSanitized).replace(/[\s\u00A0]+/g, ' ').trim();
+          if (sanitizedHtml !== rawHtml) {
+            categoryLabel.innerHTML = sanitizedHtml;
           }
-          if (normalized === initialNormalized) {
+          categoryLabel.classList.toggle('note-label-empty', !normalized);
+          if (sanitizedHtml === initialSanitized) {
             syncNoteElementMeta(note, currentData);
             return;
           }
-          const titleValue = normalized.length ? normalized : null;
-          const updated = updateNoteData(noteId, { title: titleValue }, { silent: true });
+          const updated = updateNoteData(noteId, {
+            title: normalized.length ? normalized : null,
+            titleHtml: sanitizedHtml
+          }, { silent: true });
           syncNoteElementMeta(note, updated);
           scheduleNotesViewRefresh();
         };
@@ -5065,7 +5107,7 @@ export async function initializeEditor() {
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu(optionsMenu);
           categoryLabel.dataset.editing = 'true';
-          categoryLabel.dataset.initialTitleText = categoryLabel.textContent || '';
+          categoryLabel.dataset.initialTitleHtml = categoryLabel.innerHTML || '';
         });
 
         categoryLabel.addEventListener('blur', () => {
@@ -5094,8 +5136,12 @@ export async function initializeEditor() {
             return;
           }
           event.preventDefault();
+          const html = event.clipboardData?.getData('text/html');
           const text = event.clipboardData?.getData('text/plain') || '';
-          document.execCommand('insertText', false, text);
+          const toInsert = html ? sanitizeNoteTitleHtml(html) : escapeHtml(text);
+          if (toInsert) {
+            document.execCommand('insertHTML', false, toInsert);
+          }
         });
 
         header.addEventListener('pointerdown', (event) => {
@@ -5684,7 +5730,8 @@ export async function initializeEditor() {
           const displayTitle = getNoteDisplayTitle(noteData.title, '');
           const hasCustomTitle = displayTitle.length > 0;
           if (ui.categoryLabel.dataset.editing !== 'true') {
-            ui.categoryLabel.textContent = displayTitle;
+            const titleHtml = noteData.titleHtml || (hasCustomTitle ? escapeHtml(displayTitle) : '');
+            ui.categoryLabel.innerHTML = titleHtml;
             ui.categoryLabel.classList.toggle('note-label-empty', !hasCustomTitle);
           }
           if (ui.categoryWrap) {
@@ -5771,6 +5818,7 @@ export async function initializeEditor() {
               focus: false,
               meta: noteData.meta || noteData,
               title: noteData.title,
+              titleHtml: noteData.titleHtml,
               category: noteData.category,
               priority: noteData.priority,
               tags: noteData.tags,
@@ -7602,6 +7650,10 @@ export async function initializeEditor() {
         }
         updateSectionsPanelActiveState();
         refreshTopicNoteIndicators();
+        const activeTopicId = (currentPageRef && currentPageRef.dataset)
+          ? currentPageRef.dataset.topicId || ''
+          : '';
+        setActiveTopicListHighlight(activeTopicId);
       }
 
       function togglePanelEditMode() {
@@ -7900,17 +7952,125 @@ export async function initializeEditor() {
       }
       clearAllBtn?.addEventListener('click', clearAllContent);
 
+      const TOPIC_OBSERVER_THRESHOLDS = [0, 0.1, 0.25, 0.5, 0.75, 1];
+      let pendingActiveTopicResolution = false;
+
+      function scheduleActiveTopicResolution() {
+        if (pendingActiveTopicResolution) {
+          return;
+        }
+        pendingActiveTopicResolution = true;
+        requestAnimationFrame(() => {
+          pendingActiveTopicResolution = false;
+          resolveActiveTopicFromViewport();
+        });
+      }
+
+      function resolveActiveTopicFromViewport() {
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (viewportHeight <= 0) {
+          return;
+        }
+
+        const viewportCenter = viewportHeight * 0.45;
+        let centerCandidate = null;
+        let centerDistance = Infinity;
+        let fallbackCandidate = null;
+        let fallbackRatio = 0;
+        let fallbackDistance = Infinity;
+
+        const current = currentPageRef && currentPageRef.isConnected ? currentPageRef : null;
+        let currentRatio = 0;
+        let currentDistance = Infinity;
+
+        pages.forEach((page) => {
+          if (!page || !page.isConnected) {
+            return;
+          }
+          const rect = page.getBoundingClientRect();
+          const height = rect.height || page.offsetHeight || 0;
+          if (height <= 0) {
+            return;
+          }
+
+          const visibleTop = Math.max(rect.top, 0);
+          const visibleBottom = Math.min(rect.bottom, viewportHeight);
+          const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+          if (visibleHeight <= 0) {
+            return;
+          }
+
+          const ratio = Math.max(0, Math.min(1, visibleHeight / height));
+          const pageCenter = rect.top + (height * 0.5);
+          const distance = Math.abs(pageCenter - viewportCenter);
+          const containsCenter = rect.top <= viewportCenter && rect.bottom >= viewportCenter;
+
+          if (page === current) {
+            currentRatio = ratio;
+            currentDistance = distance;
+          }
+
+          if (containsCenter) {
+            if (!centerCandidate || distance < centerDistance) {
+              centerCandidate = page;
+              centerDistance = distance;
+            }
+            return;
+          }
+
+          if (
+            ratio > fallbackRatio + 0.02
+            || (Math.abs(ratio - fallbackRatio) <= 0.02 && distance < fallbackDistance)
+          ) {
+            fallbackCandidate = page;
+            fallbackRatio = ratio;
+            fallbackDistance = distance;
+          }
+        });
+
+        let candidate = centerCandidate || fallbackCandidate || current;
+        if (!candidate) {
+          setActiveTopicListHighlight('');
+          return;
+        }
+
+        if (
+          candidate !== current
+          && current
+          && currentRatio > 0
+          && !centerCandidate
+        ) {
+          const ratioAdvantage = fallbackRatio - currentRatio;
+          if (
+            ratioAdvantage < 0.08
+            || (Math.abs(ratioAdvantage) <= 0.08 && currentDistance <= fallbackDistance + 48)
+          ) {
+            candidate = current;
+          }
+        }
+
+        const topicId = candidate.dataset.topicId || '';
+        if (candidate !== currentPageRef) {
+          setActivePage(candidate);
+        } else {
+          setActiveTopicListHighlight(topicId);
+        }
+      }
+
       const io = new IntersectionObserver((entries) => {
-        const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!visible) return;
-        const tid = visible.target.dataset.topicId || '';
-        sectionsContainer.querySelectorAll('li').forEach(li =>
-          li.classList.toggle('active', li.dataset.topicId === tid)
-        );
-        setActivePage(visible.target);
-      }, { root: null, threshold: [0.5, 0.75, 1] });
+        if (!entries || entries.length === 0) {
+          return;
+        }
+        scheduleActiveTopicResolution();
+      }, {
+        root: null,
+        threshold: TOPIC_OBSERVER_THRESHOLDS,
+        rootMargin: '-40px 0px -30% 0px'
+      });
 
       pages.forEach(p => io.observe(p));
+      scheduleActiveTopicResolution();
+      window.addEventListener('resize', scheduleActiveTopicResolution);
 
       plusBtn?.addEventListener('click', () => {
         if (panel.classList.contains('open')) {
@@ -8671,6 +8831,7 @@ ${inlineStyles}
           noteExport.priority = noteData.priority;
           noteExport.tags = Array.isArray(noteData.tags) ? [...noteData.tags] : [];
           noteExport.title = noteData.title || '';
+          noteExport.titleHtml = noteData.titleHtml || '';
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
