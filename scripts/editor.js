@@ -8086,7 +8086,7 @@ export async function initializeEditor() {
         if (targets.size === 0) {
           return;
         }
-        const delta = command === 'indent' ? 10 : -10;
+        const delta = command === 'indent' ? 5 : -5;
         applyIndentSnapshot(targets, delta);
       }
 
@@ -8167,7 +8167,21 @@ export async function initializeEditor() {
         });
 
         window.addEventListener('resize', hideIconPicker);
-        document.addEventListener('scroll', hideIconPicker, true);
+        document.addEventListener('scroll', (event) => {
+          if (!iconPicker || !iconPicker.classList.contains('show')) {
+            return;
+          }
+          const target = event.target;
+          if (target instanceof Element) {
+            if (iconPicker.contains(target)) {
+              return;
+            }
+            if (target.closest('.edit-toolbar')) {
+              return;
+            }
+          }
+          hideIconPicker();
+        }, true);
       } else if (insertIconBtn) {
         insertIconBtn.disabled = true;
         insertIconBtn.setAttribute('aria-disabled', 'true');
