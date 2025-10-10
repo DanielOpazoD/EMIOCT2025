@@ -711,12 +711,12 @@ export async function initializeEditor() {
       let iconPicker = null;
       let iconPickerAnchor = null;
 
-      if (ICON_FEATURE_ENABLED) {
-        iconPicker = document.createElement('div');
-        iconPicker.id = 'iconPicker';
-        iconPicker.className = 'icon-picker';
-        iconPicker.setAttribute('role', 'menu');
-        iconPicker.setAttribute('aria-label', 'Insertar icono');
+      function buildIconPicker() {
+        const picker = document.createElement('div');
+        picker.id = 'iconPicker';
+        picker.className = 'icon-picker';
+        picker.setAttribute('role', 'menu');
+        picker.setAttribute('aria-label', 'Insertar icono');
         NOTE_ICON_SYMBOLS.forEach(symbol => {
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -731,30 +731,61 @@ export async function initializeEditor() {
             }
             hideIconPicker();
           });
-          iconPicker.appendChild(btn);
+          picker.appendChild(btn);
         });
-        document.body.appendChild(iconPicker);
+        return picker;
+      }
+
+      function ensureIconPicker() {
+        if (!ICON_FEATURE_ENABLED) {
+          return null;
+        }
+        if (iconPicker && iconPicker.isConnected) {
+          return iconPicker;
+        }
+        if (!document.body) {
+          return null;
+        }
+        const picker = buildIconPicker();
+        document.body.appendChild(picker);
+        iconPicker = picker;
+        if (insertIconBtn) {
+          insertIconBtn.setAttribute('aria-controls', picker.id);
+        }
+        return picker;
       }
 
       function hideIconPicker() {
-        if (!ICON_FEATURE_ENABLED || !iconPicker || !iconPicker.classList.contains('show')) {
+        if (!ICON_FEATURE_ENABLED) {
           return;
         }
-        iconPicker.classList.remove('show');
+        const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
+        if (!picker || !picker.classList.contains('show')) {
+          return;
+        }
+        picker.classList.remove('show');
+        if (iconPickerAnchor) {
+          iconPickerAnchor.setAttribute('aria-expanded', 'false');
+        }
         iconPickerAnchor = null;
       }
 
       function showIconPicker(anchor) {
-        if (!ICON_FEATURE_ENABLED || !iconPicker || !anchor) {
+        if (!ICON_FEATURE_ENABLED || !anchor) {
+          return;
+        }
+        const picker = ensureIconPicker();
+        if (!picker) {
           return;
         }
         iconPickerAnchor = anchor;
         const rect = anchor.getBoundingClientRect();
         const offsetTop = rect.bottom + window.scrollY + 6;
         const offsetLeft = rect.left + window.scrollX;
-        iconPicker.style.top = `${offsetTop}px`;
-        iconPicker.style.left = `${offsetLeft}px`;
-        iconPicker.classList.add('show');
+        picker.style.top = `${offsetTop}px`;
+        picker.style.left = `${offsetLeft}px`;
+        picker.classList.add('show');
+        anchor.setAttribute('aria-expanded', 'true');
       }
 
       if (cropImageBtn) {
@@ -8067,7 +8098,12 @@ export async function initializeEditor() {
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
-      if (ICON_FEATURE_ENABLED && insertIconBtn && iconPicker) {
+      if (ICON_FEATURE_ENABLED && insertIconBtn) {
+        insertIconBtn.setAttribute('aria-haspopup', 'menu');
+        insertIconBtn.setAttribute('aria-expanded', 'false');
+
+        ensureIconPicker();
+
         insertIconBtn.addEventListener('pointerdown', () => {
           saveCurrentSelection();
         });
@@ -8076,7 +8112,11 @@ export async function initializeEditor() {
           event.preventDefault();
           event.stopPropagation();
           saveCurrentSelection();
-          if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
+          const picker = ensureIconPicker();
+          if (!picker) {
+            return;
+          }
+          if (picker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
             hideIconPicker();
           } else {
             showIconPicker(insertIconBtn);
@@ -8087,7 +8127,11 @@ export async function initializeEditor() {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             saveCurrentSelection();
-            if (iconPicker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
+            const picker = ensureIconPicker();
+            if (!picker) {
+              return;
+            }
+            if (picker.classList.contains('show') && iconPickerAnchor === insertIconBtn) {
               hideIconPicker();
             } else {
               showIconPicker(insertIconBtn);
@@ -8096,10 +8140,11 @@ export async function initializeEditor() {
         });
 
         document.addEventListener('pointerdown', (event) => {
-          if (!iconPicker || !iconPicker.classList.contains('show')) {
+          const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
+          if (!picker || !picker.classList.contains('show')) {
             return;
           }
-          if (iconPicker.contains(event.target)) {
+          if (picker.contains(event.target)) {
             return;
           }
           if (event.target === insertIconBtn) {
