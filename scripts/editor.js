@@ -13,7 +13,8 @@ import {
   escapeHtml,
   getNotePlainTextFromHtml,
   getNoteCategoryInfo,
-  getNoteDisplayTitle
+  getNoteDisplayTitle,
+  sanitizeNoteTitleHtml
 } from './modules/notes/noteUtils.js';
 
 export async function initializeEditor() {
@@ -1502,7 +1503,7 @@ export async function initializeEditor() {
         });
 
         floatingNotesViewportRelaxedMatching = true;
-        scheduleFloatingNotesViewportRefresh();
+        scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
       }
 
       function applyDocumentShift() {
@@ -4638,6 +4639,7 @@ export async function initializeEditor() {
             if (!editable) {
               label.dataset.editing = 'false';
               delete label.dataset.initialTitleText;
+              delete label.dataset.initialTitleHtml;
             }
           }
           const category = note.querySelector('.note-category');
@@ -4760,6 +4762,22 @@ export async function initializeEditor() {
           return null;
         })();
 
+        const initialTitleHtml = (() => {
+          if (typeof data.titleHtml === 'string') {
+            return data.titleHtml;
+          }
+          if (data.titleHtml === null) {
+            return null;
+          }
+          if (typeof metaSource.titleHtml === 'string') {
+            return metaSource.titleHtml;
+          }
+          if (metaSource.titleHtml === null) {
+            return null;
+          }
+          return null;
+        })();
+
         const topicId = data.topicId || metaSource.topicId || currentPageRef?.dataset.topicId || null;
         const sectionId = data.sectionId || metaSource.sectionId || currentSectionId || currentPageRef?.dataset.sectionId || null;
         const noteType = data.type || metaSource.type || DEFAULT_NOTE_TYPE;
@@ -4812,6 +4830,7 @@ export async function initializeEditor() {
           id: noteId,
           style: resolvedStyleId,
           title: initialTitle,
+          titleHtml: initialTitleHtml,
           html: htmlContent,
           content: getNotePlainTextFromHtml(htmlContent),
           type: noteType,
@@ -5038,22 +5057,28 @@ export async function initializeEditor() {
           categoryLabel.dataset.editing = 'false';
           const currentData = notesRegistry.get(noteId) || ensureNoteData(noteId);
           const initialNormalized = (categoryLabel.dataset.initialTitleText || '').replace(/[\s\u00A0]+/g, ' ').trim();
+          const initialHtmlSnapshot = categoryLabel.dataset.initialTitleHtml || '';
           delete categoryLabel.dataset.initialTitleText;
+          delete categoryLabel.dataset.initialTitleHtml;
           if (restoreOriginal) {
             syncNoteElementMeta(note, currentData);
             return;
           }
-          const raw = categoryLabel.textContent || '';
-          const normalized = raw.replace(/[\s\u00A0]+/g, ' ').trim();
-          if (normalized !== raw) {
-            categoryLabel.textContent = normalized;
+          const rawHtml = categoryLabel.innerHTML;
+          const sanitizedHtml = sanitizeNoteTitleHtml(rawHtml);
+          if (sanitizedHtml !== rawHtml) {
+            categoryLabel.innerHTML = sanitizedHtml;
           }
-          if (normalized === initialNormalized) {
+          const plainText = getNotePlainTextFromHtml(sanitizedHtml);
+          const normalized = plainText.replace(/[\s\u00A0]+/g, ' ').trim();
+          const normalizedInitialHtml = sanitizeNoteTitleHtml(initialHtmlSnapshot);
+          if (normalized === initialNormalized && sanitizedHtml === normalizedInitialHtml) {
             syncNoteElementMeta(note, currentData);
             return;
           }
           const titleValue = normalized.length ? normalized : null;
-          const updated = updateNoteData(noteId, { title: titleValue }, { silent: true });
+          const titleHtmlValue = titleValue ? sanitizedHtml : null;
+          const updated = updateNoteData(noteId, { title: titleValue, titleHtml: titleHtmlValue }, { silent: true });
           syncNoteElementMeta(note, updated);
           scheduleNotesViewRefresh();
         };
@@ -5065,7 +5090,9 @@ export async function initializeEditor() {
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu(optionsMenu);
           categoryLabel.dataset.editing = 'true';
-          categoryLabel.dataset.initialTitleText = categoryLabel.textContent || '';
+          const currentHtml = categoryLabel.innerHTML || '';
+          categoryLabel.dataset.initialTitleText = getNotePlainTextFromHtml(currentHtml);
+          categoryLabel.dataset.initialTitleHtml = sanitizeNoteTitleHtml(currentHtml);
         });
 
         categoryLabel.addEventListener('blur', () => {
@@ -5094,8 +5121,14 @@ export async function initializeEditor() {
             return;
           }
           event.preventDefault();
-          const text = event.clipboardData?.getData('text/plain') || '';
-          document.execCommand('insertText', false, text);
+          const htmlData = event.clipboardData?.getData('text/html') || '';
+          const textData = event.clipboardData?.getData('text/plain') || '';
+          const sanitized = sanitizeNoteTitleHtml(htmlData);
+          if (sanitized) {
+            document.execCommand('insertHTML', false, sanitized);
+          } else if (textData) {
+            document.execCommand('insertText', false, textData);
+          }
         });
 
         header.addEventListener('pointerdown', (event) => {
@@ -5682,9 +5715,14 @@ export async function initializeEditor() {
         }
         if (ui.categoryLabel) {
           const displayTitle = getNoteDisplayTitle(noteData.title, '');
+          const titleHtml = typeof noteData.titleHtml === 'string' ? noteData.titleHtml : '';
           const hasCustomTitle = displayTitle.length > 0;
           if (ui.categoryLabel.dataset.editing !== 'true') {
-            ui.categoryLabel.textContent = displayTitle;
+            if (titleHtml && hasCustomTitle) {
+              ui.categoryLabel.innerHTML = titleHtml;
+            } else {
+              ui.categoryLabel.textContent = displayTitle;
+            }
             ui.categoryLabel.classList.toggle('note-label-empty', !hasCustomTitle);
           }
           if (ui.categoryWrap) {
@@ -5771,6 +5809,7 @@ export async function initializeEditor() {
               focus: false,
               meta: noteData.meta || noteData,
               title: noteData.title,
+              titleHtml: noteData.titleHtml,
               category: noteData.category,
               priority: noteData.priority,
               tags: noteData.tags,
@@ -8671,6 +8710,7 @@ ${inlineStyles}
           noteExport.priority = noteData.priority;
           noteExport.tags = Array.isArray(noteData.tags) ? [...noteData.tags] : [];
           noteExport.title = noteData.title || '';
+          noteExport.titleHtml = noteData.titleHtml || '';
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
