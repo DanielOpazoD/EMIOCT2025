@@ -8130,7 +8130,9 @@ export async function initializeEditor() {
         }
       });
 
-      document.getElementById('insertTemplateBtn')?.addEventListener('click', () => {
+      document.getElementById('insertTemplateBtn')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         if (!savedSelection) {
           const activeEditable = document.activeElement && document.activeElement.isContentEditable ? document.activeElement : null;
           const target = activeEditable || getCurrentPage() || getCurrentMagicPage();
@@ -8227,7 +8229,17 @@ export async function initializeEditor() {
             <h4>${template.name}</h4>
             <div class="template-preview">${template.html}</div>
           `;
-          card.addEventListener('click', () => {
+          card.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const selectionRestored = restoreSelection();
+            if (!selectionRestored) {
+              const ensuredSelection = ensureEditableSelection();
+              if (!ensuredSelection || !ensuredSelection.rangeCount) {
+                alert('Selecciona un área editable antes de insertar una plantilla.');
+                return;
+              }
+            }
             const block = createTemplateBlock(template);
             if (!block) return;
             const insertedBlock = insertNodeAtSelection(block);
@@ -8244,7 +8256,17 @@ export async function initializeEditor() {
         });
       });
 
-      insertCollapseCardBtn?.addEventListener('click', () => {
+      insertCollapseCardBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const selectionRestored = restoreSelection();
+        if (!selectionRestored) {
+          const ensuredSelection = ensureEditableSelection();
+          if (!ensuredSelection || !ensuredSelection.rangeCount) {
+            alert('Selecciona un área editable antes de insertar la tarjeta.');
+            return;
+          }
+        }
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
         const insertedCard = insertNodeAtSelection(card);
@@ -9457,7 +9479,9 @@ export async function initializeEditor() {
       scheduleIconPickerRebind();
 
       /* === INSERTAR HTML PERSONALIZADO === */
-      document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
+      document.getElementById('insertHtmlBtn')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         showModal(`
           <div class="modal-header">
             <h3>Insertar HTML Personalizado</h3>
@@ -9474,9 +9498,19 @@ export async function initializeEditor() {
         `);
 
         setTimeout(() => {
-          document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
+          document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', (confirmEvent) => {
+            confirmEvent.preventDefault();
+            confirmEvent.stopPropagation();
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
+              const selectionRestored = restoreSelection();
+              if (!selectionRestored) {
+                const ensuredSelection = ensureEditableSelection();
+                if (!ensuredSelection || !ensuredSelection.rangeCount) {
+                  alert('Selecciona un área editable antes de insertar HTML.');
+                  return;
+                }
+              }
               const insertedNode = insertHtmlAtSelection(htmlCode);
               if (insertedNode) {
                 hideModal();
@@ -9529,7 +9563,9 @@ export async function initializeEditor() {
       });
 
       /* === INSERTAR TABLA === */
-      document.getElementById('insertTableBtn')?.addEventListener('click', () => {
+      document.getElementById('insertTableBtn')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         showModal(`
           <div class="modal-header">
             <h3>Insertar Tabla</h3>
@@ -9545,35 +9581,45 @@ export async function initializeEditor() {
             <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
           </div>
         `);
-    setTimeout(() => {
-      document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-        const rows = parseInt(document.getElementById('tableRows').value) || 3;
-        const cols = parseInt(document.getElementById('tableCols').value) || 3;
-        
-        let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-        for (let i = 0; i < cols; i++) {
-          tableHTML += `<th>Encabezado ${i + 1}</th>`;
-        }
-        tableHTML += '</tr></thead><tbody>';
-        
-        for (let i = 0; i < rows; i++) {
-          tableHTML += '<tr>';
-          for (let j = 0; j < cols; j++) {
-            tableHTML += '<td>Celda</td>';
-          }
-          tableHTML += '</tr>';
-        }
-        tableHTML += '</tbody></table></div>';
+        setTimeout(() => {
+          document.getElementById('insertTableConfirm')?.addEventListener('click', (confirmEvent) => {
+            confirmEvent.preventDefault();
+            confirmEvent.stopPropagation();
+            const selectionRestored = restoreSelection();
+            if (!selectionRestored) {
+              const ensuredSelection = ensureEditableSelection();
+              if (!ensuredSelection || !ensuredSelection.rangeCount) {
+                alert('Selecciona un área editable antes de insertar una tabla.');
+                return;
+              }
+            }
+            const rows = parseInt(document.getElementById('tableRows').value) || 3;
+            const cols = parseInt(document.getElementById('tableCols').value) || 3;
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
-        if (insertedNode) {
-          hideModal();
-        } else {
-          alert('Selecciona un área editable antes de insertar una tabla.');
-        }
+            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
+            for (let i = 0; i < cols; i++) {
+              tableHTML += `<th>Encabezado ${i + 1}</th>`;
+            }
+            tableHTML += '</tr></thead><tbody>';
+
+            for (let i = 0; i < rows; i++) {
+              tableHTML += '<tr>';
+              for (let j = 0; j < cols; j++) {
+                tableHTML += '<td>Celda</td>';
+              }
+              tableHTML += '</tr>';
+            }
+            tableHTML += '</tbody></table></div>';
+
+            const insertedNode = insertHtmlAtSelection(tableHTML);
+            if (insertedNode) {
+              hideModal();
+            } else {
+              alert('Selecciona un área editable antes de insertar una tabla.');
+            }
+          });
+        }, 100);
       });
-    }, 100);
-  });
 
   /* === BUSCAR Y REEMPLAZAR === */
   document.getElementById('findReplaceBtn')?.addEventListener('click', () => {
