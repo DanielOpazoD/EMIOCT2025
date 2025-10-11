@@ -682,6 +682,8 @@ export async function initializeEditor() {
       const shiftRightBtn = document.getElementById('shiftRightBtn');
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
+      const highlightBtn = document.getElementById('highlightBtn');
+      const textColorBtn = document.getElementById('textColorBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
@@ -4693,7 +4695,7 @@ export async function initializeEditor() {
         if (shouldShow) {
           viewportState = getActiveTopicViewportState();
           if (!viewportState) {
-            shouldShow = relaxMatching;
+            shouldShow = true;
           } else if (!relaxMatching) {
             const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
             const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');
@@ -7009,6 +7011,10 @@ export async function initializeEditor() {
           swatch.className = 'color-swatch';
           swatch.style.backgroundColor = color;
           swatch.title = color;
+          swatch.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          });
           swatch.addEventListener('click', (e) => {
             e.stopPropagation();
             applyColor(color, isHighlight);
@@ -7016,12 +7022,15 @@ export async function initializeEditor() {
           });
           palette.appendChild(swatch);
         });
-        
+
         const customSwatch = document.createElement('input');
         customSwatch.type = 'color';
         customSwatch.className = 'color-swatch';
         customSwatch.title = 'Color personalizado';
         customSwatch.style.border = '2px dashed #495057';
+        customSwatch.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+        });
         customSwatch.addEventListener('change', (e) => {
           e.stopPropagation();
           applyColor(e.target.value, isHighlight);
@@ -7101,25 +7110,35 @@ export async function initializeEditor() {
       createColorPalette('highlightPalette', highlightColors, true);
       createColorPalette('textColorPalette', textColors, false);
 
-      document.getElementById('highlightBtn')?.addEventListener('click', (e) => {
+      const handleColorButtonPointerDown = (event) => {
+        if (event.pointerType !== 'mouse' || event.button === 0) {
+          event.preventDefault();
+          saveCurrentSelection();
+        }
+      };
+
+      highlightBtn?.addEventListener('pointerdown', handleColorButtonPointerDown);
+      textColorBtn?.addEventListener('pointerdown', handleColorButtonPointerDown);
+
+      highlightBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        
+
         if (!saveCurrentSelection()) {
           alert('Por favor, selecciona el texto que deseas destacar');
           return;
         }
-        
+
         const btn = e.currentTarget;
         const btnRect = btn.getBoundingClientRect();
-        
+
         highlightPalette.style.left = btnRect.left + 'px';
         highlightPalette.style.top = (btnRect.bottom + 5) + 'px';
-        
+
         textColorPalette.classList.remove('show');
         highlightPalette.classList.add('show');
       });
 
-      document.getElementById('textColorBtn')?.addEventListener('click', (e) => {
+      textColorBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
 
         if (!saveCurrentSelection()) {
