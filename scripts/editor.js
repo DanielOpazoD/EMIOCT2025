@@ -680,7 +680,6 @@ export async function initializeEditor() {
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
-      const symbolPickerBtn = document.getElementById('symbolPickerBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
@@ -729,9 +728,31 @@ export async function initializeEditor() {
 
       let iconPicker = null;
       let iconPickerAnchor = null;
+      let iconPickerTrigger = null;
+      let iconPickerTriggerCleanup = null;
+      let iconPickerGlobalHandlersBound = false;
 
       function stopIconPickerPropagation(event) {
         event.stopPropagation();
+      }
+
+      function resolveIconPickerTrigger() {
+        const trigger = document.getElementById('symbolPickerBtn') || document.getElementById('insertIconBtn');
+        if (trigger && trigger.id === 'insertIconBtn') {
+          trigger.dataset.legacyIconTrigger = 'true';
+        }
+        return trigger;
+      }
+
+      function detachIconPickerTrigger() {
+        if (iconPickerTriggerCleanup) {
+          iconPickerTriggerCleanup();
+          iconPickerTriggerCleanup = null;
+        }
+        if (iconPickerTrigger) {
+          iconPickerTrigger.removeAttribute('data-icon-picker-bound');
+        }
+        iconPickerTrigger = null;
       }
 
       function buildIconPicker() {
@@ -791,8 +812,9 @@ export async function initializeEditor() {
         const picker = buildIconPicker();
         iconPicker = mountIconPicker(picker);
 
-        if (iconPicker && symbolPickerBtn) {
-          symbolPickerBtn.setAttribute('aria-controls', iconPicker.id);
+        const trigger = iconPickerTrigger || resolveIconPickerTrigger();
+        if (iconPicker && trigger) {
+          trigger.setAttribute('aria-controls', iconPicker.id);
         }
 
         return iconPicker;
@@ -844,6 +866,101 @@ export async function initializeEditor() {
           return;
         }
         showIconPicker(anchor);
+      }
+
+      function handleGlobalPointerDown(event) {
+        const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
+        if (!picker || !picker.classList.contains('show')) {
+          return;
+        }
+        if (picker.contains(event.target)) {
+          return;
+        }
+        const trigger = iconPickerTrigger || resolveIconPickerTrigger();
+        if (trigger && trigger.contains(event.target)) {
+          return;
+        }
+        hideIconPicker();
+      }
+
+      function bindIconPickerTrigger() {
+        const trigger = resolveIconPickerTrigger();
+
+        if (!ICON_FEATURE_ENABLED) {
+          if (trigger) {
+            trigger.disabled = true;
+            trigger.setAttribute('aria-disabled', 'true');
+            trigger.title = 'La inserción de iconos no está disponible en esta versión.';
+          }
+          detachIconPickerTrigger();
+          return;
+        }
+
+        if (!trigger) {
+          detachIconPickerTrigger();
+          return;
+        }
+
+        trigger.disabled = false;
+        trigger.removeAttribute('aria-disabled');
+        if (!trigger.dataset.iconPickerBound) {
+          const defaultTitle = trigger.dataset.legacyIconTrigger === 'true' ? 'Insertar iconos' : 'Insertar símbolos';
+          trigger.title = trigger.title || defaultTitle;
+        }
+
+        if (iconPickerTrigger === trigger) {
+          return;
+        }
+
+        detachIconPickerTrigger();
+
+        trigger.setAttribute('aria-haspopup', 'menu');
+        trigger.setAttribute('aria-expanded', 'false');
+
+        const pointerHandler = () => {
+          saveCurrentSelection();
+        };
+
+        const clickHandler = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          saveCurrentSelection();
+          const picker = ensureIconPicker();
+          if (!picker) {
+            return;
+          }
+          toggleIconPicker(trigger);
+        };
+
+        const keyHandler = (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            saveCurrentSelection();
+            toggleIconPicker(trigger);
+          }
+        };
+
+        trigger.addEventListener('pointerdown', pointerHandler);
+        trigger.addEventListener('click', clickHandler);
+        trigger.addEventListener('keydown', keyHandler);
+        trigger.dataset.iconPickerBound = 'true';
+
+        iconPickerTrigger = trigger;
+        iconPickerTriggerCleanup = () => {
+          trigger.removeEventListener('pointerdown', pointerHandler);
+          trigger.removeEventListener('click', clickHandler);
+          trigger.removeEventListener('keydown', keyHandler);
+          trigger.removeAttribute('aria-expanded');
+        };
+
+        ensureIconPicker();
+
+        if (!iconPickerGlobalHandlersBound) {
+          document.addEventListener('pointerdown', handleGlobalPointerDown);
+          window.addEventListener('resize', hideIconPicker);
+          document.addEventListener('scroll', hideIconPicker, true);
+          iconPickerGlobalHandlersBound = true;
+        }
       }
 
       if (cropImageBtn) {
@@ -8307,56 +8424,7 @@ export async function initializeEditor() {
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
-      if (ICON_FEATURE_ENABLED && symbolPickerBtn) {
-        symbolPickerBtn.setAttribute('aria-haspopup', 'menu');
-        symbolPickerBtn.setAttribute('aria-expanded', 'false');
-
-        ensureIconPicker();
-
-        symbolPickerBtn.addEventListener('pointerdown', () => {
-          saveCurrentSelection();
-        });
-
-        symbolPickerBtn.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          saveCurrentSelection();
-          const picker = ensureIconPicker();
-          if (!picker) {
-            return;
-          }
-          toggleIconPicker(symbolPickerBtn);
-        });
-
-        symbolPickerBtn.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            saveCurrentSelection();
-            toggleIconPicker(symbolPickerBtn);
-          }
-        });
-
-        document.addEventListener('pointerdown', (event) => {
-          const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
-          if (!picker || !picker.classList.contains('show')) {
-            return;
-          }
-          if (picker.contains(event.target)) {
-            return;
-          }
-          if (symbolPickerBtn.contains(event.target)) {
-            return;
-          }
-          hideIconPicker();
-        });
-
-        window.addEventListener('resize', hideIconPicker);
-        document.addEventListener('scroll', hideIconPicker, true);
-      } else if (symbolPickerBtn) {
-        symbolPickerBtn.disabled = true;
-        symbolPickerBtn.setAttribute('aria-disabled', 'true');
-        symbolPickerBtn.title = 'La inserción de iconos no está disponible en esta versión.';
-      }
+      bindIconPickerTrigger();
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
@@ -9288,6 +9356,7 @@ ${inlineStyles}
     if (isEditMode) {
       enableHtmlPaste();
     }
+    bindIconPickerTrigger();
     hideImageToolbar();
     hideTemplateToolbar();
     savedSelection = null;
