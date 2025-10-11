@@ -680,7 +680,6 @@ export async function initializeEditor() {
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
-      const insertIconBtn = document.getElementById('insertIconBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
@@ -729,9 +728,33 @@ export async function initializeEditor() {
 
       let iconPicker = null;
       let iconPickerAnchor = null;
+      let iconPickerGlobalHandlersBound = false;
+      let iconPickerTriggerObserver = null;
+      const ICON_TRIGGER_SELECTOR = '#symbolPickerBtn, #insertIconBtn';
 
       function stopIconPickerPropagation(event) {
         event.stopPropagation();
+      }
+
+      function getIconPickerTriggers() {
+        return Array.from(document.querySelectorAll(ICON_TRIGGER_SELECTOR));
+      }
+
+      function findIconPickerTrigger(element) {
+        if (!(element instanceof Element)) {
+          return null;
+        }
+        return element.closest(ICON_TRIGGER_SELECTOR);
+      }
+
+      function ensureIconTriggerObserver() {
+        if (iconPickerTriggerObserver || !editToolbar) {
+          return;
+        }
+        iconPickerTriggerObserver = new MutationObserver(() => {
+          bindIconPickerTrigger();
+        });
+        iconPickerTriggerObserver.observe(editToolbar, { childList: true, subtree: true });
       }
 
       function buildIconPicker() {
@@ -791,8 +814,11 @@ export async function initializeEditor() {
         const picker = buildIconPicker();
         iconPicker = mountIconPicker(picker);
 
-        if (iconPicker && insertIconBtn) {
-          insertIconBtn.setAttribute('aria-controls', iconPicker.id);
+        const triggers = getIconPickerTriggers();
+        if (iconPicker) {
+          triggers.forEach(trigger => {
+            trigger.setAttribute('aria-controls', iconPicker.id);
+          });
         }
 
         return iconPicker;
@@ -844,6 +870,110 @@ export async function initializeEditor() {
           return;
         }
         showIconPicker(anchor);
+      }
+
+      function handleGlobalPointerDown(event) {
+        const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
+        if (!picker || !picker.classList.contains('show')) {
+          return;
+        }
+        if (picker.contains(event.target)) {
+          return;
+        }
+        const trigger = findIconPickerTrigger(event.target);
+        if (trigger) {
+          return;
+        }
+        hideIconPicker();
+      }
+
+      function bindIconPickerTrigger() {
+        const triggers = getIconPickerTriggers();
+
+        if (!ICON_FEATURE_ENABLED) {
+          triggers.forEach(trigger => {
+            trigger.disabled = true;
+            trigger.setAttribute('aria-disabled', 'true');
+            if (!trigger.title) {
+              trigger.title = 'La inserción de iconos no está disponible en esta versión.';
+            }
+          });
+          return;
+        }
+
+        if (triggers.length === 0) {
+          return;
+        }
+
+        const picker = ensureIconPicker();
+
+        triggers.forEach(trigger => {
+          if (trigger.id === 'insertIconBtn') {
+            trigger.dataset.legacyIconTrigger = 'true';
+          }
+          trigger.disabled = false;
+          trigger.removeAttribute('aria-disabled');
+          const defaultTitle = trigger.dataset.legacyIconTrigger === 'true' ? 'Insertar iconos' : 'Insertar símbolos';
+          if (!trigger.title || trigger.dataset.iconPickerBound !== 'true') {
+            trigger.title = trigger.title || defaultTitle;
+          }
+          trigger.setAttribute('aria-haspopup', 'menu');
+          trigger.setAttribute('aria-expanded', iconPickerAnchor === trigger ? 'true' : 'false');
+          if (picker) {
+            trigger.setAttribute('aria-controls', picker.id);
+          }
+          trigger.dataset.iconPickerBound = 'true';
+        });
+
+        ensureIconTriggerObserver();
+
+        if (!iconPickerGlobalHandlersBound) {
+          document.addEventListener('pointerdown', handleIconTriggerPointerDown, true);
+          document.addEventListener('click', handleIconTriggerClick);
+          document.addEventListener('keydown', handleIconTriggerKeyDown);
+          document.addEventListener('pointerdown', handleGlobalPointerDown);
+          window.addEventListener('resize', hideIconPicker);
+          document.addEventListener('scroll', hideIconPicker, true);
+          iconPickerGlobalHandlersBound = true;
+        }
+      }
+
+      function handleIconTriggerPointerDown(event) {
+        const trigger = findIconPickerTrigger(event.target);
+        if (!trigger || trigger.disabled || !ICON_FEATURE_ENABLED) {
+          return;
+        }
+        saveCurrentSelection();
+      }
+
+      function handleIconTriggerClick(event) {
+        const trigger = findIconPickerTrigger(event.target);
+        if (!trigger || trigger.disabled || !ICON_FEATURE_ENABLED) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        saveCurrentSelection();
+        const picker = ensureIconPicker();
+        if (!picker) {
+          return;
+        }
+        toggleIconPicker(trigger);
+      }
+
+      function handleIconTriggerKeyDown(event) {
+        const trigger = findIconPickerTrigger(event.target);
+        if (!trigger || trigger.disabled || !ICON_FEATURE_ENABLED) {
+          return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          saveCurrentSelection();
+          toggleIconPicker(trigger);
+        } else if (event.key === 'Escape' && iconPickerAnchor === trigger) {
+          event.preventDefault();
+          hideIconPicker();
+        }
       }
 
       if (cropImageBtn) {
@@ -8307,56 +8437,7 @@ export async function initializeEditor() {
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
-      if (ICON_FEATURE_ENABLED && insertIconBtn) {
-        insertIconBtn.setAttribute('aria-haspopup', 'menu');
-        insertIconBtn.setAttribute('aria-expanded', 'false');
-
-        ensureIconPicker();
-
-        insertIconBtn.addEventListener('pointerdown', () => {
-          saveCurrentSelection();
-        });
-
-        insertIconBtn.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          saveCurrentSelection();
-          const picker = ensureIconPicker();
-          if (!picker) {
-            return;
-          }
-          toggleIconPicker(insertIconBtn);
-        });
-
-        insertIconBtn.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            saveCurrentSelection();
-            toggleIconPicker(insertIconBtn);
-          }
-        });
-
-        document.addEventListener('pointerdown', (event) => {
-          const picker = iconPicker && iconPicker.isConnected ? iconPicker : null;
-          if (!picker || !picker.classList.contains('show')) {
-            return;
-          }
-          if (picker.contains(event.target)) {
-            return;
-          }
-          if (event.target === insertIconBtn) {
-            return;
-          }
-          hideIconPicker();
-        });
-
-        window.addEventListener('resize', hideIconPicker);
-        document.addEventListener('scroll', hideIconPicker, true);
-      } else if (insertIconBtn) {
-        insertIconBtn.disabled = true;
-        insertIconBtn.setAttribute('aria-disabled', 'true');
-        insertIconBtn.title = 'La inserción de iconos no está disponible en esta versión.';
-      }
+      bindIconPickerTrigger();
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
@@ -9288,6 +9369,7 @@ ${inlineStyles}
     if (isEditMode) {
       enableHtmlPaste();
     }
+    bindIconPickerTrigger();
     hideImageToolbar();
     hideTemplateToolbar();
     savedSelection = null;
