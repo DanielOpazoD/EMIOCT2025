@@ -714,7 +714,7 @@ export async function initializeEditor() {
       const tableResizeOverlay = document.getElementById('tableResizeOverlay');
 
       const highlightColors = [
-        '#fff1f2', '#ffe4e6', '#ffdce5', '#ffd6e0', '#ffe5d3', '#ffe8c7', '#fef3c7', '#fef9c3',
+        '#ffffff', '#fff1f2', '#ffe4e6', '#ffdce5', '#ffd6e0', '#ffe5d3', '#ffe8c7', '#fef3c7', '#fef9c3',
         '#f1f8d7', '#e9fbdc', '#dcfce7', '#ccfbf1', '#cffafe', '#dbeafe', '#e0f2fe', '#e0f2ff',
         '#e0e7ff', '#ede9fe', '#f3e8ff', '#fae8ff', '#fde7f5', '#fde2ff', '#fce7f3', '#fdf2f8',
         '#f4f4f5', '#f3f4f6', '#eef2ff', '#e2e8f0', '#e7f0ff', '#e6fffa', '#f0fdf4', '#f8fafc'
@@ -917,7 +917,12 @@ export async function initializeEditor() {
         }
         iconPickerAnchor = anchor;
         if (!restoreSelection()) {
-          ensureEditableSelection();
+          const activeSelection = window.getSelection();
+          if (!isSelectionWithinEditable(activeSelection)) {
+            clearSavedSelection();
+          } else {
+            saveCurrentSelection();
+          }
         }
 
         const selectionRect = getSavedSelectionRect();
@@ -1933,8 +1938,32 @@ export async function initializeEditor() {
         return selection;
       }
 
+      function isSelectionWithinEditable(selection) {
+        if (!selection || selection.rangeCount === 0) {
+          return false;
+        }
+        const range = selection.getRangeAt(0);
+        const startEditable = resolveEditableAncestor(range.startContainer);
+        const endEditable = resolveEditableAncestor(range.endContainer);
+        return !!startEditable && !!endEditable;
+      }
+
+      function resolveSelectionForInsertion() {
+        if (restoreSelection()) {
+          const restored = window.getSelection();
+          if (isSelectionWithinEditable(restored)) {
+            return restored;
+          }
+        }
+        const liveSelection = window.getSelection();
+        if (isSelectionWithinEditable(liveSelection)) {
+          return liveSelection;
+        }
+        return null;
+      }
+
       function insertNodeAtSelection(node) {
-        const selection = ensureEditableSelection();
+        const selection = resolveSelectionForInsertion();
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -1948,7 +1977,7 @@ export async function initializeEditor() {
       }
 
       function insertHtmlAtSelection(html) {
-        const selection = ensureEditableSelection();
+        const selection = resolveSelectionForInsertion();
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -1988,7 +2017,7 @@ export async function initializeEditor() {
         if (typeof text !== 'string' || !text) {
           return null;
         }
-        const selection = ensureEditableSelection();
+        const selection = resolveSelectionForInsertion();
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         const contextElement = options.preserveContextStyle ? getRangeContextElement(range) : null;
@@ -2026,6 +2055,17 @@ export async function initializeEditor() {
         return insertedNode;
       }
 
+      document.addEventListener('selectionchange', () => {
+        if (!isEditMode) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (!isSelectionWithinEditable(selection)) {
+          return;
+        }
+        saveCurrentSelection();
+      });
+
       const FONT_SCALE_FACTOR = 1.1;
       const FONT_MIN_SIZE = 8;
       const FONT_MAX_SIZE = 96;
@@ -2050,7 +2090,7 @@ export async function initializeEditor() {
       }
 
       function adjustFontSizeProportionally(direction) {
-        const selection = window.getSelection();
+        const selection = resolveSelectionForInsertion();
         if (!selection || selection.rangeCount === 0) {
           alert('Selecciona el texto que deseas modificar');
           return false;
@@ -2064,16 +2104,8 @@ export async function initializeEditor() {
         const factor = direction === 'decrease' ? (1 / FONT_SCALE_FACTOR) : FONT_SCALE_FACTOR;
 
         if (selection.isCollapsed) {
-          const context = getRangeContextElement(range);
-          if (!context) {
-            alert('Coloca el cursor en el texto que deseas modificar');
-            return false;
-          }
-          const currentSize = getFontSizeFromElement(context);
-          const newSize = clampFontSize(currentSize * factor);
-          context.style.fontSize = `${newSize}px`;
-          clearSavedSelection();
-          return true;
+          alert('Selecciona el texto que deseas modificar');
+          return false;
         }
 
         const contextElement = getRangeContextElement(range);
