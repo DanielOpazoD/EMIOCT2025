@@ -8090,25 +8090,28 @@ export async function initializeEditor() {
       });
 
       /* === PLANTILLAS === */
-      insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
-
-      insertTemplateBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+      function bindSelectionPreservingTrigger(trigger, handler) {
+        if (!trigger || typeof handler !== 'function') {
+          return;
         }
-      });
 
-      insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
-
-      insertHtmlBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        const preserveSelection = () => {
           saveCurrentSelection();
-        }
-      });
+        };
+
+        trigger.addEventListener('pointerdown', preserveSelection);
+        trigger.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            preserveSelection();
+          }
+        });
+        trigger.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          preserveSelection();
+          handler(event);
+        });
+      }
 
       insertTableBtn?.addEventListener('pointerdown', () => {
         saveCurrentSelection();
@@ -8120,17 +8123,7 @@ export async function initializeEditor() {
         }
       });
 
-      insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
-
-      insertCollapseCardBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
-        }
-      });
-
-      document.getElementById('insertTemplateBtn')?.addEventListener('click', () => {
+      const handleInsertTemplateTrigger = () => {
         if (!savedSelection) {
           const activeEditable = document.activeElement && document.activeElement.isContentEditable ? document.activeElement : null;
           const target = activeEditable || getCurrentPage() || getCurrentMagicPage();
@@ -8227,7 +8220,17 @@ export async function initializeEditor() {
             <h4>${template.name}</h4>
             <div class="template-preview">${template.html}</div>
           `;
-          card.addEventListener('click', () => {
+          card.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const selectionRestored = restoreSelection();
+            if (!selectionRestored) {
+              const liveSelection = window.getSelection();
+              if (!isSelectionWithinEditable(liveSelection)) {
+                alert('Selecciona un área editable antes de insertar una plantilla.');
+                return;
+              }
+            }
             const block = createTemplateBlock(template);
             if (!block) return;
             const insertedBlock = insertNodeAtSelection(block);
@@ -8242,9 +8245,19 @@ export async function initializeEditor() {
           });
           grid?.appendChild(card);
         });
-      });
+      };
 
-      insertCollapseCardBtn?.addEventListener('click', () => {
+      bindSelectionPreservingTrigger(insertTemplateBtn, handleInsertTemplateTrigger);
+
+      const handleInsertCollapseCard = () => {
+        const selectionRestored = restoreSelection();
+        if (!selectionRestored) {
+          const liveSelection = window.getSelection();
+          if (!isSelectionWithinEditable(liveSelection)) {
+            alert('Selecciona un área editable antes de insertar la tarjeta.');
+            return;
+          }
+        }
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
         const insertedCard = insertNodeAtSelection(card);
@@ -8262,7 +8275,9 @@ export async function initializeEditor() {
           selection.addRange(range);
         }
         insertedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      });
+      };
+
+      bindSelectionPreservingTrigger(insertCollapseCardBtn, handleInsertCollapseCard);
 
       /* === PANEL LATERAL === */
       function openPanel() {
@@ -9457,7 +9472,7 @@ export async function initializeEditor() {
       scheduleIconPickerRebind();
 
       /* === INSERTAR HTML PERSONALIZADO === */
-      document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
+      const handleInsertHtmlTrigger = () => {
         showModal(`
           <div class="modal-header">
             <h3>Insertar HTML Personalizado</h3>
@@ -9474,9 +9489,19 @@ export async function initializeEditor() {
         `);
 
         setTimeout(() => {
-          document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
+          document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const selectionRestored = restoreSelection();
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
+              if (!selectionRestored) {
+                const liveSelection = window.getSelection();
+                if (!isSelectionWithinEditable(liveSelection)) {
+                  alert('Selecciona un área editable antes de insertar HTML.');
+                  return;
+                }
+              }
               const insertedNode = insertHtmlAtSelection(htmlCode);
               if (insertedNode) {
                 hideModal();
@@ -9488,7 +9513,9 @@ export async function initializeEditor() {
             }
           });
         }, 100);
-      });
+      };
+
+      bindSelectionPreservingTrigger(insertHtmlBtn, handleInsertHtmlTrigger);
 
       /* === COPIAR HTML DE SELECCIÓN === */
       document.getElementById('copyHtmlSelectionBtn')?.addEventListener('click', async () => {
