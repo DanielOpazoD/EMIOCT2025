@@ -17,6 +17,10 @@ import {
   sanitizeNoteTitleHtml,
   getNoteTitlePlainText
 } from './modules/notes/noteUtils.js';
+import {
+  createSelectionBookmark,
+  restoreRangeFromBookmark
+} from './modules/editorSelection.js';
 
 export async function initializeEditor() {
       let isEditMode = false;
@@ -36,6 +40,7 @@ export async function initializeEditor() {
       let allSectionsExpanded = true;
       let savedSelection = null;
       let savedSelectionEditable = null;
+      let savedSelectionBookmark = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -1727,6 +1732,7 @@ export async function initializeEditor() {
       function clearSavedSelection() {
         savedSelection = null;
         savedSelectionEditable = null;
+        savedSelectionBookmark = null;
       }
 
       function resolveEditableHost(node) {
@@ -1759,7 +1765,14 @@ export async function initializeEditor() {
       }
 
       function focusSavedSelectionEditable() {
-        const target = savedSelectionEditable;
+        let target = savedSelectionEditable;
+        if ((!target || !target.isConnected) && savedSelectionBookmark?.topicId) {
+          const candidate = findPageByTopicId(savedSelectionBookmark.topicId);
+          if (candidate) {
+            target = candidate;
+            savedSelectionEditable = candidate;
+          }
+        }
         if (!target || !target.isConnected) {
           return false;
         }
@@ -1789,28 +1802,61 @@ export async function initializeEditor() {
           || resolveEditableHost(selection.focusNode)
           || (document.activeElement?.isContentEditable ? document.activeElement : null);
         savedSelectionEditable = host instanceof HTMLElement ? host : null;
+        savedSelectionBookmark = savedSelectionEditable
+          ? createSelectionBookmark(range, savedSelectionEditable)
+          : null;
         return true;
       }
 
       function restoreSelection() {
-        if (!savedSelection) {
-          return false;
+        if (savedSelection) {
+          const startConnected = document.contains(savedSelection.startContainer);
+          const endConnected = document.contains(savedSelection.endContainer);
+          if (startConnected && endConnected) {
+            if (savedSelectionEditable && !document.contains(savedSelectionEditable)) {
+              savedSelectionEditable = null;
+            }
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            try {
+              selection.addRange(savedSelection);
+              return true;
+            } catch (err) {
+              savedSelection = null;
+            }
+          } else {
+            savedSelection = null;
+          }
         }
-        if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-          clearSavedSelection();
-          return false;
-        }
+
         if (savedSelectionEditable && !document.contains(savedSelectionEditable)) {
           savedSelectionEditable = null;
         }
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        try {
-          selection.addRange(savedSelection);
-          return true;
-        } catch (err) {
-          clearSavedSelection();
+
+        if (savedSelectionBookmark) {
+          let editable = savedSelectionEditable;
+          if ((!editable || !editable.isConnected) && savedSelectionBookmark.topicId) {
+            const candidate = findPageByTopicId(savedSelectionBookmark.topicId);
+            if (candidate) {
+              editable = candidate;
+              savedSelectionEditable = candidate;
+            }
+          }
+
+          if (editable && editable.isConnected) {
+            const restoredRange = restoreRangeFromBookmark(savedSelectionBookmark, editable);
+            if (restoredRange) {
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(restoredRange);
+              savedSelection = restoredRange.cloneRange();
+              savedSelectionBookmark = createSelectionBookmark(restoredRange, editable);
+              return true;
+            }
+          }
         }
+
+        clearSavedSelection();
         return false;
       }
 
@@ -1844,6 +1890,8 @@ export async function initializeEditor() {
         selection.addRange(range);
         if (target instanceof HTMLElement) {
           savedSelectionEditable = target;
+          savedSelection = range.cloneRange();
+          savedSelectionBookmark = createSelectionBookmark(range, target);
         }
         return selection;
       }

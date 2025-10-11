@@ -1,0 +1,7 @@
+{
+  "name": "emioct2025",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
