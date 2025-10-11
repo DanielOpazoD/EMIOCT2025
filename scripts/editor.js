@@ -8455,6 +8455,9 @@ export async function initializeEditor() {
           }
           enableHtmlPaste();
           tableMenuAPI?.refresh();
+
+          // Agregar padding al body cuando la toolbar está activa
+          document.body.classList.add('edit-toolbar-active');
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
@@ -8470,6 +8473,9 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+
+          // Remover padding del body cuando se desactiva la toolbar
+          document.body.classList.remove('edit-toolbar-active');
         }
       }
       
