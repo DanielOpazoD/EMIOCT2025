@@ -7591,7 +7591,13 @@ export async function initializeEditor() {
       }
 
       function persistMagicEdits() {
-        if (!activeMagicWrapper && !activeMagicSource) {
+        if (!activeMagicWrapper && !activeMagicSource && !activeMagicPage) {
+          return;
+        }
+
+        const magicContainer = document.querySelector('.magic-content-container');
+        if (!magicContainer) {
+          activeMagicSource = null;
           return;
         }
 
@@ -7599,20 +7605,34 @@ export async function initializeEditor() {
           activeMagicWrapper = null;
         }
 
-        if (!activeMagicSource && activeMagicWrapper && activeMagicPage) {
-          const { source } = ensureMagicTopicSource('', activeMagicPage);
-          activeMagicSource = source || null;
+        if (activeMagicPage && !document.contains(activeMagicPage)) {
+          activeMagicPage = null;
         }
 
-        if (activeMagicSource && !document.contains(activeMagicSource)) {
-          activeMagicSource = null;
+        if (!activeMagicSource || !document.contains(activeMagicSource)) {
+          const anchorId = activeMagicPage?.dataset.magicAnchorId || '';
+          const ensured = activeMagicPage ? ensureMagicTopicSource(anchorId, activeMagicPage) : { source: null, anchorId: '' };
+          activeMagicSource = ensured.source || null;
+          if (ensured.anchorId && activeMagicPage) {
+            activeMagicPage.dataset.magicAnchorId = ensured.anchorId;
+          }
         }
 
-        if (!activeMagicSource || !activeMagicWrapper) {
+        if (!activeMagicSource) {
           return;
         }
 
-        activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
+        if (activeMagicPage) {
+          const topicId = (activeMagicPage.dataset.topicId || '').trim();
+          if (topicId) {
+            activeMagicSource.dataset.sourceTopicId = topicId;
+          }
+        }
+
+        if (activeMagicWrapper) {
+          activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
+        }
+
         afterContentSanitize(activeMagicSource);
       }
 
@@ -9007,10 +9027,32 @@ ${inlineStyles}
         }
 
         const titleText = (tema.titulo || getTopicTitle(page) || '').trim() || `Tema ${exportSection.temas.length + 1}`;
-        const magicId = magicAnchorFor(page);
-        const magicEl = magicId ? document.getElementById(magicId) : null;
+        const isActiveMagicTopic = activeMagicPage === page;
+        const fallbackMagicAnchor = isActiveMagicTopic ? (page.dataset.magicAnchorId || '') : '';
+        let magicId = magicAnchorFor(page) || fallbackMagicAnchor;
+        let magicEl = magicId ? document.getElementById(magicId) : null;
+        if (!magicEl && fallbackMagicAnchor) {
+          magicEl = document.getElementById(fallbackMagicAnchor);
+          if (magicEl && !magicEl.classList.contains('magic-topic')) {
+            magicEl = null;
+          }
+        }
         if (magicEl && topicId) {
           magicEl.dataset.sourceTopicId = topicId;
+        }
+
+        const activeMagicHtml = isActiveMagicTopic && activeMagicWrapper ? activeMagicWrapper.innerHTML : null;
+        if (!magicEl && activeMagicHtml && magicContainer) {
+          const ensured = ensureMagicTopicSource(magicId || '', page);
+          if (ensured?.source) {
+            magicEl = ensured.source;
+            magicId = ensured.anchorId || magicEl.id || magicId;
+            magicEl.innerHTML = activeMagicHtml;
+            afterContentSanitize(magicEl);
+            if (topicId) {
+              magicEl.dataset.sourceTopicId = topicId;
+            }
+          }
         }
 
         const templateBlocks = serializeTemplateBlocks(page);
@@ -9021,7 +9063,7 @@ ${inlineStyles}
           sectionId: page.dataset.sectionId,
           sectionName: page.dataset.sectionName,
           magicId: magicId || null,
-          magicHtml: magicEl ? magicEl.innerHTML : null,
+          magicHtml: magicEl ? magicEl.innerHTML : (activeMagicHtml || null),
           theme: getPageTheme(page)
         };
         if (templateBlocks.length) {
@@ -9057,10 +9099,32 @@ ${inlineStyles}
         page.dataset.topicId = topicId;
       }
 
-      const magicId = magicAnchorFor(page);
-      const magicEl = magicId ? document.getElementById(magicId) : null;
+      const isActiveMagicTopic = activeMagicPage === page;
+      const fallbackMagicAnchor = isActiveMagicTopic ? (page.dataset.magicAnchorId || '') : '';
+      let magicId = magicAnchorFor(page) || fallbackMagicAnchor;
+      let magicEl = magicId ? document.getElementById(magicId) : null;
+      if (!magicEl && fallbackMagicAnchor) {
+        magicEl = document.getElementById(fallbackMagicAnchor);
+        if (magicEl && !magicEl.classList.contains('magic-topic')) {
+          magicEl = null;
+        }
+      }
       if (magicEl && topicId) {
         magicEl.dataset.sourceTopicId = topicId;
+      }
+
+      const activeMagicHtml = isActiveMagicTopic && activeMagicWrapper ? activeMagicWrapper.innerHTML : null;
+      if (!magicEl && activeMagicHtml && magicContainer) {
+        const ensured = ensureMagicTopicSource(magicId || '', page);
+        if (ensured?.source) {
+          magicEl = ensured.source;
+          magicId = ensured.anchorId || magicEl.id || magicId;
+          magicEl.innerHTML = activeMagicHtml;
+          afterContentSanitize(magicEl);
+          if (topicId) {
+            magicEl.dataset.sourceTopicId = topicId;
+          }
+        }
       }
 
       const templateBlocks = serializeTemplateBlocks(page);
@@ -9071,7 +9135,7 @@ ${inlineStyles}
         sectionId: sectionId,
         sectionName: sectionName,
         magicId: magicId || null,
-        magicHtml: magicEl ? magicEl.innerHTML : null,
+        magicHtml: magicEl ? magicEl.innerHTML : (activeMagicHtml || null),
         theme: getPageTheme(page)
       };
       if (templateBlocks.length) {
