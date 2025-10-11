@@ -35,6 +35,7 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let pendingInsertionSnapshot = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -329,6 +330,25 @@ export async function initializeEditor() {
       const imageWidthIncreaseBtn = document.getElementById('imageWidthIncrease');
       const imageWidthDecreaseBtn = document.getElementById('imageWidthDecrease');
       const widthDisplay = document.getElementById('widthDisplay');
+      let imageResizeHandle = document.getElementById('imageResizeHandle');
+      if (!imageResizeHandle) {
+        imageResizeHandle = document.createElement('button');
+        imageResizeHandle.type = 'button';
+        imageResizeHandle.id = 'imageResizeHandle';
+        imageResizeHandle.className = 'image-resize-handle';
+        imageResizeHandle.setAttribute('aria-label', 'Arrastra para ajustar el tamaño de la imagen');
+        imageResizeHandle.title = 'Arrastra para ajustar el tamaño de la imagen';
+        imageResizeHandle.innerHTML = '<span aria-hidden="true">◢</span>';
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+        imageResizeHandle.tabIndex = -1;
+      }
+      if (!imageResizeHandle.isConnected) {
+        const handleHost = document.body || document.documentElement;
+        handleHost?.appendChild(imageResizeHandle);
+      }
+      let imageResizeActive = false;
+      let imageResizeStartX = 0;
+      let imageResizeStartWidth = 0;
       const imageCropModal = document.getElementById('imageCropModal');
       const imageCropStage = document.getElementById('imageCropStage');
       const imageCropPreview = document.getElementById('imageCropPreview');
@@ -1884,6 +1904,191 @@ export async function initializeEditor() {
         return null;
       }
 
+      function safeCssEscape(value) {
+        if (typeof value !== 'string') {
+          return '';
+        }
+        if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+          return CSS.escape(value);
+        }
+        return value.replace(/([^a-zA-Z0-9_\-])/g, '\\$1');
+      }
+
+      function findBookmarkAnchor(node) {
+        let current = node instanceof HTMLElement ? node : node?.parentElement;
+        while (current && current !== document.body && current !== document.documentElement) {
+          if (current.dataset?.noteId) {
+            return {
+              element: current,
+              type: 'floating-note',
+              noteId: current.dataset.noteId
+            };
+          }
+          if (current.classList?.contains('page') || current.classList?.contains('magic-page')) {
+            const pages = Array.from(document.querySelectorAll('.page, .magic-page'));
+            const index = pages.indexOf(current);
+            if (index !== -1) {
+              return {
+                element: current,
+                type: 'page',
+                index
+              };
+            }
+          }
+          if (current.id) {
+            return {
+              element: current,
+              type: 'id',
+              id: current.id
+            };
+          }
+          current = current.parentElement;
+        }
+        return {
+          element: document.body,
+          type: 'body'
+        };
+      }
+
+      function resolveBookmarkAnchor(bookmark) {
+        if (!bookmark?.anchor) {
+          return document.body;
+        }
+        const { type } = bookmark.anchor;
+        if (type === 'floating-note' && bookmark.anchor.noteId) {
+          const escapedId = safeCssEscape(bookmark.anchor.noteId);
+          const note = document.querySelector(`.floating-note[data-note-id="${escapedId}"]`);
+          if (note) {
+            return note;
+          }
+        } else if (type === 'page' && Number.isInteger(bookmark.anchor.index)) {
+          const pages = Array.from(document.querySelectorAll('.page, .magic-page'));
+          if (pages[bookmark.anchor.index]) {
+            return pages[bookmark.anchor.index];
+          }
+        } else if (type === 'id' && bookmark.anchor.id) {
+          const target = document.getElementById(bookmark.anchor.id);
+          if (target) {
+            return target;
+          }
+        }
+        return document.body;
+      }
+
+      function buildNodePath(node, root) {
+        const path = [];
+        let current = node;
+        while (current && current !== root) {
+          const parent = current.parentNode;
+          if (!parent) {
+            return null;
+          }
+          const index = Array.prototype.indexOf.call(parent.childNodes, current);
+          if (index < 0) {
+            return null;
+          }
+          path.unshift(index);
+          current = parent;
+        }
+        if (current !== root) {
+          return null;
+        }
+        return path;
+      }
+
+      function resolveNodePath(path, root) {
+        if (!Array.isArray(path)) {
+          return null;
+        }
+        let current = root;
+        for (let i = 0; i < path.length; i += 1) {
+          const index = path[i];
+          if (!current || !current.childNodes || index < 0 || index >= current.childNodes.length) {
+            return null;
+          }
+          current = current.childNodes[index];
+        }
+        return current || null;
+      }
+
+      function normalizeBookmarkOffset(node, offset) {
+        if (!Number.isFinite(offset) || offset < 0) {
+          return 0;
+        }
+        if (!node) {
+          return 0;
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+          const length = node.textContent ? node.textContent.length : 0;
+          return Math.min(offset, length);
+        }
+        const length = node.childNodes ? node.childNodes.length : 0;
+        return Math.min(offset, length);
+      }
+
+      function createSelectionBookmark(range) {
+        if (!range) {
+          return null;
+        }
+        const anchor = findBookmarkAnchor(range.commonAncestorContainer || range.startContainer || range.endContainer);
+        const root = anchor?.element || document.body;
+        const startPath = buildNodePath(range.startContainer, root);
+        const endPath = buildNodePath(range.endContainer, root);
+        if (!startPath || !endPath) {
+          return null;
+        }
+        return {
+          anchor,
+          startPath,
+          endPath,
+          startOffset: normalizeBookmarkOffset(range.startContainer, range.startOffset),
+          endOffset: normalizeBookmarkOffset(range.endContainer, range.endOffset)
+        };
+      }
+
+      function cloneSelectionBookmark(bookmark) {
+        if (!bookmark) {
+          return null;
+        }
+        return {
+          anchor: bookmark.anchor ? { ...bookmark.anchor } : null,
+          startPath: Array.isArray(bookmark.startPath) ? [...bookmark.startPath] : null,
+          endPath: Array.isArray(bookmark.endPath) ? [...bookmark.endPath] : null,
+          startOffset: Number.isFinite(bookmark.startOffset) ? bookmark.startOffset : 0,
+          endOffset: Number.isFinite(bookmark.endOffset) ? bookmark.endOffset : 0
+        };
+      }
+
+      function restoreRangeFromBookmark(bookmark) {
+        if (!bookmark) {
+          return null;
+        }
+        const root = resolveBookmarkAnchor(bookmark);
+        if (!root) {
+          return null;
+        }
+        const startNode = resolveNodePath(bookmark.startPath, root);
+        const endNode = resolveNodePath(bookmark.endPath, root);
+        if (!startNode || !endNode) {
+          return null;
+        }
+        const range = document.createRange();
+        const startOffset = normalizeBookmarkOffset(startNode, bookmark.startOffset);
+        const endOffset = normalizeBookmarkOffset(endNode, bookmark.endOffset);
+        try {
+          range.setStart(startNode, startOffset);
+          range.setEnd(endNode, endOffset);
+        } catch (error) {
+          try {
+            range.selectNode(startNode);
+            range.collapse(true);
+          } catch (fallbackError) {
+            return null;
+          }
+        }
+        return range;
+      }
+
       function clearSavedSelection() {
         savedSelection = null;
       }
@@ -1894,6 +2099,7 @@ export async function initializeEditor() {
         }
 
         const range = selection.getRangeAt(0).cloneRange();
+        const bookmark = createSelectionBookmark(range);
         const activeEditable = document.activeElement && document.activeElement.isContentEditable
           ? document.activeElement
           : null;
@@ -1905,6 +2111,7 @@ export async function initializeEditor() {
 
         return {
           range,
+          bookmark,
           focusTarget: focusTarget || pageTarget || null,
           pageTarget: pageTarget || null
         };
@@ -1917,6 +2124,7 @@ export async function initializeEditor() {
 
         return {
           range: snapshot.range.cloneRange(),
+          bookmark: cloneSelectionBookmark(snapshot.bookmark),
           focusTarget: snapshot.focusTarget && document.contains(snapshot.focusTarget)
             ? snapshot.focusTarget
             : null,
@@ -1926,16 +2134,41 @@ export async function initializeEditor() {
         };
       }
 
+      function capturePendingInsertionSnapshot() {
+        const liveSelection = window.getSelection();
+        if (isSelectionWithinEditable(liveSelection) && liveSelection?.rangeCount) {
+          const snapshot = createSelectionSnapshot(liveSelection);
+          if (snapshot) {
+            savedSelection = snapshot;
+            pendingInsertionSnapshot = cloneSelectionSnapshot(snapshot);
+            return true;
+          }
+        }
+
+        if (savedSelection) {
+          pendingInsertionSnapshot = cloneSelectionSnapshot(savedSelection);
+          return !!pendingInsertionSnapshot;
+        }
+
+        pendingInsertionSnapshot = null;
+        return false;
+      }
+
       function restoreSelectionSnapshot(snapshot, options = {}) {
         if (!snapshot || !snapshot.range) {
           return false;
         }
 
-        const { range, focusTarget, pageTarget } = snapshot;
+        let { range, focusTarget, pageTarget, bookmark } = snapshot;
         if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
-          return false;
+          const restored = restoreRangeFromBookmark(bookmark);
+          if (!restored) {
+            return false;
+          }
+          range = restored;
+          snapshot.range = restored.cloneRange();
+          snapshot.bookmark = createSelectionBookmark(restored);
         }
-
         const selection = window.getSelection();
         selection.removeAllRanges();
 
@@ -1962,6 +2195,7 @@ export async function initializeEditor() {
           selection.addRange(restoredRange);
           if (options.updateSnapshot) {
             snapshot.range = restoredRange.cloneRange();
+            snapshot.bookmark = createSelectionBookmark(restoredRange);
           }
           return true;
         } catch (err) {
@@ -2010,6 +2244,21 @@ export async function initializeEditor() {
 
         iconPickerSelectionSnapshot = snapshot;
         return !!iconPickerSelectionSnapshot;
+      }
+
+      function consumePendingInsertionSelection() {
+        if (pendingInsertionSnapshot) {
+          const snapshot = cloneSelectionSnapshot(pendingInsertionSnapshot);
+          pendingInsertionSnapshot = null;
+          if (snapshot && restoreSelectionSnapshot(snapshot, { updateSnapshot: false })) {
+            const selection = window.getSelection();
+            if (isSelectionWithinEditable(selection)) {
+              return selection;
+            }
+          }
+        }
+
+        return resolveSelectionForInsertion();
       }
 
       function clearIconPickerSelectionSnapshot() {
@@ -2068,8 +2317,13 @@ export async function initializeEditor() {
         return null;
       }
 
-      function insertNodeAtSelection(node) {
-        const selection = resolveSelectionForInsertion();
+      function insertNodeAtSelection(node, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -2082,8 +2336,13 @@ export async function initializeEditor() {
         return node;
       }
 
-      function insertHtmlAtSelection(html) {
-        const selection = resolveSelectionForInsertion();
+      function insertHtmlAtSelection(html, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -4472,37 +4731,176 @@ export async function initializeEditor() {
         repositionImageToolbar();
       }
 
+      function hideImageResizeHandle() {
+        if (!imageResizeHandle) {
+          return;
+        }
+        imageResizeHandle.classList.remove('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+      }
+
+      function positionImageResizeHandle(img) {
+        if (!imageResizeHandle) {
+          return;
+        }
+        if (!img) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        if (!rect || (!rect.width && !rect.height)) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const handleRect = imageResizeHandle.getBoundingClientRect();
+        const handleWidth = handleRect.width || 18;
+        const handleHeight = handleRect.height || 18;
+
+        let left = rect.left - (handleWidth / 2) + 8;
+        let top = rect.bottom - (handleHeight / 2) - 8;
+
+        const minLeft = 4;
+        const maxLeft = Math.max(minLeft, viewportWidth - handleWidth - 4);
+        const minTop = 4;
+        const maxTop = Math.max(minTop, viewportHeight - handleHeight - 4);
+
+        if (Number.isFinite(left)) {
+          left = Math.min(Math.max(minLeft, left), maxLeft);
+          imageResizeHandle.style.left = Math.round(left) + 'px';
+        }
+
+        if (Number.isFinite(top)) {
+          top = Math.min(Math.max(minTop, top), maxTop);
+          imageResizeHandle.style.top = Math.round(top) + 'px';
+        }
+
+        imageResizeHandle.classList.add('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'false');
+      }
+
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
 
         imageToolbar.classList.add('show');
 
         const rect = img.getBoundingClientRect();
-        const toolbarWidth = imageToolbar.offsetWidth || 240;
-        const toolbarHeight = imageToolbar.offsetHeight || 160;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
 
-        let left = rect.left;
-        let top = rect.top - toolbarHeight - 10;
+        const toolbarRect = imageToolbar.getBoundingClientRect();
+        const measuredWidth = toolbarRect.width || imageToolbar.offsetWidth || 240;
+        const measuredHeight = toolbarRect.height || imageToolbar.offsetHeight || 160;
 
-        if (top < 10) {
-          top = rect.bottom + 10;
+        const imageWidth = rect.width || getImageWidthPx(img) || measuredWidth;
+
+        if (Number.isFinite(imageWidth) && imageWidth > 0) {
+          const overlayWidth = Math.min(Math.max(imageWidth, 160), Math.max(160, viewportWidth - 16));
+          imageToolbar.style.minWidth = '0px';
+          imageToolbar.style.width = Math.round(overlayWidth) + 'px';
+        } else {
+          imageToolbar.style.width = '';
         }
 
-        if (top + toolbarHeight > window.innerHeight - 10) {
-          top = Math.max(10, window.innerHeight - toolbarHeight - 10);
+        const targetWidth = imageToolbar.offsetWidth || measuredWidth;
+        const targetHeight = imageToolbar.offsetHeight || measuredHeight;
+
+        let left = rect.left + ((rect.width - targetWidth) / 2);
+        let top = rect.top + ((rect.height - targetHeight) / 2);
+
+        if (!Number.isFinite(left)) {
+          left = rect.left || 0;
+        }
+        if (!Number.isFinite(top)) {
+          top = rect.top || 0;
         }
 
-        if (left + toolbarWidth > window.innerWidth - 10) {
-          left = window.innerWidth - toolbarWidth - 10;
+        if (Number.isFinite(rect.left) && Number.isFinite(rect.right) && targetWidth <= rect.width) {
+          const minLeft = rect.left;
+          const maxLeft = rect.right - targetWidth;
+          left = Math.min(Math.max(left, minLeft), maxLeft);
         }
 
-        if (left < 10) {
-          left = 10;
+        if (Number.isFinite(rect.top) && Number.isFinite(rect.bottom) && targetHeight <= rect.height) {
+          const minTop = rect.top;
+          const maxTop = rect.bottom - targetHeight;
+          top = Math.min(Math.max(top, minTop), maxTop);
         }
 
-        imageToolbar.style.left = left + 'px';
-        imageToolbar.style.top = top + 'px';
+        const viewportPadding = 8;
+        const minViewportLeft = viewportPadding;
+        const maxViewportLeft = Math.max(minViewportLeft, viewportWidth - targetWidth - viewportPadding);
+        const maxViewportTop = Math.max(viewportPadding, viewportHeight - targetHeight - viewportPadding);
+
+        left = Math.min(Math.max(left, minViewportLeft), maxViewportLeft);
+        top = Math.min(Math.max(top, viewportPadding), maxViewportTop);
+
+        imageToolbar.style.left = Math.round(left) + 'px';
+        imageToolbar.style.top = Math.round(top) + 'px';
+
+        positionImageResizeHandle(img);
       }
+
+      function finishImageResize(event) {
+        if (!imageResizeActive) {
+          return;
+        }
+        if (event?.preventDefault) {
+          event.preventDefault();
+        }
+        if (event?.pointerId != null && imageResizeHandle && typeof imageResizeHandle.releasePointerCapture === 'function' && typeof imageResizeHandle.hasPointerCapture === 'function' && imageResizeHandle.hasPointerCapture(event.pointerId)) {
+          try {
+            imageResizeHandle.releasePointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeActive = false;
+        imageResizeHandle?.classList.remove('dragging');
+        repositionImageToolbar();
+      }
+
+      imageResizeHandle?.addEventListener('pointerdown', (event) => {
+        if (!isEditMode || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        imageResizeActive = true;
+        imageResizeStartX = event.clientX;
+        imageResizeStartWidth = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || selectedImage.getBoundingClientRect().width || IMAGE_MIN_WIDTH;
+        if (typeof imageResizeHandle.setPointerCapture === 'function' && event.pointerId != null) {
+          try {
+            imageResizeHandle.setPointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeHandle.classList.add('dragging');
+      });
+
+      imageResizeHandle?.addEventListener('pointermove', (event) => {
+        if (!imageResizeActive || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        const deltaX = imageResizeStartX - event.clientX;
+        const proposedWidth = imageResizeStartWidth + deltaX;
+        setImageWidthPx(selectedImage, proposedWidth);
+        updateWidthDisplayForImage(selectedImage);
+        updateToolbarPosition(selectedImage);
+      });
+
+      imageResizeHandle?.addEventListener('pointerup', finishImageResize);
+      imageResizeHandle?.addEventListener('pointercancel', finishImageResize);
+      imageResizeHandle?.addEventListener('pointerleave', (event) => {
+        if (imageResizeActive) {
+          finishImageResize(event);
+        }
+      });
 
       function updateToolbarState(img) {
         if (!img) return;
@@ -4623,11 +5021,25 @@ export async function initializeEditor() {
       function repositionImageToolbar() {
         if (selectedImage) {
           updateToolbarPosition(selectedImage);
+        } else {
+          hideImageResizeHandle();
         }
       }
 
       window.addEventListener('scroll', repositionImageToolbar, { passive: true });
       window.addEventListener('resize', repositionImageToolbar);
+      document.addEventListener('scroll', (event) => {
+        if (!selectedImage) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        if (target.contains(selectedImage) || target === selectedImage) {
+          repositionImageToolbar();
+        }
+      }, true);
       window.addEventListener('scroll', repositionTemplateToolbar, { passive: true });
       window.addEventListener('resize', repositionTemplateToolbar);
       window.addEventListener('scroll', () => {
@@ -4773,16 +5185,23 @@ export async function initializeEditor() {
         selectedImage = img;
         img.classList.add('selected-image');
 
+        const parentNote = img.closest('.floating-note');
+        if (parentNote) {
+          bringNoteToFront(parentNote);
+        }
+
         updateToolbarState(img);
         updateToolbarPosition(img);
       }
 
       function hideImageToolbar() {
+        finishImageResize();
         if (selectedImage) {
           selectedImage.classList.remove('selected-image');
           selectedImage = null;
         }
         imageToolbar.classList.remove('show');
+        hideImageResizeHandle();
         if (cropImageBtn) {
           cropImageBtn.disabled = true;
         }
@@ -4792,7 +5211,7 @@ export async function initializeEditor() {
         if (isEditMode && e.target.tagName === 'IMG') {
           e.preventDefault();
           showImageToolbar(e.target);
-        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
+        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure') && !e.target.closest('#imageResizeHandle')) {
           hideImageToolbar();
         }
 
@@ -8091,42 +8510,42 @@ export async function initializeEditor() {
 
       /* === PLANTILLAS === */
       insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTemplateBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertTableBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertCollapseCardBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
@@ -8142,6 +8561,7 @@ export async function initializeEditor() {
             selection.removeAllRanges();
             selection.addRange(range);
             saveCurrentSelection();
+            capturePendingInsertionSnapshot();
           }
         }
 
@@ -8230,7 +8650,8 @@ export async function initializeEditor() {
           card.addEventListener('click', () => {
             const block = createTemplateBlock(template);
             if (!block) return;
-            const insertedBlock = insertNodeAtSelection(block);
+            const selectionForInsert = consumePendingInsertionSelection();
+            const insertedBlock = insertNodeAtSelection(block, { selectionOverride: selectionForInsert });
             if (!insertedBlock) {
               alert('Selecciona un área editable antes de insertar una plantilla.');
               return;
@@ -8247,7 +8668,8 @@ export async function initializeEditor() {
       insertCollapseCardBtn?.addEventListener('click', () => {
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
-        const insertedCard = insertNodeAtSelection(card);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedCard = insertNodeAtSelection(card, { selectionOverride: selectionForInsert });
         if (!insertedCard) {
           alert('Selecciona un área editable antes de insertar la tarjeta.');
           return;
@@ -9477,7 +9899,8 @@ export async function initializeEditor() {
           document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
-              const insertedNode = insertHtmlAtSelection(htmlCode);
+              const selectionForInsert = consumePendingInsertionSelection();
+              const insertedNode = insertHtmlAtSelection(htmlCode, { selectionOverride: selectionForInsert });
               if (insertedNode) {
                 hideModal();
               } else {
@@ -9565,7 +9988,8 @@ export async function initializeEditor() {
         }
         tableHTML += '</tbody></table></div>';
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedNode = insertHtmlAtSelection(tableHTML, { selectionOverride: selectionForInsert });
         if (insertedNode) {
           hideModal();
         } else {
