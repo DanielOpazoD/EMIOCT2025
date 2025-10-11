@@ -1,4 +1,5 @@
 import { generateUniqueId } from './utils/id.js';
+import { installIconPickerDiagnostics } from './modules/internalTests/iconPickerDiagnostics.js';
 import {
   NoteRegistry,
   NOTE_TYPES,
@@ -35,6 +36,7 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let lastFocusedEditable = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -544,6 +546,8 @@ export async function initializeEditor() {
           closeTopicNotesPopover();
           currentPageRef = null;
           currentSectionId = '';
+          savedSelection = null;
+          updateLastFocusedEditable(null);
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
@@ -561,6 +565,7 @@ export async function initializeEditor() {
         }
         setActiveTopicListHighlight(nextTopicId);
         currentPageRef = page;
+        updateLastFocusedEditable(page);
         const sectionId = page.dataset.sectionId || 'seccion-default';
         currentSectionId = sectionId;
         const themeClass = getPageTheme(page);
@@ -1724,14 +1729,136 @@ export async function initializeEditor() {
       shiftLeftBtn?.addEventListener('click', () => adjustDocumentShift(-DOCUMENT_SHIFT_STEP));
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
+      function getEditableHostFromNode(node) {
+        if (!node) {
+          return null;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const element = /** @type {HTMLElement} */ (node);
+          if (element.isContentEditable) {
+            return element;
+          }
+          if (typeof element.closest === 'function') {
+            return element.closest('[contenteditable="true"]');
+          }
+          return null;
+        }
+        const parent = node.parentElement;
+        if (!parent) {
+          return null;
+        }
+        return typeof parent.closest === 'function'
+          ? parent.closest('[contenteditable="true"]')
+          : (parent.isContentEditable ? parent : null);
+      }
+
+      function updateLastFocusedEditable(element) {
+        if (element && element.isConnected && element.isContentEditable) {
+          lastFocusedEditable = element;
+          return;
+        }
+        if (!element) {
+          lastFocusedEditable = null;
+        } else if (!element.isConnected || !element.isContentEditable) {
+          lastFocusedEditable = null;
+        }
+      }
+
+      function getLastFocusedEditable() {
+        if (lastFocusedEditable && lastFocusedEditable.isConnected && lastFocusedEditable.isContentEditable) {
+          return lastFocusedEditable;
+        }
+        lastFocusedEditable = null;
+        return null;
+      }
+
+      document.addEventListener('focusin', (event) => {
+        if (!isEditMode) return;
+        const target = event.target;
+        if (!target) return;
+        const editable = target.isContentEditable
+          ? target
+          : (typeof target.closest === 'function' ? target.closest('[contenteditable="true"]') : null);
+        if (editable) {
+          updateLastFocusedEditable(editable);
+        }
+      });
+
+      document.addEventListener('pointerdown', (event) => {
+        if (!isEditMode) return;
+        const target = event.target;
+        if (!target || typeof target.closest !== 'function') return;
+        const editable = target.closest('[contenteditable="true"]');
+        if (editable) {
+          updateLastFocusedEditable(editable);
+        }
+      }, true);
+
       /* === UTILIDADES === */
+      function resolveEditableTarget() {
+        const activeEditable = document.activeElement && document.activeElement.isContentEditable
+          ? document.activeElement
+          : null;
+        if (activeEditable) {
+          updateLastFocusedEditable(activeEditable);
+          return activeEditable;
+        }
+
+        const recentEditable = getLastFocusedEditable();
+        if (recentEditable) {
+          return recentEditable;
+        }
+
+        const preferredMagic = getCurrentMagicPage();
+        if (preferredMagic && preferredMagic.isContentEditable) {
+          updateLastFocusedEditable(preferredMagic);
+          return preferredMagic;
+        }
+
+        const current = getCurrentPage();
+        if (current && current.isContentEditable) {
+          updateLastFocusedEditable(current);
+          return current;
+        }
+
+        return null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
-          return true;
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (range) {
+            const editableHost = getEditableHostFromNode(range.commonAncestorContainer);
+            if (editableHost) {
+              updateLastFocusedEditable(editableHost);
+            }
+            savedSelection = range.cloneRange();
+            return true;
+          }
         }
-        return false;
+
+        const fallbackTarget = resolveEditableTarget();
+        if (!fallbackTarget) {
+          savedSelection = null;
+          return false;
+        }
+
+        const range = document.createRange();
+        range.selectNodeContents(fallbackTarget);
+        range.collapse(false);
+
+        const freshSelection = window.getSelection();
+        if (!freshSelection) {
+          savedSelection = null;
+          return false;
+        }
+
+        freshSelection.removeAllRanges();
+        freshSelection.addRange(range);
+        savedSelection = range.cloneRange();
+        updateLastFocusedEditable(fallbackTarget);
+        return true;
       }
 
       function restoreSelection() {
@@ -1744,6 +1871,10 @@ export async function initializeEditor() {
           selection.removeAllRanges();
           try {
             selection.addRange(savedSelection);
+            const editableHost = getEditableHostFromNode(savedSelection.startContainer);
+            if (editableHost) {
+              updateLastFocusedEditable(editableHost);
+            }
             return true;
           } catch (err) {
             savedSelection = null;
@@ -1755,41 +1886,47 @@ export async function initializeEditor() {
       function ensureEditableSelection() {
         if (restoreSelection()) {
           const restored = window.getSelection();
-          if (restored.rangeCount > 0) {
+          if (restored && restored.rangeCount > 0) {
+            const editableHost = getEditableHostFromNode(restored.getRangeAt(0).commonAncestorContainer);
+            if (editableHost) {
+              updateLastFocusedEditable(editableHost);
+            }
             return restored;
           }
         }
 
         const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
+        if (selection && selection.rangeCount > 0) {
+          const editableHost = getEditableHostFromNode(selection.getRangeAt(0).commonAncestorContainer);
+          if (editableHost) {
+            updateLastFocusedEditable(editableHost);
+          }
           return selection;
         }
 
-        const activeEditable = document.activeElement && document.activeElement.isContentEditable
-          ? document.activeElement
-          : null;
-        const preferredMagic = getCurrentMagicPage();
-        const target = activeEditable || preferredMagic || getCurrentPage();
-        if (!target) return null;
+        const target = resolveEditableTarget();
+        if (!target) {
+          return null;
+        }
 
-        const range = document.createRange();
-        range.selectNodeContents(target);
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        return selection;
+        const ensured = focusEditableElement(target, { collapseToEnd: true });
+        if (!ensured) {
+          return null;
+        }
+
+        return window.getSelection();
       }
 
-      function focusPageContent(page, { collapseToEnd = true } = {}) {
-        if (!page || !page.isConnected || !page.isContentEditable) {
+      function focusEditableElement(element, { collapseToEnd = true } = {}) {
+        if (!element || !element.isConnected || !element.isContentEditable) {
           return false;
         }
 
-        if (typeof page.focus === 'function') {
+        if (typeof element.focus === 'function') {
           try {
-            page.focus({ preventScroll: true });
+            element.focus({ preventScroll: true });
           } catch (err) {
-            page.focus();
+            element.focus();
           }
         }
 
@@ -1799,14 +1936,19 @@ export async function initializeEditor() {
         }
 
         const range = document.createRange();
-        range.selectNodeContents(page);
+        range.selectNodeContents(element);
         if (collapseToEnd) {
           range.collapse(false);
         }
         selection.removeAllRanges();
         selection.addRange(range);
         savedSelection = range.cloneRange();
+        updateLastFocusedEditable(element);
         return true;
+      }
+
+      function focusPageContent(page, options = {}) {
+        return focusEditableElement(page, options);
       }
 
       function insertNodeAtSelection(node) {
@@ -1820,6 +1962,10 @@ export async function initializeEditor() {
         selection.removeAllRanges();
         selection.addRange(range);
         savedSelection = null;
+        const editableHost = getEditableHostFromNode(node);
+        if (editableHost) {
+          updateLastFocusedEditable(editableHost);
+        }
         return node;
       }
 
@@ -1839,6 +1985,10 @@ export async function initializeEditor() {
         selection.removeAllRanges();
         selection.addRange(range);
         savedSelection = null;
+        const editableHost = getEditableHostFromNode(nodes[0] || range.commonAncestorContainer);
+        if (editableHost) {
+          updateLastFocusedEditable(editableHost);
+        }
         return nodes[0] || null;
       }
 
@@ -1846,7 +1996,14 @@ export async function initializeEditor() {
         if (typeof text !== 'string' || !text) {
           return null;
         }
-        const selection = ensureEditableSelection();
+        let selection = ensureEditableSelection();
+        if (!selection || !selection.rangeCount) {
+          const target = resolveEditableTarget();
+          if (!target || !focusEditableElement(target, { collapseToEnd: true })) {
+            return null;
+          }
+          selection = window.getSelection();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -1857,6 +2014,10 @@ export async function initializeEditor() {
         selection.removeAllRanges();
         selection.addRange(range);
         savedSelection = null;
+        const editableHost = getEditableHostFromNode(textNode);
+        if (editableHost) {
+          updateLastFocusedEditable(editableHost);
+        }
         return textNode;
       }
 
@@ -8332,6 +8493,10 @@ export async function initializeEditor() {
           }
           enableHtmlPaste();
           tableMenuAPI?.refresh();
+          const currentEditable = getCurrentPage();
+          if (currentEditable) {
+            updateLastFocusedEditable(currentEditable);
+          }
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
@@ -8347,6 +8512,8 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+          savedSelection = null;
+          updateLastFocusedEditable(null);
         }
       }
       
@@ -9756,6 +9923,22 @@ ${inlineStyles}
 
   window.addEventListener('beforeunload', () => {
     void saveToLocalCache(false);
+  });
+
+  installIconPickerDiagnostics({
+    getCurrentPage,
+    getCurrentMagicPage,
+    focusCurrentPage: (page, options) => focusPageContent(page, options),
+    focusEditableElement,
+    saveSelection: () => saveCurrentSelection(),
+    restoreSelection: () => restoreSelection(),
+    insertText: (value) => insertTextAtSelection(value),
+    getSavedSelection: () => savedSelection,
+    getLastFocusedEditable,
+    resolveEditableTarget,
+    scheduleIconPickerRebind: (delay = 0, label = 'Manual icon picker rebind') => {
+      scheduleIconPickerRebind(delay, label);
+    }
   });
 
   const restoredFromCache = await restoreFromLocalCache();
