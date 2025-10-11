@@ -38,6 +38,9 @@ export async function initializeEditor() {
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let persistentHighlight = { active: false, color: '', applyTimer: null, suspended: false };
+      let isPointerSelectingText = false;
+      let isApplyingPersistentHighlight = false;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -800,7 +803,7 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
-            const inserted = insertTextAtSelection(`${symbol} `);
+            const inserted = insertSymbolAtSelection(symbol);
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
             }
@@ -1977,6 +1980,55 @@ export async function initializeEditor() {
         return textNode;
       }
 
+      function insertSymbolAtSelection(symbol) {
+        if (!symbol) {
+          return false;
+        }
+
+        if (!restoreSelection()) {
+          ensureEditableSelection();
+        }
+
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!range) {
+          return false;
+        }
+
+        const editableContext = resolveEditableAncestor(range.startContainer)
+          || resolveEditableAncestor(range.endContainer);
+        if (!editableContext) {
+          return false;
+        }
+
+        range.deleteContents();
+
+        const span = document.createElement('span');
+        span.className = 'inline-symbol';
+        span.textContent = symbol;
+        span.style.fontSize = 'inherit';
+        span.style.lineHeight = '1em';
+        span.style.display = 'inline-block';
+        span.style.whiteSpace = 'pre';
+
+        const trailingSpace = document.createTextNode(' ');
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(span);
+        fragment.appendChild(trailingSpace);
+
+        range.insertNode(fragment);
+        range.setStartAfter(trailingSpace);
+        range.setEndAfter(trailingSpace);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        clearSavedSelection();
+        return true;
+      }
+
       function normalizeColorToHex(color, fallback = '#ffffff') {
         if (!color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)' || color === 'none') {
           return fallback;
@@ -3069,6 +3121,7 @@ export async function initializeEditor() {
         let currentResizer = null;
 
         const actionButtons = Array.from(tableMenu.querySelectorAll('[data-action]'));
+        const TABLE_HORIZONTAL_STEP = 20;
 
         function hideMenu(options = {}) {
           tableMenu.classList.remove('show');
@@ -3134,6 +3187,7 @@ export async function initializeEditor() {
           if (!table.dataset.borderWidth) table.dataset.borderWidth = '1';
           if (!table.dataset.hideVerticalBorders) table.dataset.hideVerticalBorders = 'false';
           if (!table.dataset.hideHorizontalBorders) table.dataset.hideHorizontalBorders = 'false';
+          if (!table.dataset.tableOffsetX) table.dataset.tableOffsetX = '0';
         }
 
         function countColumns(table) {
@@ -3156,6 +3210,9 @@ export async function initializeEditor() {
           const lineHeight = parseFloat(selectedTable.dataset.lineHeight || '1.25');
           const paddingY = parseInt(selectedTable.dataset.paddingY || '4', 10);
           const margin = parseInt(selectedTable.dataset.tableMargin || '6', 10);
+          const offsetX = parseInt(selectedTable.dataset.tableOffsetX || '0', 10) || 0;
+          const leftMargin = Math.max(0, margin + offsetX);
+          const rightMargin = Math.max(0, margin - offsetX);
           const cells = selectedTable.querySelectorAll('th,td');
           cells.forEach(cell => {
             cell.style.lineHeight = lineHeight.toString();
@@ -3164,8 +3221,8 @@ export async function initializeEditor() {
           });
           selectedTable.style.marginTop = margin + 'px';
           selectedTable.style.marginBottom = margin + 'px';
-          selectedTable.style.marginLeft = margin + 'px';
-          selectedTable.style.marginRight = margin + 'px';
+          selectedTable.style.marginLeft = leftMargin + 'px';
+          selectedTable.style.marginRight = rightMargin + 'px';
         }
 
         function updateSpacingControls() {
@@ -3415,6 +3472,15 @@ export async function initializeEditor() {
           });
         }
 
+        function moveTableHorizontally(direction) {
+          if (!selectedTable) return;
+          const delta = direction === 'left' ? -TABLE_HORIZONTAL_STEP : TABLE_HORIZONTAL_STEP;
+          const current = parseInt(selectedTable.dataset.tableOffsetX || '0', 10) || 0;
+          const updated = current + delta;
+          selectedTable.dataset.tableOffsetX = String(updated);
+          applySpacing();
+        }
+
         function toggleHeaderRow() {
           if (!selectedTable) return;
           if (selectedTable.tHead) {
@@ -3492,6 +3558,12 @@ export async function initializeEditor() {
               break;
             case 'clear-column':
               clearColumn();
+              break;
+            case 'move-table-left':
+              moveTableHorizontally('left');
+              break;
+            case 'move-table-right':
+              moveTableHorizontally('right');
               break;
             case 'toggle-header':
               toggleHeaderRow();
@@ -6977,6 +7049,21 @@ export async function initializeEditor() {
       });
 
       /* === PALETAS DE COLOR MEJORADAS === */
+      function handleHighlightPaletteSelection(color, palette, options = {}) {
+        if (!palette) return;
+        const mode = palette.dataset.mode || 'single';
+        if (mode === 'persistent') {
+          activatePersistentHighlight(color);
+          palette.classList.remove('show');
+          persistentHighlight.suspended = false;
+          return;
+        }
+
+        applyColor(color, true, options);
+        palette.classList.remove('show');
+        persistentHighlight.suspended = false;
+      }
+
       function createColorPalette(paletteId, colors, isHighlight) {
         const palette = document.getElementById(paletteId);
         if (!palette) return;
@@ -6994,8 +7081,12 @@ export async function initializeEditor() {
           });
           swatch.addEventListener('click', (e) => {
             e.stopPropagation();
-            applyColor(color, isHighlight);
-            palette.classList.remove('show');
+            if (isHighlight) {
+              handleHighlightPaletteSelection(color, palette);
+            } else {
+              applyColor(color, false);
+              palette.classList.remove('show');
+            }
           });
           palette.appendChild(swatch);
         });
@@ -7010,10 +7101,32 @@ export async function initializeEditor() {
         });
         customSwatch.addEventListener('change', (e) => {
           e.stopPropagation();
-          applyColor(e.target.value, isHighlight);
-          palette.classList.remove('show');
+          if (isHighlight) {
+            const mode = palette.dataset.mode || 'single';
+            const extraOptions = mode === 'persistent' ? { silent: true } : {};
+            handleHighlightPaletteSelection(e.target.value, palette, extraOptions);
+          } else {
+            applyColor(e.target.value, false);
+            palette.classList.remove('show');
+          }
         });
         palette.appendChild(customSwatch);
+
+        if (isHighlight) {
+          const stopBtn = document.createElement('button');
+          stopBtn.type = 'button';
+          stopBtn.className = 'color-palette-action';
+          stopBtn.setAttribute('aria-label', 'Detener destacado continuo');
+          stopBtn.title = 'Detener destacado continuo';
+          stopBtn.textContent = '✖️';
+          stopBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            deactivatePersistentHighlight();
+            palette.classList.remove('show');
+          });
+          palette.appendChild(stopBtn);
+        }
       }
 
       function supportsCommand(command) {
@@ -7025,15 +7138,21 @@ export async function initializeEditor() {
         }
       }
 
-      function applyColor(color, isHighlight) {
+      function applyColor(color, isHighlight, options = {}) {
+        const { silent = false } = options;
+
         if (!restoreSelection()) {
-          alert('Por favor, selecciona el texto primero');
+          if (!silent) {
+            alert('Por favor, selecciona el texto primero');
+          }
           return;
         }
 
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) {
-          alert('Por favor, selecciona el texto primero');
+          if (!silent) {
+            alert('Por favor, selecciona el texto primero');
+          }
           savedSelection = null;
           return;
         }
@@ -7068,6 +7187,7 @@ export async function initializeEditor() {
           const wrapper = document.createElement('span');
           if (isHighlight) {
             wrapper.style.backgroundColor = color;
+            wrapper.dataset.editorHighlight = normalizeColorToHex(color);
           } else {
             wrapper.style.color = color;
           }
@@ -7080,12 +7200,311 @@ export async function initializeEditor() {
           }
         }
 
+        if (isHighlight) {
+          markHighlightElements(selection, color);
+        }
+
         selection.removeAllRanges();
         savedSelection = null;
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
       createColorPalette('textColorPalette', textColors, false);
+      if (highlightPalette) {
+        highlightPalette.dataset.mode = 'single';
+      }
+
+      function rangeIntersectsNodeCompat(range, node) {
+        if (!range || !node) {
+          return false;
+        }
+        if (typeof range.intersectsNode === 'function') {
+          try {
+            return range.intersectsNode(node);
+          } catch (error) {
+            return false;
+          }
+        }
+        try {
+          const nodeRange = document.createRange();
+          if (node.nodeType === Node.TEXT_NODE) {
+            nodeRange.selectNodeContents(node);
+          } else {
+            nodeRange.selectNode(node);
+          }
+          return range.compareBoundaryPoints(Range.END_TO_START, nodeRange) === -1
+            && range.compareBoundaryPoints(Range.START_TO_END, nodeRange) === 1;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      function markHighlightElements(selection, color) {
+        if (!selection || !selection.rangeCount) {
+          return;
+        }
+        const range = selection.getRangeAt(0).cloneRange();
+        const normalizedColor = normalizeColorToHex(color);
+        const elements = new Set();
+
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode(node) {
+              if (!(node instanceof HTMLElement)) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (!rangeIntersectsNodeCompat(range, node)) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              const inlineColor = node.style?.backgroundColor;
+              if (!inlineColor) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (normalizeColorToHex(inlineColor) !== normalizedColor) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        while (walker.nextNode()) {
+          elements.add(walker.currentNode);
+        }
+
+        elements.forEach(element => {
+          element.dataset.editorHighlight = normalizedColor;
+        });
+      }
+
+      function activatePersistentHighlight(color) {
+        if (!color) {
+          return;
+        }
+        persistentHighlight.active = true;
+        persistentHighlight.color = color;
+        persistentHighlight.suspended = false;
+        highlightBtn?.classList.add('active');
+        highlightBtn?.setAttribute('aria-pressed', 'true');
+      }
+
+      function deactivatePersistentHighlight() {
+        persistentHighlight.active = false;
+        persistentHighlight.color = '';
+        persistentHighlight.suspended = false;
+        if (persistentHighlight.applyTimer) {
+          clearTimeout(persistentHighlight.applyTimer);
+          persistentHighlight.applyTimer = null;
+        }
+        highlightBtn?.classList.remove('active');
+        highlightBtn?.setAttribute('aria-pressed', 'false');
+      }
+
+      function showPaletteAtRect(palette, rect, options = {}) {
+        if (!palette || !rect) {
+          return;
+        }
+
+        const { offsetX = 0, offsetY = 6 } = options;
+        const computed = window.getComputedStyle(palette);
+        const isFixed = computed?.position === 'fixed';
+        const scrollX = isFixed ? 0 : (window.scrollX ?? window.pageXOffset ?? 0);
+        const scrollY = isFixed ? 0 : (window.scrollY ?? window.pageYOffset ?? 0);
+
+        palette.style.visibility = 'hidden';
+        palette.classList.add('show');
+        const paletteRect = palette.getBoundingClientRect();
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+
+        let top = rect.bottom + offsetY + scrollY;
+        let left = rect.left + offsetX + scrollX;
+
+        if (paletteRect) {
+          const maxLeft = (isFixed ? viewportWidth : scrollX + viewportWidth) - paletteRect.width - 12;
+          const minLeft = (isFixed ? 12 : scrollX + 12);
+          left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
+
+          const maxTop = (isFixed ? viewportHeight : scrollY + viewportHeight) - paletteRect.height - 12;
+          const minTop = (isFixed ? 12 : scrollY + 12);
+          if (top > maxTop && rect.top - paletteRect.height - offsetY >= 0) {
+            top = rect.top - paletteRect.height - offsetY + scrollY;
+          }
+          top = Math.min(Math.max(top, minTop), Math.max(minTop, maxTop));
+        }
+
+        palette.style.left = `${Math.round(left)}px`;
+        palette.style.top = `${Math.round(top)}px`;
+        palette.style.visibility = '';
+      }
+
+      function showPaletteAtButton(palette, button) {
+        if (!palette || !button) {
+          return;
+        }
+        const rect = button.getBoundingClientRect();
+        showPaletteAtRect(palette, rect, { offsetY: 6 });
+      }
+
+      function applyPersistentHighlight() {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        if (persistentHighlight.suspended) {
+          return;
+        }
+        if (isApplyingPersistentHighlight) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount || selection.isCollapsed) {
+          return;
+        }
+        const anchorEditable = resolveEditableAncestor(selection.anchorNode);
+        const focusEditable = resolveEditableAncestor(selection.focusNode);
+        if (!anchorEditable || !focusEditable) {
+          return;
+        }
+        if (highlightPalette?.classList.contains('show')) {
+          return;
+        }
+        isApplyingPersistentHighlight = true;
+        try {
+          saveCurrentSelection();
+          applyColor(persistentHighlight.color, true, { silent: true });
+        } finally {
+          isApplyingPersistentHighlight = false;
+        }
+      }
+
+      function schedulePersistentHighlight() {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        if (persistentHighlight.suspended) {
+          return;
+        }
+        if (persistentHighlight.applyTimer) {
+          clearTimeout(persistentHighlight.applyTimer);
+        }
+        persistentHighlight.applyTimer = setTimeout(() => {
+          persistentHighlight.applyTimer = null;
+          applyPersistentHighlight();
+        }, 120);
+      }
+
+      function collectTextNodesInRange(range) {
+        if (!range) {
+          return [];
+        }
+        const nodes = [];
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              if (!rangeIntersectsNodeCompat(range, node)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!node.nodeValue || !node.nodeValue.trim()) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+        while (walker.nextNode()) {
+          nodes.push(walker.currentNode);
+        }
+        return nodes;
+      }
+
+      function adjustSelectionFontSize(factor) {
+        if (typeof factor !== 'number' || !Number.isFinite(factor) || factor <= 0) {
+          return false;
+        }
+
+        if (!restoreSelection()) {
+          alert('Por favor, selecciona el texto que deseas ajustar');
+          return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          alert('Por favor, selecciona el texto que deseas ajustar');
+          savedSelection = null;
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const textNodes = collectTextNodesInRange(range);
+        if (textNodes.length === 0) {
+          alert('No se encontró texto para ajustar el tamaño.');
+          savedSelection = null;
+          return false;
+        }
+
+        const sizes = new Map();
+        textNodes.forEach(node => {
+          const element = node.parentElement || resolveEditableAncestor(node);
+          if (!element) {
+            return;
+          }
+          const computed = window.getComputedStyle(element);
+          const size = parseFloat(computed.fontSize);
+          if (Number.isFinite(size)) {
+            sizes.set(node, size);
+          }
+        });
+
+        if (sizes.size === 0) {
+          alert('No se pudo determinar el tamaño del texto seleccionado.');
+          savedSelection = null;
+          return false;
+        }
+
+        const styleWithCss = supportsCommand('styleWithCSS');
+        if (styleWithCss) {
+          document.execCommand('styleWithCSS', false, true);
+        }
+        document.execCommand('fontSize', false, '7');
+        if (styleWithCss) {
+          document.execCommand('styleWithCSS', false, false);
+        }
+
+        const wrapperAdjustments = new Map();
+        sizes.forEach((size, node) => {
+          const wrapper = node.parentElement;
+          if (!wrapper) {
+            return;
+          }
+          let targetWrapper = wrapper.closest('[data-font-size-adjust="true"]') || wrapper;
+          if (targetWrapper !== wrapper && wrapper.dataset.fontSizeAdjust !== 'true') {
+            while (wrapper.firstChild) {
+              targetWrapper.appendChild(wrapper.firstChild);
+            }
+            wrapper.remove();
+          }
+          const newSize = Math.max(1, size * factor);
+          if (!wrapperAdjustments.has(targetWrapper)) {
+            wrapperAdjustments.set(targetWrapper, newSize);
+          }
+        });
+
+        wrapperAdjustments.forEach((newSize, wrapper) => {
+          if (!(wrapper instanceof HTMLElement)) {
+            return;
+          }
+          wrapper.style.fontSize = `${newSize}px`;
+          wrapper.dataset.fontSizeAdjust = 'true';
+        });
+
+        saveCurrentSelection();
+        return true;
+      }
 
       const handleColorButtonPointerDown = (event) => {
         if (event.pointerType !== 'mouse' || event.button === 0) {
@@ -7100,16 +7519,24 @@ export async function initializeEditor() {
       highlightBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        if (!saveCurrentSelection()) {
-          alert('Por favor, selecciona el texto que deseas destacar');
-          return;
+        const selection = window.getSelection();
+        const hasSelection = !!selection && selection.rangeCount > 0 && !selection.isCollapsed
+          && !!resolveEditableAncestor(selection.anchorNode)
+          && !!resolveEditableAncestor(selection.focusNode);
+
+        if (hasSelection) {
+          if (!saveCurrentSelection()) {
+            alert('Por favor, selecciona el texto que deseas destacar');
+            return;
+          }
+          highlightPalette.dataset.mode = 'single';
+        } else {
+          highlightPalette.dataset.mode = 'persistent';
+          persistentHighlight.suspended = true;
         }
 
         const btn = e.currentTarget;
-        const btnRect = btn.getBoundingClientRect();
-
-        highlightPalette.style.left = btnRect.left + 'px';
-        highlightPalette.style.top = (btnRect.bottom + 5) + 'px';
+        showPaletteAtButton(highlightPalette, btn);
 
         textColorPalette.classList.remove('show');
         highlightPalette.classList.add('show');
@@ -7122,15 +7549,102 @@ export async function initializeEditor() {
           alert('Por favor, selecciona el texto al que deseas cambiar el color');
           return;
         }
-        
+
         const btn = e.currentTarget;
-        const btnRect = btn.getBoundingClientRect();
-        
-        textColorPalette.style.left = btnRect.left + 'px';
-        textColorPalette.style.top = (btnRect.bottom + 5) + 'px';
+        showPaletteAtButton(textColorPalette, btn);
 
         highlightPalette.classList.remove('show');
         textColorPalette.classList.add('show');
+      });
+
+      document.addEventListener('dblclick', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const highlightElement = target.closest('[data-editor-highlight]');
+        if (!highlightElement) {
+          return;
+        }
+        if (!resolveEditableAncestor(highlightElement)) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          range.selectNodeContents(highlightElement);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          saveCurrentSelection();
+        }
+
+        highlightPalette.dataset.mode = 'single';
+        const rect = highlightElement.getBoundingClientRect();
+        showPaletteAtRect(highlightPalette, rect, { offsetY: 6 });
+        highlightPalette.classList.add('show');
+        textColorPalette.classList.remove('show');
+        persistentHighlight.suspended = true;
+      });
+
+      document.addEventListener('selectionchange', () => {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        if (isApplyingPersistentHighlight) {
+          return;
+        }
+        if (isPointerSelectingText) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+        const anchorEditable = resolveEditableAncestor(selection.anchorNode);
+        const focusEditable = resolveEditableAncestor(selection.focusNode);
+        if (!anchorEditable || !focusEditable) {
+          return;
+        }
+        schedulePersistentHighlight();
+      });
+
+      document.addEventListener('pointerdown', (event) => {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        if (!(event.target instanceof HTMLElement)) {
+          return;
+        }
+        if (!resolveEditableAncestor(event.target)) {
+          return;
+        }
+        isPointerSelectingText = true;
+      });
+
+      document.addEventListener('pointerup', () => {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        isPointerSelectingText = false;
+        schedulePersistentHighlight();
+      });
+
+      document.addEventListener('pointercancel', () => {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        isPointerSelectingText = false;
+      });
+
+      document.addEventListener('keyup', (event) => {
+        if (!persistentHighlight.active || !persistentHighlight.color) {
+          return;
+        }
+        const keys = ['Shift', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'End', 'Home'];
+        if (keys.includes(event.key)) {
+          schedulePersistentHighlight();
+        }
       });
 
       function copySelectedFormat() {
@@ -7232,6 +7746,7 @@ export async function initializeEditor() {
           highlightPalette.classList.remove('show');
           if (wasOpen) {
             savedSelection = null;
+            persistentHighlight.suspended = false;
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
@@ -8597,7 +9112,27 @@ export async function initializeEditor() {
           this.value = '';
         }
       });
-      
+
+      const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
+      const fontSizeDecreaseBtn = document.getElementById('fontSizeDecreaseBtn');
+
+      const handleFontSizePointerDown = (event) => {
+        if (event.pointerType !== 'mouse' || event.button === 0) {
+          saveCurrentSelection();
+        }
+      };
+
+      fontSizeIncreaseBtn?.addEventListener('pointerdown', handleFontSizePointerDown);
+      fontSizeDecreaseBtn?.addEventListener('pointerdown', handleFontSizePointerDown);
+
+      fontSizeIncreaseBtn?.addEventListener('click', () => {
+        adjustSelectionFontSize(1.1);
+      });
+
+      fontSizeDecreaseBtn?.addEventListener('click', () => {
+        adjustSelectionFontSize(0.9);
+      });
+
       document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
