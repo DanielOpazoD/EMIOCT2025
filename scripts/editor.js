@@ -47,6 +47,7 @@ export async function initializeEditor() {
         scaleX: 1,
         scaleY: 1
       };
+      let imageResizeSession = null;
 
       const IMAGE_MIN_WIDTH = 60;
       const IMAGE_MAX_WIDTH = 1600;
@@ -337,6 +338,21 @@ export async function initializeEditor() {
       const imageCropCancelBtn = document.getElementById('imageCropCancelBtn');
       const imageCropCloseBtn = document.getElementById('imageCropCloseBtn');
       const imageCropSizeLabel = document.getElementById('imageCropSizeLabel');
+      const existingResizeHandle = document.getElementById('imageResizeHandle');
+      const imageResizeHandle = existingResizeHandle || (() => {
+        const handle = document.createElement('button');
+        handle.type = 'button';
+        handle.id = 'imageResizeHandle';
+        handle.className = 'image-resize-handle';
+        handle.innerHTML = '<span aria-hidden="true">⤡</span>';
+        handle.title = 'Arrastra para ajustar el tamaño de la imagen';
+        handle.setAttribute('aria-label', 'Ajustar tamaño de la imagen');
+        (document.body || document.documentElement).appendChild(handle);
+        return handle;
+      })();
+      if (existingResizeHandle && !existingResizeHandle.classList.contains('image-resize-handle')) {
+        existingResizeHandle.classList.add('image-resize-handle');
+      }
       const templateToolbar = document.getElementById('templateToolbar');
       const templateBgColorInput = document.getElementById('templateBgColor');
       const templateClearBgBtn = document.getElementById('templateClearBgBtn');
@@ -4469,7 +4485,108 @@ export async function initializeEditor() {
         const current = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || 200;
         setImageWidthPx(selectedImage, current * multiplier);
         updateWidthDisplayForImage(selectedImage);
-        repositionImageToolbar();
+        positionImageResizeHandle(selectedImage);
+      }
+
+      function positionImageResizeHandle(targetImage = selectedImage) {
+        if (!imageResizeHandle) return;
+        const img = targetImage;
+        if (!img || !isEditMode) {
+          imageResizeHandle.classList.remove('show');
+          return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          imageResizeHandle.classList.remove('show');
+          return;
+        }
+
+        const handleRect = imageResizeHandle.getBoundingClientRect();
+        const handleWidth = handleRect.width || 18;
+        const handleHeight = handleRect.height || 18;
+        const offset = 6;
+
+        let left = rect.left + offset;
+        let top = rect.bottom - handleHeight - offset;
+
+        left = Math.max(4, Math.min(window.innerWidth - handleWidth - 4, left));
+        top = Math.max(4, Math.min(window.innerHeight - handleHeight - 4, top));
+
+        imageResizeHandle.style.left = left + 'px';
+        imageResizeHandle.style.top = top + 'px';
+      }
+
+      function showImageResizeHandle(img) {
+        if (!imageResizeHandle) return;
+        if (!img || !isEditMode) {
+          imageResizeHandle.classList.remove('show');
+          return;
+        }
+        positionImageResizeHandle(img);
+        imageResizeHandle.classList.add('show');
+      }
+
+      function hideImageResizeHandle() {
+        if (!imageResizeHandle) return;
+        imageResizeHandle.classList.remove('show');
+      }
+
+      function beginImageResize(event) {
+        if (!imageResizeHandle || !selectedImage || !isEditMode) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const baseWidth = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || selectedImage.getBoundingClientRect().width || 0;
+        if (!baseWidth) {
+          return;
+        }
+        imageResizeSession = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startWidth: baseWidth,
+          image: selectedImage
+        };
+        try {
+          imageResizeHandle.setPointerCapture(event.pointerId);
+        } catch (err) {
+          /* ignore */
+        }
+        imageResizeHandle.classList.add('resizing');
+      }
+
+      function handleImageResizePointerMove(event) {
+        if (!imageResizeSession || event.pointerId !== imageResizeSession.pointerId) {
+          return;
+        }
+        event.preventDefault();
+        const delta = imageResizeSession.startX - event.clientX;
+        const proposedWidth = imageResizeSession.startWidth + delta;
+        const appliedWidth = setImageWidthPx(imageResizeSession.image, proposedWidth);
+        if (appliedWidth) {
+          updateWidthDisplayForImage(imageResizeSession.image);
+          positionImageResizeHandle(imageResizeSession.image);
+        }
+      }
+
+      function endImageResize(event) {
+        if (!imageResizeSession) {
+          return;
+        }
+        if (event && imageResizeSession.pointerId !== null && event.pointerId !== imageResizeSession.pointerId) {
+          return;
+        }
+        if (imageResizeHandle && imageResizeSession.pointerId !== null) {
+          try {
+            imageResizeHandle.releasePointerCapture(imageResizeSession.pointerId);
+          } catch (err) {
+            /* ignore */
+          }
+        }
+        imageResizeHandle.classList.remove('resizing');
+        positionImageResizeHandle(imageResizeSession.image);
+        imageResizeSession = null;
       }
 
       function updateToolbarPosition(img) {
@@ -4481,27 +4598,24 @@ export async function initializeEditor() {
         const toolbarWidth = imageToolbar.offsetWidth || 240;
         const toolbarHeight = imageToolbar.offsetHeight || 160;
 
-        let left = rect.left;
-        let top = rect.top - toolbarHeight - 10;
+        let left = rect.left + (rect.width / 2) - (toolbarWidth / 2);
+        let top = rect.top - toolbarHeight - 12;
 
-        if (top < 10) {
-          top = rect.bottom + 10;
+        if (top < 12) {
+          top = 12;
         }
 
-        if (top + toolbarHeight > window.innerHeight - 10) {
-          top = Math.max(10, window.innerHeight - toolbarHeight - 10);
+        if (left + toolbarWidth > window.innerWidth - 12) {
+          left = window.innerWidth - toolbarWidth - 12;
         }
 
-        if (left + toolbarWidth > window.innerWidth - 10) {
-          left = window.innerWidth - toolbarWidth - 10;
-        }
-
-        if (left < 10) {
-          left = 10;
+        if (left < 12) {
+          left = 12;
         }
 
         imageToolbar.style.left = left + 'px';
         imageToolbar.style.top = top + 'px';
+        positionImageResizeHandle(img);
       }
 
       function updateToolbarState(img) {
@@ -4775,6 +4889,7 @@ export async function initializeEditor() {
 
         updateToolbarState(img);
         updateToolbarPosition(img);
+        showImageResizeHandle(img);
       }
 
       function hideImageToolbar() {
@@ -4786,13 +4901,20 @@ export async function initializeEditor() {
         if (cropImageBtn) {
           cropImageBtn.disabled = true;
         }
+        endImageResize(null);
+        hideImageResizeHandle();
       }
 
       document.addEventListener('click', (e) => {
         if (isEditMode && e.target.tagName === 'IMG') {
           e.preventDefault();
           showImageToolbar(e.target);
-        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
+        } else if (
+          !e.target.closest('#imageToolbar') &&
+          !e.target.closest('#imageResizeHandle') &&
+          !e.target.closest('img') &&
+          !e.target.closest('.image-figure')
+        ) {
           hideImageToolbar();
         }
 
@@ -7027,13 +7149,18 @@ export async function initializeEditor() {
       });
 
       window.addEventListener('pointermove', handleFloatingNotePointerMove);
+      window.addEventListener('pointermove', handleImageResizePointerMove);
       window.addEventListener('pointerup', (event) => {
         endFloatingNoteDrag(event);
+        endImageResize(event);
         if (!floatingNoteResizeObserver && floatingNotesLayer) {
           floatingNotesLayer.querySelectorAll('.floating-note').forEach(updateFloatingNoteSizeDataset);
         }
       });
-      window.addEventListener('pointercancel', endFloatingNoteDrag);
+      window.addEventListener('pointercancel', (event) => {
+        endFloatingNoteDrag(event);
+        endImageResize(event);
+      });
       window.addEventListener('resize', requestFloatingNotesViewportSync);
       if (window.visualViewport) {
         const handleVisualViewportChange = () => {
@@ -7064,6 +7191,11 @@ export async function initializeEditor() {
 
       toggleNotesBtn?.addEventListener('click', () => {
         setFloatingNotesVisibility(!floatingNotesHidden);
+      });
+
+      imageResizeHandle?.addEventListener('pointerdown', beginImageResize);
+      imageResizeHandle?.addEventListener('click', (event) => {
+        event.preventDefault();
       });
 
       imageWidthIncreaseBtn?.addEventListener('click', () => {
@@ -8073,7 +8205,6 @@ export async function initializeEditor() {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
-            clearSavedSelection();
             highlightPalette.dataset.mode = persistentHighlight.active ? 'persistent-change' : 'selection';
             if (!persistentHighlight.active) {
               updateHighlightPaletteActiveColor(highlightPalette, '');
@@ -8083,9 +8214,6 @@ export async function initializeEditor() {
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
-          if (wasOpen) {
-            clearSavedSelection();
-          }
         }
       });
 
