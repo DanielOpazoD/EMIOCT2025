@@ -1871,12 +1871,15 @@ export async function initializeEditor() {
         if (!element) {
           return null;
         }
+        const editable = typeof element.closest === 'function'
+          ? element.closest('[contenteditable="true"]')
+          : null;
+        if (editable) {
+          return editable;
+        }
         const page = element.closest('.page, .magic-page');
         if (page) {
           return page;
-        }
-        if (typeof element.closest === 'function') {
-          return element.closest('[contenteditable="true"]');
         }
         return null;
       }
@@ -1904,6 +1907,22 @@ export async function initializeEditor() {
           range,
           focusTarget: focusTarget || pageTarget || null,
           pageTarget: pageTarget || null
+        };
+      }
+
+      function cloneSelectionSnapshot(snapshot) {
+        if (!snapshot || !snapshot.range) {
+          return null;
+        }
+
+        return {
+          range: snapshot.range.cloneRange(),
+          focusTarget: snapshot.focusTarget && document.contains(snapshot.focusTarget)
+            ? snapshot.focusTarget
+            : null,
+          pageTarget: snapshot.pageTarget && document.contains(snapshot.pageTarget)
+            ? snapshot.pageTarget
+            : null
         };
       }
 
@@ -1977,8 +1996,19 @@ export async function initializeEditor() {
       }
 
       function captureIconPickerSelectionSnapshot() {
-        const selection = window.getSelection();
-        iconPickerSelectionSnapshot = createSelectionSnapshot(selection);
+        let selection = window.getSelection();
+
+        if ((!selection || selection.rangeCount === 0) && savedSelection && savedSelection.range) {
+          restoreSelectionSnapshot(savedSelection, { updateSnapshot: false });
+          selection = window.getSelection();
+        }
+
+        let snapshot = createSelectionSnapshot(selection);
+        if (!snapshot && savedSelection) {
+          snapshot = cloneSelectionSnapshot(savedSelection);
+        }
+
+        iconPickerSelectionSnapshot = snapshot;
         return !!iconPickerSelectionSnapshot;
       }
 
@@ -7352,12 +7382,110 @@ export async function initializeEditor() {
         toUnwrap.forEach(node => unwrapElementPreservingContent(node));
       }
 
+      function isHighlightElement(element) {
+        if (!(element instanceof HTMLElement)) {
+          return false;
+        }
+        if (element.classList && element.classList.contains('text-highlighted')) {
+          return true;
+        }
+        if (element.tagName === 'MARK') {
+          return true;
+        }
+        if (!element.style) {
+          return false;
+        }
+        const bgColor = element.style.backgroundColor || '';
+        const background = element.style.background || '';
+        if (bgColor && !isTransparentColor(bgColor)) {
+          return true;
+        }
+        if (background && !isTransparentColor(background)) {
+          return true;
+        }
+        return false;
+      }
+
+      function stripHighlightFromElement(element) {
+        if (!(element instanceof HTMLElement) || !element.isConnected) {
+          return;
+        }
+
+        if (element.style) {
+          if (element.style.backgroundColor) {
+            element.style.removeProperty('background-color');
+          }
+          if (element.style.background) {
+            element.style.removeProperty('background');
+          }
+          if (element.style.length === 0) {
+            element.removeAttribute('style');
+          }
+        }
+
+        if (element.classList && element.classList.contains('text-highlighted')) {
+          element.classList.remove('text-highlighted');
+        }
+
+        if (element.tagName === 'MARK') {
+          unwrapElementPreservingContent(element);
+          return;
+        }
+
+        const tagName = element.tagName;
+        if ((tagName === 'SPAN' || tagName === 'FONT') && element.attributes.length === 0) {
+          unwrapElementPreservingContent(element);
+        }
+      }
+
+      function rangeFullyContainsNode(range, node) {
+        if (!range || !node) {
+          return false;
+        }
+        const nodeRange = document.createRange();
+        try {
+          nodeRange.selectNodeContents(node);
+        } catch (err) {
+          return false;
+        }
+        return range.compareBoundaryPoints(Range.START_TO_START, nodeRange) <= 0
+          && range.compareBoundaryPoints(Range.END_TO_END, nodeRange) >= 0;
+      }
+
+      function collectHighlightWrappersForRange(range) {
+        if (!range) {
+          return [];
+        }
+
+        const wrappers = new Set();
+        const addAncestors = (node) => {
+          let current = node;
+          if (current && current.nodeType !== Node.ELEMENT_NODE) {
+            current = current ? current.parentElement : null;
+          }
+          while (current && current !== document.body) {
+            if (isHighlightElement(current) && rangeFullyContainsNode(range, current)) {
+              wrappers.add(current);
+            }
+            current = current.parentElement;
+          }
+        };
+
+        addAncestors(range.startContainer);
+        addAncestors(range.endContainer);
+
+        return Array.from(wrappers);
+      }
+
       function clearHighlightFromRange(range) {
         if (!range || range.collapsed) {
           return false;
         }
 
-        const fragment = range.cloneContents();
+        const workingRange = range.cloneRange();
+        const wrappersToStrip = collectHighlightWrappersForRange(workingRange);
+
+        const fragment = workingRange.extractContents();
         if (!fragment || fragment.childNodes.length === 0) {
           return false;
         }
@@ -7365,13 +7493,14 @@ export async function initializeEditor() {
         sanitizeHighlightFragment(fragment);
         const nodes = Array.from(fragment.childNodes);
 
-        range.deleteContents();
-        range.insertNode(fragment);
+        workingRange.insertNode(fragment);
 
         if (nodes.length > 0) {
           range.setStartBefore(nodes[0]);
           range.setEndAfter(nodes[nodes.length - 1]);
         }
+
+        wrappersToStrip.forEach(stripHighlightFromElement);
 
         return true;
       }
