@@ -539,7 +539,7 @@ export async function initializeEditor() {
         updateSectionsPanelActiveState();
       }
 
-      function setActivePage(page) {
+      function setActivePage(page, { focus = false } = {}) {
         if (!page) {
           closeTopicNotesPopover();
           currentPageRef = null;
@@ -573,6 +573,9 @@ export async function initializeEditor() {
         refreshFloatingNotesTopicVisibility();
         scheduleFloatingNotesViewportRefresh();
         scheduleIconPickerRebind();
+        if (focus && isEditMode) {
+          focusPageContent(page);
+        }
       }
 
       function setSectionTheme(sectionId, themeClass) {
@@ -1775,6 +1778,35 @@ export async function initializeEditor() {
         selection.removeAllRanges();
         selection.addRange(range);
         return selection;
+      }
+
+      function focusPageContent(page, { collapseToEnd = true } = {}) {
+        if (!page || !page.isConnected || !page.isContentEditable) {
+          return false;
+        }
+
+        if (typeof page.focus === 'function') {
+          try {
+            page.focus({ preventScroll: true });
+          } catch (err) {
+            page.focus();
+          }
+        }
+
+        const selection = window.getSelection();
+        if (!selection) {
+          return false;
+        }
+
+        const range = document.createRange();
+        range.selectNodeContents(page);
+        if (collapseToEnd) {
+          range.collapse(false);
+        }
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedSelection = range.cloneRange();
+        return true;
       }
 
       function insertNodeAtSelection(node) {
@@ -7986,7 +8018,7 @@ export async function initializeEditor() {
         }
         initializeSections();
         buildSectionsPanel();
-        setActivePage(newPage);
+        setActivePage(newPage, { focus: true });
         return newPage;
       }
 
@@ -9391,7 +9423,7 @@ ${inlineStyles}
     hideTemplateToolbar();
     savedSelection = null;
     const firstPage = pages[0] || null;
-    setActivePage(firstPage || null);
+    setActivePage(firstPage || null, { focus: isEditMode && !!firstPage });
     scheduleIconPickerRebind(0, 'Icon picker reconectado después de importar secciones');
     window.scrollTo({ top: 0 });
   }
