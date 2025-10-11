@@ -1719,31 +1719,105 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
+      function isNodeInDocument(node) {
+        if (!node) {
+          return false;
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+          return !!node.parentNode && document.contains(node.parentNode);
+        }
+        return document.contains(node);
+      }
+
+      function resolveEditableAncestor(node) {
+        if (!node) {
+          return null;
+        }
+        const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        if (!element) {
+          return null;
+        }
+        const page = element.closest('.page, .magic-page');
+        if (page) {
+          return page;
+        }
+        if (typeof element.closest === 'function') {
+          return element.closest('[contenteditable="true"]');
+        }
+        return null;
+      }
+
+      function clearSavedSelection() {
+        savedSelection = null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
-          return true;
+        if (!selection || selection.rangeCount === 0) {
+          clearSavedSelection();
+          return false;
         }
-        return false;
+
+        const range = selection.getRangeAt(0).cloneRange();
+        const activeEditable = document.activeElement && document.activeElement.isContentEditable
+          ? document.activeElement
+          : null;
+        const focusTarget = activeEditable || resolveEditableAncestor(range.commonAncestorContainer) || resolveEditableAncestor(range.startContainer) || resolveEditableAncestor(range.endContainer);
+        const pageTarget = focusTarget && typeof focusTarget.closest === 'function'
+          ? focusTarget.closest('.page, .magic-page') || focusTarget
+          : resolveEditableAncestor(range.commonAncestorContainer);
+
+        savedSelection = {
+          range,
+          focusTarget: focusTarget || pageTarget || null,
+          pageTarget: pageTarget || null
+        };
+
+        return true;
       }
 
       function restoreSelection() {
-        if (savedSelection) {
-          if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
-            return false;
-          }
-          const selection = window.getSelection();
-          selection.removeAllRanges();
+        if (!savedSelection || !savedSelection.range) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const { range, focusTarget, pageTarget } = savedSelection;
+        if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+
+        const restoredRange = range.cloneRange();
+
+        let focusElement = null;
+        if (focusTarget && document.contains(focusTarget)) {
+          focusElement = focusTarget;
+        } else if (pageTarget && document.contains(pageTarget)) {
+          focusElement = pageTarget;
+        } else {
+          focusElement = resolveEditableAncestor(restoredRange.commonAncestorContainer) || resolveEditableAncestor(restoredRange.startContainer) || resolveEditableAncestor(restoredRange.endContainer);
+        }
+
+        if (focusElement && typeof focusElement.focus === 'function') {
           try {
-            selection.addRange(savedSelection);
-            return true;
+            focusElement.focus({ preventScroll: true });
           } catch (err) {
-            savedSelection = null;
+            focusElement.focus();
           }
         }
-        return false;
+
+        try {
+          selection.addRange(restoredRange);
+          savedSelection.range = restoredRange.cloneRange();
+          return true;
+        } catch (err) {
+          clearSavedSelection();
+          return false;
+        }
       }
 
       function ensureEditableSelection() {
@@ -1784,7 +1858,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1877,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1895,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
