@@ -682,6 +682,8 @@ export async function initializeEditor() {
       const shiftRightBtn = document.getElementById('shiftRightBtn');
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
+      const highlightBtn = document.getElementById('highlightBtn');
+      const textColorBtn = document.getElementById('textColorBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
@@ -4687,10 +4689,18 @@ export async function initializeEditor() {
         const { relaxMatching = false } = options;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
-        let shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
+        const hasNoteTopic = !!noteTopicId;
+        const targetPage = hasNoteTopic ? findPageByTopicId(noteTopicId) : null;
+        const hasCurrentTopic = !!currentTopic;
+        const allowFallbackDisplay = !hasNoteTopic || !targetPage || !hasCurrentTopic;
+
+        let shouldShow = false;
         let viewportState = null;
 
-        if (shouldShow) {
+        if (allowFallbackDisplay) {
+          shouldShow = true;
+        } else if (noteTopicId === currentTopic) {
+          shouldShow = true;
           viewportState = getActiveTopicViewportState();
           if (!viewportState) {
             shouldShow = relaxMatching;
@@ -7098,28 +7108,54 @@ export async function initializeEditor() {
         savedSelection = null;
       }
 
+      const bindColorTrigger = (button) => {
+        if (!button) return;
+        button.addEventListener('pointerdown', (event) => {
+          if (event.button !== undefined && event.button !== 0) {
+            return;
+          }
+          event.preventDefault();
+          saveCurrentSelection();
+        });
+        button.addEventListener('mousedown', (event) => {
+          if (event.button !== 0) {
+            return;
+          }
+          event.preventDefault();
+          saveCurrentSelection();
+        });
+        button.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            saveCurrentSelection();
+          }
+        });
+      };
+
+      bindColorTrigger(highlightBtn);
+      bindColorTrigger(textColorBtn);
+
       createColorPalette('highlightPalette', highlightColors, true);
       createColorPalette('textColorPalette', textColors, false);
 
-      document.getElementById('highlightBtn')?.addEventListener('click', (e) => {
+      highlightBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        
+
         if (!saveCurrentSelection()) {
           alert('Por favor, selecciona el texto que deseas destacar');
           return;
         }
-        
+
         const btn = e.currentTarget;
         const btnRect = btn.getBoundingClientRect();
-        
+
         highlightPalette.style.left = btnRect.left + 'px';
         highlightPalette.style.top = (btnRect.bottom + 5) + 'px';
-        
+
         textColorPalette.classList.remove('show');
         highlightPalette.classList.add('show');
       });
 
-      document.getElementById('textColorBtn')?.addEventListener('click', (e) => {
+      textColorBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
 
         if (!saveCurrentSelection()) {
