@@ -3788,13 +3788,32 @@ export async function initializeEditor() {
           }
 
           let magicIcon = h1.querySelector('.magic-icon');
-          if (!magicIcon) {
-            magicIcon = document.createElement('span');
-            magicIcon.className = 'magic-icon';
-            magicIcon.title = 'Ver contenido mágico';
-            magicIcon.textContent = '✨';
-            h1.appendChild(magicIcon);
+          if (!magicIcon || magicIcon.tagName !== 'BUTTON') {
+            const newButton = document.createElement('button');
+            newButton.type = 'button';
+            newButton.className = 'magic-icon magic-pill';
+            newButton.innerHTML = '<span class="magic-icon-symbol">✨</span><span class="magic-icon-label">Mágica</span>';
+            if (magicIcon) {
+              magicIcon.replaceWith(newButton);
+            } else if (titleSpan?.nextSibling) {
+              h1.insertBefore(newButton, titleSpan.nextSibling);
+            } else {
+              h1.appendChild(newButton);
+            }
+            magicIcon = newButton;
+          } else {
+            magicIcon.classList.add('magic-pill');
+            magicIcon.type = 'button';
+            if (!magicIcon.querySelector('.magic-icon-symbol')) {
+              magicIcon.innerHTML = '<span class="magic-icon-symbol">✨</span><span class="magic-icon-label">Mágica</span>';
+            }
           }
+
+          magicIcon.dataset.topicId = page.dataset.topicId || '';
+          if (!magicIcon.getAttribute('aria-label')) {
+            magicIcon.setAttribute('aria-label', 'Abrir sección mágica');
+          }
+          magicIcon.setAttribute('title', magicIcon.getAttribute('aria-label'));
 
           let noteIcon = h1.querySelector('.topic-note-icon');
           if (!noteIcon) {
@@ -3855,6 +3874,7 @@ export async function initializeEditor() {
             }
           }
           noteIcon.setAttribute('aria-expanded', isTopicNotesPopoverOpen() && topicNotesPopoverTopicId === (page.dataset.topicId || '') ? 'true' : 'false');
+          updateMagicUiForTopic(page);
         });
         refreshTopicNoteIndicators();
       }
@@ -7590,6 +7610,83 @@ export async function initializeEditor() {
         return { source: src, anchorId: resolvedId };
       }
 
+      function findPageByTopicId(topicId) {
+        if (!topicId) return null;
+        const trimmedId = topicId.trim();
+        return pages.find(p => (p.dataset.topicId || '').trim() === trimmedId) || null;
+      }
+
+      function isMeaningfulMagicContent(sourceEl) {
+        if (!sourceEl) return false;
+        const html = (sourceEl.innerHTML || '').trim();
+        if (!html) {
+          return false;
+        }
+        const textContent = getNotePlainTextFromHtml(html).replace(/\s+/g, ' ').trim();
+        if (textContent.length > 0) {
+          return true;
+        }
+        const temp = document.createElement('div');
+        temp.innerHTML = html;
+        return Boolean(temp.querySelector('img, video, audio, iframe, table, ul, ol, li, blockquote, code, pre, svg, canvas, figure, embed, object, hr'));
+      }
+
+      function applyMagicIndicatorState({ pageRef = null, topicId = '', hasContent = false }) {
+        if (pageRef && pageRef.isConnected) {
+          const magicButton = pageRef.querySelector('.magic-icon');
+          if (magicButton) {
+            magicButton.classList.toggle('has-content', hasContent);
+            magicButton.dataset.hasContent = hasContent ? 'true' : 'false';
+            magicButton.setAttribute('aria-pressed', hasContent ? 'true' : 'false');
+            const label = hasContent ? 'Ver contenido mágico guardado' : 'Crear contenido mágico';
+            magicButton.setAttribute('aria-label', label);
+            magicButton.title = label;
+          }
+        }
+
+        if (!topicId && pageRef) {
+          topicId = (pageRef.dataset.topicId || '').trim();
+        }
+
+        if (topicId) {
+          const indicators = document.querySelectorAll('.topic-magic-indicator');
+          indicators.forEach(indicator => {
+            if ((indicator.dataset.topicId || '').trim() === topicId) {
+              indicator.classList.toggle('has-content', hasContent);
+              indicator.dataset.hasContent = hasContent ? 'true' : 'false';
+              const label = hasContent ? 'Ver contenido mágico guardado' : 'Crear contenido mágico';
+              indicator.title = label;
+              indicator.setAttribute('aria-label', label);
+              indicator.setAttribute('aria-pressed', hasContent ? 'true' : 'false');
+            }
+          });
+        }
+      }
+
+      function updateMagicUiForTopic(pageRef, fallbackTopicId = '') {
+        const topicId = (pageRef?.dataset.topicId || fallbackTopicId || '').trim();
+        let magicEl = null;
+
+        if (pageRef && topicId) {
+          const magicId = magicAnchorFor(pageRef);
+          magicEl = magicId ? document.getElementById(magicId) : null;
+        }
+
+        if (!magicEl && topicId) {
+          const container = document.querySelector('.magic-content-container');
+          if (container) {
+            magicEl = container.querySelector(`.magic-topic[data-source-topic-id="${escapeAttr(topicId)}"]`) || document.getElementById(`magic-topic-${topicId}`) || null;
+          }
+        }
+
+        const hasContent = isMeaningfulMagicContent(magicEl);
+        applyMagicIndicatorState({ pageRef: pageRef || findPageByTopicId(topicId), topicId, hasContent });
+      }
+
+      function refreshMagicUiIndicators() {
+        pages.forEach(page => updateMagicUiForTopic(page));
+      }
+
       function persistMagicEdits() {
         if (!activeMagicWrapper && !activeMagicSource) {
           return;
@@ -7612,8 +7709,30 @@ export async function initializeEditor() {
           return;
         }
 
-        activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
+        let htmlToPersist = '';
+        if (activeMagicPage) {
+          const collector = document.createElement('div');
+          const nodes = Array.from(activeMagicPage.childNodes);
+          nodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('magic-title')) {
+              return;
+            }
+            if (node === activeMagicWrapper) {
+              collector.insertAdjacentHTML('beforeend', activeMagicWrapper.innerHTML);
+            } else if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
+              collector.appendChild(node.cloneNode(true));
+            }
+          });
+          htmlToPersist = collector.innerHTML;
+        } else {
+          htmlToPersist = activeMagicWrapper.innerHTML;
+        }
+
+        activeMagicWrapper.innerHTML = htmlToPersist;
+        activeMagicSource.innerHTML = htmlToPersist;
         afterContentSanitize(activeMagicSource);
+        const sourceTopicId = (activeMagicSource.dataset.sourceTopicId || '').trim();
+        updateMagicUiForTopic(activeMagicPage, sourceTopicId);
       }
 
       function setMagicFloatingBackVisibility(visible, disabled = false) {
@@ -7677,6 +7796,7 @@ export async function initializeEditor() {
 
         const { source: src } = ensureMagicTopicSource(anchorId, pageRef);
         const wrapper = document.createElement('div');
+        wrapper.className = 'magic-content-wrapper';
         wrapper.innerHTML = src ? src.innerHTML : '<p>No hay contenido adicional.</p>';
         afterContentSanitize(wrapper);
 
@@ -7689,7 +7809,11 @@ export async function initializeEditor() {
 
         if (isEditMode) {
           magicPage.contentEditable = 'true';
+          wrapper.contentEditable = 'true';
           enableHtmlPaste();
+        } else {
+          magicPage.contentEditable = 'false';
+          wrapper.contentEditable = 'false';
         }
 
         syncMagicZoom();
@@ -7885,6 +8009,29 @@ export async function initializeEditor() {
 
             const trailing = document.createElement('div');
             trailing.className = 'topic-trailing';
+            const magicIndicator = document.createElement('button');
+            magicIndicator.type = 'button';
+            magicIndicator.className = 'topic-magic-indicator';
+            magicIndicator.innerHTML = '<span class="magic-icon-symbol">✨</span>';
+            magicIndicator.dataset.topicId = topicIdValue;
+            const indicatorLabel = 'Abrir sección mágica';
+            magicIndicator.setAttribute('aria-label', indicatorLabel);
+            magicIndicator.title = indicatorLabel;
+            magicIndicator.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const resolvedPage = (tema.page && tema.page.isConnected)
+                ? tema.page
+                : pages.find(p => (p.dataset.topicId || '').trim() === topicIdValue);
+              if (!resolvedPage) {
+                return;
+              }
+              const topicTitle = (tema.titulo || getTopicTitle(resolvedPage) || 'Tema').trim();
+              closePanel();
+              activateMagicTopic(magicAnchorFor(resolvedPage), topicTitle, resolvedPage);
+            });
+
+            trailing.appendChild(magicIndicator);
             trailing.appendChild(noteIndicator);
 
             if (isPanelEditMode) {
@@ -7975,6 +8122,7 @@ export async function initializeEditor() {
           }
         }
         updateSectionsPanelActiveState();
+        refreshMagicUiIndicators();
         refreshTopicNoteIndicators();
         const activeTopicId = (currentPageRef && currentPageRef.dataset)
           ? currentPageRef.dataset.topicId || ''
@@ -8106,10 +8254,10 @@ export async function initializeEditor() {
         titleSpan.className = 'topic-title-text';
         titleSpan.textContent = title;
         h1.appendChild(titleSpan);
-        const magicIcon = document.createElement('span');
-        magicIcon.className = 'magic-icon';
-        magicIcon.title = 'Ver contenido mágico';
-        magicIcon.textContent = '✨';
+        const magicIcon = document.createElement('button');
+        magicIcon.type = 'button';
+        magicIcon.className = 'magic-icon magic-pill';
+        magicIcon.innerHTML = '<span class="magic-icon-symbol">✨</span><span class="magic-icon-label">Mágica</span>';
         h1.appendChild(magicIcon);
         newPage.appendChild(h1);
 
@@ -8455,7 +8603,13 @@ export async function initializeEditor() {
         if (isEditMode) {
           pages.forEach(page => page.contentEditable = 'true');
           const magicPage = getCurrentMagicPage();
-          if (magicPage) magicPage.contentEditable = 'true';
+          if (magicPage) {
+            magicPage.contentEditable = 'true';
+            const wrapper = magicPage.querySelector('.magic-content-wrapper');
+            if (wrapper) {
+              wrapper.contentEditable = 'true';
+            }
+          }
           setFloatingNotesEditable(true);
           editToolbar.classList.add('show');
           cachedToolbarHeight = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || cachedToolbarHeight || 56;
@@ -8469,7 +8623,13 @@ export async function initializeEditor() {
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
-          magicPages.forEach(mp => mp.contentEditable = 'false');
+          magicPages.forEach(mp => {
+            mp.contentEditable = 'false';
+            const wrapper = mp.querySelector('.magic-content-wrapper');
+            if (wrapper) {
+              wrapper.contentEditable = 'false';
+            }
+          });
           setFloatingNotesEditable(false);
           editToolbar.classList.remove('show');
           editBtn.classList.remove('active');
