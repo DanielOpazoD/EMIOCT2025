@@ -5,7 +5,9 @@ import {
   restoreRangeFromBookmark,
   serializePosition,
   getNodeFromPath,
-  getNodePath
+  getNodePath,
+  findEditableHost,
+  captureSelectionSnapshot
 } from '../scripts/modules/editorSelection.js';
 import { assignGlobalDom } from './helpers/fakeDom.js';
 
@@ -56,6 +58,14 @@ describe('editor selection bookmarks', () => {
     p.appendChild(document.createTextNode(text));
     root.appendChild(p);
   }
+
+  it('findEditableHost climbs to the nearest contentEditable ancestor', () => {
+    const editable = createEditable(root => buildSimpleParagraph(root, 'Texto dentro'));
+    const paragraph = editable.firstChild;
+    const textNode = paragraph.firstChild;
+    const host = findEditableHost(textNode);
+    assert.equal(host, editable);
+  });
 
   it('serializes and restores a collapsed caret inside deeply nested nodes', () => {
     const editable = createEditable(buildPhrase);
@@ -144,5 +154,55 @@ describe('editor selection bookmarks', () => {
     const position = serializePosition(textNode, 3, editable);
     assert.deepEqual(position?.path, [0, 1, 0]);
     assert.equal(position?.offset, 3);
+  });
+
+  it('captureSelectionSnapshot preserves caret location across DOM replacements', () => {
+    const editable = createEditable(buildPhrase);
+    const paragraph = editable.firstChild;
+    const strong = paragraph.childNodes[1];
+    const strongText = strong.firstChild;
+    const range = document.createRange();
+    range.setStart(strongText, 2);
+    range.collapse(true);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      anchorNode: strongText,
+      focusNode: strongText
+    };
+
+    const snapshot = captureSelectionSnapshot(selection);
+    assert.ok(snapshot);
+    assert.equal(snapshot?.editable, editable);
+    assert.equal(snapshot?.bookmark?.topicId, 'topic-1');
+
+    const replacement = editable.cloneNode(true);
+    replacement.dataset.topicId = 'topic-1';
+    document.body.replaceChild(replacement, editable);
+
+    const restored = restoreRangeFromBookmark(snapshot.bookmark, replacement);
+    assert.ok(restored);
+    assert.equal(restored?.startContainer?.textContent, 'mun');
+    assert.equal(restored?.startOffset, 2);
+  });
+
+  it('captureSelectionSnapshot returns null for selections without an editable host', () => {
+    const orphanText = document.createTextNode('Sin editable');
+    document.body.appendChild(orphanText);
+
+    const range = document.createRange();
+    range.setStart(orphanText, 3);
+    range.collapse(true);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      anchorNode: orphanText,
+      focusNode: orphanText
+    };
+
+    const snapshot = captureSelectionSnapshot(selection);
+    assert.equal(snapshot, null);
   });
 });

@@ -117,3 +117,101 @@ export function isBookmarkWithinEditable(bookmark, editable) {
   const endNode = getNodeFromPath(editable, bookmark.end?.path || []);
   return Boolean(startNode && endNode);
 }
+
+export function findEditableHost(node) {
+  if (!node) {
+    return null;
+  }
+
+  let current = node;
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE) {
+      current = current.parentElement;
+      continue;
+    }
+
+    if (current.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      if ('host' in current && current.host) {
+        current = current.host;
+      } else {
+        current = current.parentElement;
+      }
+      continue;
+    }
+
+    if (!current || current.nodeType !== 1) {
+      break;
+    }
+
+    const editableValue = typeof current.isContentEditable === 'boolean'
+      ? current.isContentEditable
+      : current.getAttribute && current.getAttribute('contenteditable') === 'true';
+
+    if (editableValue) {
+      return current;
+    }
+
+    current = current.parentElement;
+  }
+
+  return null;
+}
+
+export function captureSelectionSnapshot(selection, { fallbackEditable = null } = {}) {
+  if (!selection || typeof selection.getRangeAt !== 'function' || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!range) {
+    return null;
+  }
+
+  const candidates = [
+    range.commonAncestorContainer,
+    selection.anchorNode,
+    selection.focusNode,
+    fallbackEditable
+  ];
+
+  let editable = null;
+  for (const candidate of candidates) {
+    const host = findEditableHost(candidate);
+    if (host) {
+      editable = host;
+      break;
+    }
+  }
+
+  if (!editable || !editable.contains(range.startContainer) || !editable.contains(range.endContainer)) {
+    return null;
+  }
+
+  let outerEditable = editable;
+  while (outerEditable?.parentElement) {
+    const parent = outerEditable.parentElement;
+    if (!parent || parent.nodeType !== 1) {
+      break;
+    }
+    const parentEditable = typeof parent.isContentEditable === 'boolean'
+      ? parent.isContentEditable
+      : parent.getAttribute && parent.getAttribute('contenteditable') === 'true';
+    if (!parentEditable) {
+      break;
+    }
+    outerEditable = parent;
+  }
+
+  editable = outerEditable;
+
+  const bookmark = createSelectionBookmark(range, editable);
+  if (!bookmark) {
+    return null;
+  }
+
+  return {
+    range: range.cloneRange(),
+    editable,
+    bookmark
+  };
+}

@@ -54,6 +54,13 @@ class FakeNode {
     return this.childNodes[this.childNodes.length - 1] || null;
   }
 
+  get parentElement() {
+    if (!this.parentNode) {
+      return null;
+    }
+    return this.parentNode.nodeType === 1 ? this.parentNode : null;
+  }
+
   cloneNode(deep = false) {
     throw new Error('cloneNode must be implemented by subclasses');
   }
@@ -136,6 +143,10 @@ class FakeElement extends FakeNode {
       });
     }
     return clone;
+  }
+
+  get isContentEditable() {
+    return this.contentEditable === 'true';
   }
 }
 
@@ -248,7 +259,7 @@ export function createFakeDocument() {
 export function assignGlobalDom() {
   const doc = createFakeDocument();
   global.document = doc;
-  global.Node = { TEXT_NODE: 3, DOCUMENT_FRAGMENT_NODE: 11 };
+  global.Node = { TEXT_NODE: 3, DOCUMENT_FRAGMENT_NODE: 11, ELEMENT_NODE: 1 };
   return doc;
 }
 

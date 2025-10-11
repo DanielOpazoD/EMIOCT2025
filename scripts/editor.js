@@ -19,7 +19,9 @@ import {
 } from './modules/notes/noteUtils.js';
 import {
   createSelectionBookmark,
-  restoreRangeFromBookmark
+  restoreRangeFromBookmark,
+  findEditableHost,
+  captureSelectionSnapshot
 } from './modules/editorSelection.js';
 
 export async function initializeEditor() {
@@ -44,6 +46,7 @@ export async function initializeEditor() {
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let selectionTrackerBound = false;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -1735,33 +1738,23 @@ export async function initializeEditor() {
         savedSelectionBookmark = null;
       }
 
-      function resolveEditableHost(node) {
-        if (!node) {
-          return null;
+      function applySelectionSnapshot(snapshot) {
+        if (!snapshot || !snapshot.range || !snapshot.editable) {
+          return false;
         }
-        let current = node;
-        while (current) {
-          if (current.nodeType === Node.TEXT_NODE) {
-            current = current.parentElement;
-            continue;
-          }
-          if (current.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-            if ('host' in current && current.host) {
-              current = current.host;
-            } else {
-              current = current.parentElement;
-            }
-            continue;
-          }
-          if (!(current instanceof HTMLElement)) {
-            break;
-          }
-          if (current.isContentEditable || current.getAttribute('contenteditable') === 'true') {
-            return current;
-          }
-          current = current.parentElement;
+
+        savedSelectionEditable = snapshot.editable;
+        savedSelection = snapshot.range.cloneRange ? snapshot.range.cloneRange() : snapshot.range;
+        savedSelectionBookmark = snapshot.bookmark
+          || createSelectionBookmark(savedSelection, savedSelectionEditable);
+
+        if (!savedSelectionBookmark) {
+          savedSelection = null;
+          savedSelectionEditable = null;
+          return false;
         }
-        return null;
+
+        return true;
       }
 
       function focusSavedSelectionEditable() {
@@ -1792,20 +1785,38 @@ export async function initializeEditor() {
         if (!selection || selection.rangeCount === 0) {
           return false;
         }
-        const range = selection.getRangeAt(0);
-        if (!range) {
+
+        const fallbackEditable = findEditableHost(document.activeElement);
+        const snapshot = captureSelectionSnapshot(selection, { fallbackEditable });
+        if (!snapshot) {
           return false;
         }
-        savedSelection = range.cloneRange();
-        const host = resolveEditableHost(range.commonAncestorContainer)
-          || resolveEditableHost(selection.anchorNode)
-          || resolveEditableHost(selection.focusNode)
-          || (document.activeElement?.isContentEditable ? document.activeElement : null);
-        savedSelectionEditable = host instanceof HTMLElement ? host : null;
-        savedSelectionBookmark = savedSelectionEditable
-          ? createSelectionBookmark(range, savedSelectionEditable)
-          : null;
-        return true;
+
+        return applySelectionSnapshot(snapshot);
+      }
+
+      function handleDocumentSelectionChange() {
+        if (!isEditMode) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return;
+        }
+
+        const fallbackEditable = findEditableHost(document.activeElement);
+        const snapshot = captureSelectionSnapshot(selection, { fallbackEditable });
+        if (!snapshot) {
+          return;
+        }
+
+        applySelectionSnapshot(snapshot);
+      }
+
+      if (!selectionTrackerBound) {
+        document.addEventListener('selectionchange', handleDocumentSelectionChange);
+        selectionTrackerBound = true;
       }
 
       function restoreSelection() {
