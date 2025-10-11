@@ -708,6 +708,26 @@ body.reading-mode .reading-mode-exit {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
+.color-swatch-clear {
+  position: relative;
+}
+
+.color-swatch-clear::after {
+  content: '✕';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.color-swatch-clear:hover::after {
+  color: #0f172a;
+}
+
 .color-swatch-stop {
   display: flex;
   align-items: center;

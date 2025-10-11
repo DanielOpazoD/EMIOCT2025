@@ -742,6 +742,7 @@ export async function initializeEditor() {
       let iconPickerAnchor = null;
       let iconPickerTrigger = null;
       let iconPickerTriggerCleanup = null;
+      let iconPickerSelectionSnapshot = null;
       let iconPickerGlobalHandlersBound = false;
 
       function stopIconPickerPropagation(event) {
@@ -807,9 +808,20 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
-            const inserted = insertTextAtSelection(`${symbol} `, { preserveContextStyle: true });
+            const selection = restoreSelectionForIconInsertion();
+            if (!selection || selection.rangeCount === 0) {
+              alert('Selecciona un área editable antes de insertar iconos.');
+              hideIconPicker();
+              return;
+            }
+            const inserted = insertTextAtSelection(`${symbol} `, {
+              preserveContextStyle: true,
+              selectionOverride: selection
+            });
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
+            } else {
+              captureIconPickerSelectionSnapshot();
             }
             hideIconPicker();
           });
@@ -854,6 +866,33 @@ export async function initializeEditor() {
         return iconPicker;
       }
 
+      function restoreSelectionForIconInsertion() {
+        if (iconPickerSelectionSnapshot) {
+          if (restoreSelectionSnapshot(iconPickerSelectionSnapshot, { updateSnapshot: true })) {
+            const restored = window.getSelection();
+            if (isSelectionWithinEditable(restored)) {
+              return restored;
+            }
+          } else {
+            clearIconPickerSelectionSnapshot();
+          }
+        }
+
+        if (restoreSelection()) {
+          const restored = window.getSelection();
+          if (isSelectionWithinEditable(restored)) {
+            return restored;
+          }
+        }
+
+        const liveSelection = window.getSelection();
+        if (isSelectionWithinEditable(liveSelection)) {
+          return liveSelection;
+        }
+
+        return null;
+      }
+
       function hideIconPicker() {
         if (!ICON_FEATURE_ENABLED) {
           return;
@@ -867,6 +906,7 @@ export async function initializeEditor() {
           iconPickerAnchor.setAttribute('aria-expanded', 'false');
         }
         iconPickerAnchor = null;
+        clearIconPickerSelectionSnapshot();
       }
 
       function getSavedSelectionRect() {
@@ -924,6 +964,7 @@ export async function initializeEditor() {
             saveCurrentSelection();
           }
         }
+        captureIconPickerSelectionSnapshot();
 
         const selectionRect = getSavedSelectionRect();
         const anchorRect = anchor.getBoundingClientRect();
@@ -1034,12 +1075,14 @@ export async function initializeEditor() {
 
         const pointerHandler = () => {
           saveCurrentSelection();
+          captureIconPickerSelectionSnapshot();
         };
 
         const clickHandler = (event) => {
           event.preventDefault();
           event.stopPropagation();
           saveCurrentSelection();
+          captureIconPickerSelectionSnapshot();
           const picker = ensureIconPicker();
           if (!picker) {
             return;
@@ -1051,6 +1094,7 @@ export async function initializeEditor() {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             saveCurrentSelection();
+            captureIconPickerSelectionSnapshot();
             toggleIconPicker(trigger);
           }
         };
@@ -1841,40 +1885,35 @@ export async function initializeEditor() {
         savedSelection = null;
       }
 
-      function saveCurrentSelection() {
-        const selection = window.getSelection();
+      function createSelectionSnapshot(selection) {
         if (!selection || selection.rangeCount === 0) {
-          clearSavedSelection();
-          return false;
+          return null;
         }
 
         const range = selection.getRangeAt(0).cloneRange();
         const activeEditable = document.activeElement && document.activeElement.isContentEditable
           ? document.activeElement
           : null;
-        const focusTarget = activeEditable || resolveEditableAncestor(range.commonAncestorContainer) || resolveEditableAncestor(range.startContainer) || resolveEditableAncestor(range.endContainer);
+        const fallbackAncestor = resolveEditableAncestor(range.commonAncestorContainer) || resolveEditableAncestor(range.startContainer) || resolveEditableAncestor(range.endContainer);
+        const focusTarget = activeEditable || fallbackAncestor;
         const pageTarget = focusTarget && typeof focusTarget.closest === 'function'
           ? focusTarget.closest('.page, .magic-page') || focusTarget
-          : resolveEditableAncestor(range.commonAncestorContainer);
+          : fallbackAncestor;
 
-        savedSelection = {
+        return {
           range,
           focusTarget: focusTarget || pageTarget || null,
           pageTarget: pageTarget || null
         };
-
-        return true;
       }
 
-      function restoreSelection() {
-        if (!savedSelection || !savedSelection.range) {
-          clearSavedSelection();
+      function restoreSelectionSnapshot(snapshot, options = {}) {
+        if (!snapshot || !snapshot.range) {
           return false;
         }
 
-        const { range, focusTarget, pageTarget } = savedSelection;
+        const { range, focusTarget, pageTarget } = snapshot;
         if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
-          clearSavedSelection();
           return false;
         }
 
@@ -1902,12 +1941,49 @@ export async function initializeEditor() {
 
         try {
           selection.addRange(restoredRange);
-          savedSelection.range = restoredRange.cloneRange();
+          if (options.updateSnapshot) {
+            snapshot.range = restoredRange.cloneRange();
+          }
           return true;
         } catch (err) {
+          return false;
+        }
+      }
+
+      function saveCurrentSelection() {
+        const selection = window.getSelection();
+        const snapshot = createSelectionSnapshot(selection);
+        if (!snapshot) {
           clearSavedSelection();
           return false;
         }
+
+        savedSelection = snapshot;
+        return true;
+      }
+
+      function restoreSelection() {
+        if (!savedSelection) {
+          clearSavedSelection();
+          return false;
+        }
+
+        if (!restoreSelectionSnapshot(savedSelection, { updateSnapshot: true })) {
+          clearSavedSelection();
+          return false;
+        }
+
+        return true;
+      }
+
+      function captureIconPickerSelectionSnapshot() {
+        const selection = window.getSelection();
+        iconPickerSelectionSnapshot = createSelectionSnapshot(selection);
+        return !!iconPickerSelectionSnapshot;
+      }
+
+      function clearIconPickerSelectionSnapshot() {
+        iconPickerSelectionSnapshot = null;
       }
 
       function ensureEditableSelection() {
@@ -2017,14 +2093,31 @@ export async function initializeEditor() {
         if (typeof text !== 'string' || !text) {
           return null;
         }
-        const selection = resolveSelectionForInsertion();
-        if (!selection || !selection.rangeCount) return null;
+
+        const {
+          selectionOverride = null,
+          preserveContextStyle = false
+        } = options;
+
+        let selection = selectionOverride;
+        if (selection && (!selection.rangeCount || !isSelectionWithinEditable(selection))) {
+          selection = null;
+        }
+
+        if (!selection) {
+          selection = resolveSelectionForInsertion();
+        }
+
+        if (!selection || !selection.rangeCount) {
+          return null;
+        }
+
         const range = selection.getRangeAt(0);
-        const contextElement = options.preserveContextStyle ? getRangeContextElement(range) : null;
+        const contextElement = preserveContextStyle ? getRangeContextElement(range) : null;
         range.deleteContents();
 
         let insertedNode = null;
-        if (contextElement && options.preserveContextStyle) {
+        if (contextElement && preserveContextStyle) {
           try {
             const computed = window.getComputedStyle(contextElement);
             const fontSize = (computed && computed.fontSize) ? computed.fontSize : '';
@@ -7209,6 +7302,80 @@ export async function initializeEditor() {
         });
       }
 
+      function isClearHighlightColor(color) {
+        if (!color) {
+          return true;
+        }
+        if (isTransparentColor(color)) {
+          return true;
+        }
+        const normalized = normalizeColorValue(color);
+        return normalized === '#ffffff';
+      }
+
+      function unwrapElementPreservingContent(element) {
+        if (!element || !element.parentNode) {
+          return;
+        }
+        const parent = element.parentNode;
+        while (element.firstChild) {
+          parent.insertBefore(element.firstChild, element);
+        }
+        parent.removeChild(element);
+      }
+
+      function sanitizeHighlightFragment(fragment) {
+        if (!fragment) {
+          return;
+        }
+        const toUnwrap = [];
+        const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_ELEMENT, null);
+        while (walker.nextNode()) {
+          const el = walker.currentNode;
+          if (!(el instanceof HTMLElement)) {
+            continue;
+          }
+          if (el.style) {
+            el.style.removeProperty('background-color');
+            el.style.removeProperty('background');
+            if (el.style.length === 0) {
+              el.removeAttribute('style');
+            }
+          }
+          if (el.classList.contains('text-highlighted')) {
+            el.classList.remove('text-highlighted');
+          }
+          if (el.tagName === 'SPAN' && el.attributes.length === 0) {
+            toUnwrap.push(el);
+          }
+        }
+        toUnwrap.forEach(node => unwrapElementPreservingContent(node));
+      }
+
+      function clearHighlightFromRange(range) {
+        if (!range || range.collapsed) {
+          return false;
+        }
+
+        const fragment = range.cloneContents();
+        if (!fragment || fragment.childNodes.length === 0) {
+          return false;
+        }
+
+        sanitizeHighlightFragment(fragment);
+        const nodes = Array.from(fragment.childNodes);
+
+        range.deleteContents();
+        range.insertNode(fragment);
+
+        if (nodes.length > 0) {
+          range.setStartBefore(nodes[0]);
+          range.setEndAfter(nodes[nodes.length - 1]);
+        }
+
+        return true;
+      }
+
       function activatePersistentHighlight(color) {
         if (!color) {
           return;
@@ -7288,11 +7455,20 @@ export async function initializeEditor() {
 
         const handleColorSelection = (color) => {
           const mode = palette.dataset.mode || 'selection';
+          const isClear = isHighlight && isClearHighlightColor(color);
           if (isHighlight && (mode === 'persistent' || mode === 'persistent-change')) {
-            activatePersistentHighlight(color);
-            updateHighlightPaletteActiveColor(palette, color);
+            if (isClear) {
+              deactivatePersistentHighlight();
+              updateHighlightPaletteActiveColor(palette, '');
+            } else {
+              activatePersistentHighlight(color);
+              updateHighlightPaletteActiveColor(palette, color);
+            }
           } else {
             applyColor(color, isHighlight, { skipAlerts: mode === 'persistent' });
+            if (isHighlight) {
+              updateHighlightPaletteActiveColor(palette, isClear ? '' : color);
+            }
           }
           palette.classList.remove('show');
         };
@@ -7319,7 +7495,13 @@ export async function initializeEditor() {
           swatch.className = 'color-swatch';
           swatch.style.backgroundColor = color;
           swatch.dataset.color = color;
-          swatch.title = color;
+          const isClear = isHighlight && isClearHighlightColor(color);
+          if (isClear) {
+            swatch.classList.add('color-swatch-clear');
+            swatch.title = 'Sin destacado';
+          } else {
+            swatch.title = color;
+          }
           swatch.addEventListener('pointerdown', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -7365,7 +7547,6 @@ export async function initializeEditor() {
         } = options;
 
         let selection = providedSelection || window.getSelection();
-
         if (!skipRestore) {
           if (!restoreSelection()) {
             if (!skipAlerts) {
@@ -7410,6 +7591,19 @@ export async function initializeEditor() {
       function applyColorToRange(range, color, isHighlight) {
         if (!range || range.collapsed) {
           return false;
+        }
+
+        if (isHighlight && isClearHighlightColor(color)) {
+          const selection = window.getSelection();
+          if (selection) {
+            selection.removeAllRanges();
+          }
+          const cleared = clearHighlightFromRange(range);
+          if (selection && cleared) {
+            const restoredRange = range.cloneRange();
+            selection.addRange(restoredRange);
+          }
+          return cleared;
         }
 
         const selection = window.getSelection();
