@@ -680,7 +680,7 @@ export async function initializeEditor() {
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
-      const insertIconBtn = document.getElementById('insertIconBtn');
+      const symbolPickerBtn = document.getElementById('symbolPickerBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
@@ -791,8 +791,8 @@ export async function initializeEditor() {
         const picker = buildIconPicker();
         iconPicker = mountIconPicker(picker);
 
-        if (iconPicker && insertIconBtn) {
-          insertIconBtn.setAttribute('aria-controls', iconPicker.id);
+        if (iconPicker && symbolPickerBtn) {
+          symbolPickerBtn.setAttribute('aria-controls', iconPicker.id);
         }
 
         return iconPicker;
@@ -8307,17 +8307,17 @@ export async function initializeEditor() {
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
-      if (ICON_FEATURE_ENABLED && insertIconBtn) {
-        insertIconBtn.setAttribute('aria-haspopup', 'menu');
-        insertIconBtn.setAttribute('aria-expanded', 'false');
+      if (ICON_FEATURE_ENABLED && symbolPickerBtn) {
+        symbolPickerBtn.setAttribute('aria-haspopup', 'menu');
+        symbolPickerBtn.setAttribute('aria-expanded', 'false');
 
         ensureIconPicker();
 
-        insertIconBtn.addEventListener('pointerdown', () => {
+        symbolPickerBtn.addEventListener('pointerdown', () => {
           saveCurrentSelection();
         });
 
-        insertIconBtn.addEventListener('click', (event) => {
+        symbolPickerBtn.addEventListener('click', (event) => {
           event.preventDefault();
           event.stopPropagation();
           saveCurrentSelection();
@@ -8325,14 +8325,14 @@ export async function initializeEditor() {
           if (!picker) {
             return;
           }
-          toggleIconPicker(insertIconBtn);
+          toggleIconPicker(symbolPickerBtn);
         });
 
-        insertIconBtn.addEventListener('keydown', (event) => {
+        symbolPickerBtn.addEventListener('keydown', (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             saveCurrentSelection();
-            toggleIconPicker(insertIconBtn);
+            toggleIconPicker(symbolPickerBtn);
           }
         });
 
@@ -8344,7 +8344,7 @@ export async function initializeEditor() {
           if (picker.contains(event.target)) {
             return;
           }
-          if (event.target === insertIconBtn) {
+          if (symbolPickerBtn.contains(event.target)) {
             return;
           }
           hideIconPicker();
@@ -8352,10 +8352,10 @@ export async function initializeEditor() {
 
         window.addEventListener('resize', hideIconPicker);
         document.addEventListener('scroll', hideIconPicker, true);
-      } else if (insertIconBtn) {
-        insertIconBtn.disabled = true;
-        insertIconBtn.setAttribute('aria-disabled', 'true');
-        insertIconBtn.title = 'La inserción de iconos no está disponible en esta versión.';
+      } else if (symbolPickerBtn) {
+        symbolPickerBtn.disabled = true;
+        symbolPickerBtn.setAttribute('aria-disabled', 'true');
+        symbolPickerBtn.title = 'La inserción de iconos no está disponible en esta versión.';
       }
 
       /* === INSERTAR HTML PERSONALIZADO === */
