@@ -8090,47 +8090,42 @@ export async function initializeEditor() {
       });
 
       /* === PLANTILLAS === */
-      insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
-
-      insertTemplateBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+      function bindSelectionAwareTrigger(button, handler) {
+        if (!button || typeof handler !== 'function') {
+          return;
         }
-      });
 
-      insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
-
-      insertHtmlBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        const preserveSelection = () => {
           saveCurrentSelection();
-        }
-      });
+        };
 
-      insertTableBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
+        button.addEventListener('pointerdown', preserveSelection);
+        button.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            preserveSelection();
+          }
+        });
 
-      insertTableBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
-        }
-      });
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
 
-      insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
-      });
+          if (!restoreSelection()) {
+            const selection = ensureEditableSelection();
+            if (selection && selection.rangeCount) {
+              saveCurrentSelection();
+            } else {
+              clearSavedSelection();
+            }
+          } else {
+            saveCurrentSelection();
+          }
 
-      insertCollapseCardBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
-        }
-      });
+          handler(event);
+        });
+      }
 
-      document.getElementById('insertTemplateBtn')?.addEventListener('click', () => {
+      bindSelectionAwareTrigger(insertTemplateBtn, () => {
         if (!savedSelection) {
           const activeEditable = document.activeElement && document.activeElement.isContentEditable ? document.activeElement : null;
           const target = activeEditable || getCurrentPage() || getCurrentMagicPage();
@@ -8228,6 +8223,14 @@ export async function initializeEditor() {
             <div class="template-preview">${template.html}</div>
           `;
           card.addEventListener('click', () => {
+            if (!restoreSelection()) {
+              const fallbackSelection = ensureEditableSelection();
+              if (!fallbackSelection || !fallbackSelection.rangeCount || !isSelectionWithinEditable(fallbackSelection)) {
+                alert('Selecciona un área editable antes de insertar una plantilla.');
+                return;
+              }
+              saveCurrentSelection();
+            }
             const block = createTemplateBlock(template);
             if (!block) return;
             const insertedBlock = insertNodeAtSelection(block);
@@ -8244,7 +8247,15 @@ export async function initializeEditor() {
         });
       });
 
-      insertCollapseCardBtn?.addEventListener('click', () => {
+      bindSelectionAwareTrigger(insertCollapseCardBtn, () => {
+        if (!restoreSelection()) {
+          const fallbackSelection = ensureEditableSelection();
+          if (!fallbackSelection || !fallbackSelection.rangeCount || !isSelectionWithinEditable(fallbackSelection)) {
+            alert('Selecciona un área editable antes de insertar la tarjeta.');
+            return;
+          }
+          saveCurrentSelection();
+        }
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
         const insertedCard = insertNodeAtSelection(card);
@@ -9457,7 +9468,7 @@ export async function initializeEditor() {
       scheduleIconPickerRebind();
 
       /* === INSERTAR HTML PERSONALIZADO === */
-      document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
+      bindSelectionAwareTrigger(insertHtmlBtn, () => {
         showModal(`
           <div class="modal-header">
             <h3>Insertar HTML Personalizado</h3>
@@ -9476,15 +9487,25 @@ export async function initializeEditor() {
         setTimeout(() => {
           document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
             const htmlCode = document.getElementById('customHtmlInput').value;
-            if (htmlCode.trim()) {
-              const insertedNode = insertHtmlAtSelection(htmlCode);
-              if (insertedNode) {
-                hideModal();
-              } else {
-                alert('Selecciona un área editable antes de insertar HTML.');
-              }
-            } else {
+            if (!htmlCode.trim()) {
               alert('Por favor ingresa código HTML válido');
+              return;
+            }
+
+            if (!restoreSelection()) {
+              const fallbackSelection = ensureEditableSelection();
+              if (!fallbackSelection || !fallbackSelection.rangeCount || !isSelectionWithinEditable(fallbackSelection)) {
+                alert('Selecciona un área editable antes de insertar HTML.');
+                return;
+              }
+              saveCurrentSelection();
+            }
+
+            const insertedNode = insertHtmlAtSelection(htmlCode);
+            if (insertedNode) {
+              hideModal();
+            } else {
+              alert('Selecciona un área editable antes de insertar HTML.');
             }
           });
         }, 100);
@@ -9529,7 +9550,7 @@ export async function initializeEditor() {
       });
 
       /* === INSERTAR TABLA === */
-      document.getElementById('insertTableBtn')?.addEventListener('click', () => {
+      bindSelectionAwareTrigger(insertTableBtn, () => {
         showModal(`
           <div class="modal-header">
             <h3>Insertar Tabla</h3>
@@ -9545,35 +9566,44 @@ export async function initializeEditor() {
             <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
           </div>
         `);
-    setTimeout(() => {
-      document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-        const rows = parseInt(document.getElementById('tableRows').value) || 3;
-        const cols = parseInt(document.getElementById('tableCols').value) || 3;
-        
-        let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-        for (let i = 0; i < cols; i++) {
-          tableHTML += `<th>Encabezado ${i + 1}</th>`;
-        }
-        tableHTML += '</tr></thead><tbody>';
-        
-        for (let i = 0; i < rows; i++) {
-          tableHTML += '<tr>';
-          for (let j = 0; j < cols; j++) {
-            tableHTML += '<td>Celda</td>';
-          }
-          tableHTML += '</tr>';
-        }
-        tableHTML += '</tbody></table></div>';
+        setTimeout(() => {
+          document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
+            const rows = parseInt(document.getElementById('tableRows').value) || 3;
+            const cols = parseInt(document.getElementById('tableCols').value) || 3;
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
-        if (insertedNode) {
-          hideModal();
-        } else {
-          alert('Selecciona un área editable antes de insertar una tabla.');
-        }
+            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
+            for (let i = 0; i < cols; i++) {
+              tableHTML += `<th>Encabezado ${i + 1}</th>`;
+            }
+            tableHTML += '</tr></thead><tbody>';
+
+            for (let i = 0; i < rows; i++) {
+              tableHTML += '<tr>';
+              for (let j = 0; j < cols; j++) {
+                tableHTML += '<td>Celda</td>';
+              }
+              tableHTML += '</tr>';
+            }
+            tableHTML += '</tbody></table></div>';
+
+            if (!restoreSelection()) {
+              const fallbackSelection = ensureEditableSelection();
+              if (!fallbackSelection || !fallbackSelection.rangeCount || !isSelectionWithinEditable(fallbackSelection)) {
+                alert('Selecciona un área editable antes de insertar una tabla.');
+                return;
+              }
+              saveCurrentSelection();
+            }
+
+            const insertedNode = insertHtmlAtSelection(tableHTML);
+            if (insertedNode) {
+              hideModal();
+            } else {
+              alert('Selecciona un área editable antes de insertar una tabla.');
+            }
+          });
+        }, 100);
       });
-    }, 100);
-  });
 
   /* === BUSCAR Y REEMPLAZAR === */
   document.getElementById('findReplaceBtn')?.addEventListener('click', () => {
