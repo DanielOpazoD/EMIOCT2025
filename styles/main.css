@@ -702,6 +702,27 @@ body.reading-mode .reading-mode-exit {
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
 }
 
+.color-swatch.active {
+  outline: 2px solid var(--theme-primary);
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.color-swatch-stop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #dc2626;
+  background: #fff;
+}
+
+.color-swatch-stop:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #b91c1c;
+}
+
 .icon-picker {
   position: fixed;
   z-index: 9999;
