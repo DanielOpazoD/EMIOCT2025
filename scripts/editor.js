@@ -35,6 +35,7 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let savedSelectionPage = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -798,6 +799,9 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
+            if (!restoreSelection()) {
+              ensureEditableSelection();
+            }
             const inserted = insertTextAtSelection(`${symbol} `);
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
@@ -1719,10 +1723,39 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
+      function clearSavedSelection() {
+        savedSelection = null;
+        savedSelectionPage = null;
+      }
+
+      function resolvePageForNode(node) {
+        if (!node) {
+          return null;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          return node.closest ? node.closest('.page') : null;
+        }
+        if (node.parentElement && node.parentElement.closest) {
+          return node.parentElement.closest('.page');
+        }
+        if (node.parentNode && node.parentNode !== node && node.parentNode.nodeType === Node.ELEMENT_NODE) {
+          return resolvePageForNode(node.parentNode);
+        }
+        return null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
         if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
+          const range = selection.getRangeAt(0);
+          savedSelection = range.cloneRange();
+          const pageFromRange = resolvePageForNode(range.commonAncestorContainer)
+            || resolvePageForNode(range.startContainer)
+            || resolvePageForNode(range.endContainer)
+            || null;
+          savedSelectionPage = pageFromRange && document.contains(pageFromRange)
+            ? pageFromRange
+            : (currentPageRef && document.contains(currentPageRef) ? currentPageRef : null);
           return true;
         }
         return false;
@@ -1731,16 +1764,22 @@ export async function initializeEditor() {
       function restoreSelection() {
         if (savedSelection) {
           if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
+            clearSavedSelection();
             return false;
           }
           const selection = window.getSelection();
           selection.removeAllRanges();
           try {
             selection.addRange(savedSelection);
+            const savedPage = savedSelectionPage && document.contains(savedSelectionPage)
+              ? savedSelectionPage
+              : null;
+            if (savedPage && savedPage !== currentPageRef) {
+              setActivePage(savedPage);
+            }
             return true;
           } catch (err) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
         return false;
@@ -1762,8 +1801,11 @@ export async function initializeEditor() {
         const activeEditable = document.activeElement && document.activeElement.isContentEditable
           ? document.activeElement
           : null;
+        const savedPage = savedSelectionPage && document.contains(savedSelectionPage)
+          ? savedSelectionPage
+          : null;
         const preferredMagic = getCurrentMagicPage();
-        const target = activeEditable || preferredMagic || getCurrentPage();
+        const target = activeEditable || savedPage || preferredMagic || getCurrentPage();
         if (!target) return null;
 
         const range = document.createRange();
@@ -1784,7 +1826,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1845,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1863,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
@@ -6717,7 +6759,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         hideTemplateToolbar();
       });
 
@@ -6898,7 +6940,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) {
           alert('Por favor, selecciona el texto primero');
-          savedSelection = null;
+          clearSavedSelection();
           return;
         }
 
@@ -6945,7 +6987,7 @@ export async function initializeEditor() {
         }
 
         selection.removeAllRanges();
-        savedSelection = null;
+        clearSavedSelection();
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
@@ -7085,14 +7127,14 @@ export async function initializeEditor() {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
       });
@@ -7875,7 +7917,7 @@ export async function initializeEditor() {
         globalTopicCounter = 1;
         currentPageRef = null;
         currentSectionId = '';
-        savedSelection = null;
+        clearSavedSelection();
         const magicContainer = document.querySelector('.magic-content-container');
         if (magicContainer) {
           magicContainer.innerHTML = '';
@@ -8257,7 +8299,7 @@ export async function initializeEditor() {
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
           hideIconPicker();
-          savedSelection = null;
+          clearSavedSelection();
         }
       });
 
@@ -9384,7 +9426,7 @@ ${inlineStyles}
     }
     hideImageToolbar();
     hideTemplateToolbar();
-    savedSelection = null;
+    clearSavedSelection();
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
     scheduleIconPickerRebind(150);
