@@ -25,6 +25,7 @@ export async function initializeEditor() {
       let pages = [...document.querySelectorAll('.page')];
       let globalTopicCounter = 1;
       let selectedImage = null;
+      let lastEditableRange = null;
       let selectedTemplateBlock = null;
       let currentZoom = 1;
       let lastRegularZoom = 1;
@@ -337,6 +338,23 @@ export async function initializeEditor() {
       const imageCropCancelBtn = document.getElementById('imageCropCancelBtn');
       const imageCropCloseBtn = document.getElementById('imageCropCloseBtn');
       const imageCropSizeLabel = document.getElementById('imageCropSizeLabel');
+      let imageResizeHandle = document.getElementById('imageResizeHandle');
+      if (!imageResizeHandle) {
+        imageResizeHandle = document.createElement('button');
+        imageResizeHandle.type = 'button';
+        imageResizeHandle.id = 'imageResizeHandle';
+        imageResizeHandle.className = 'image-resize-handle';
+        imageResizeHandle.setAttribute('aria-label', 'Ajustar tamaño de la imagen');
+        imageResizeHandle.innerHTML = '<span aria-hidden="true">⤡</span>';
+        document.body.appendChild(imageResizeHandle);
+      }
+      let resizeHandleImage = null;
+      const imageResizeState = {
+        active: false,
+        pointerId: null,
+        startX: 0,
+        startWidth: 0
+      };
       const templateToolbar = document.getElementById('templateToolbar');
       const templateBgColorInput = document.getElementById('templateBgColor');
       const templateClearBgBtn = document.getElementById('templateClearBgBtn');
@@ -1888,6 +1906,30 @@ export async function initializeEditor() {
         savedSelection = null;
       }
 
+      function isRangeInDocument(range) {
+        if (!range) return false;
+        const { startContainer, endContainer } = range;
+        return isNodeInDocument(startContainer) && isNodeInDocument(endContainer);
+      }
+
+      function updateLastEditableRange(range) {
+        if (range && isRangeInDocument(range)) {
+          lastEditableRange = range.cloneRange();
+        }
+      }
+
+      function restoreLastEditableRange() {
+        if (!lastEditableRange || !isRangeInDocument(lastEditableRange)) {
+          return null;
+        }
+        const selection = window.getSelection();
+        if (!selection) return null;
+        selection.removeAllRanges();
+        const clone = lastEditableRange.cloneRange();
+        selection.addRange(clone);
+        return selection;
+      }
+
       function createSelectionSnapshot(selection) {
         if (!selection || selection.rangeCount === 0) {
           return null;
@@ -2058,12 +2100,25 @@ export async function initializeEditor() {
         if (restoreSelection()) {
           const restored = window.getSelection();
           if (isSelectionWithinEditable(restored)) {
+            if (restored.rangeCount > 0) {
+              updateLastEditableRange(restored.getRangeAt(0));
+            }
             return restored;
           }
         }
         const liveSelection = window.getSelection();
         if (isSelectionWithinEditable(liveSelection)) {
+          if (liveSelection.rangeCount > 0) {
+            updateLastEditableRange(liveSelection.getRangeAt(0));
+          }
           return liveSelection;
+        }
+        const restored = restoreLastEditableRange();
+        if (isSelectionWithinEditable(restored)) {
+          if (restored.rangeCount > 0) {
+            updateLastEditableRange(restored.getRangeAt(0));
+          }
+          return restored;
         }
         return null;
       }
@@ -2078,6 +2133,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
+        updateLastEditableRange(range);
         clearSavedSelection();
         return node;
       }
@@ -2097,6 +2153,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
+        updateLastEditableRange(range);
         clearSavedSelection();
         return nodes[0] || null;
       }
@@ -2174,6 +2231,7 @@ export async function initializeEditor() {
         range.setEndAfter(insertedNode);
         selection.removeAllRanges();
         selection.addRange(range);
+        updateLastEditableRange(range);
         clearSavedSelection();
         return insertedNode;
       }
@@ -2185,6 +2243,9 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!isSelectionWithinEditable(selection)) {
           return;
+        }
+        if (selection.rangeCount > 0) {
+          updateLastEditableRange(selection.getRangeAt(0));
         }
         saveCurrentSelection();
       });
@@ -4469,7 +4530,7 @@ export async function initializeEditor() {
         const current = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || 200;
         setImageWidthPx(selectedImage, current * multiplier);
         updateWidthDisplayForImage(selectedImage);
-        repositionImageToolbar();
+        positionImageResizeHandle();
       }
 
       function updateToolbarPosition(img) {
@@ -4481,27 +4542,24 @@ export async function initializeEditor() {
         const toolbarWidth = imageToolbar.offsetWidth || 240;
         const toolbarHeight = imageToolbar.offsetHeight || 160;
 
-        let left = rect.left;
-        let top = rect.top - toolbarHeight - 10;
+        let left = rect.left + (rect.width / 2) - (toolbarWidth / 2);
+        let top = rect.top - toolbarHeight - 12;
 
-        if (top < 10) {
-          top = rect.bottom + 10;
+        if (top < 12) {
+          top = 12;
         }
 
-        if (top + toolbarHeight > window.innerHeight - 10) {
-          top = Math.max(10, window.innerHeight - toolbarHeight - 10);
+        if (left + toolbarWidth > window.innerWidth - 12) {
+          left = window.innerWidth - toolbarWidth - 12;
         }
 
-        if (left + toolbarWidth > window.innerWidth - 10) {
-          left = window.innerWidth - toolbarWidth - 10;
-        }
-
-        if (left < 10) {
-          left = 10;
+        if (left < 12) {
+          left = 12;
         }
 
         imageToolbar.style.left = left + 'px';
         imageToolbar.style.top = top + 'px';
+        positionImageResizeHandle();
       }
 
       function updateToolbarState(img) {
@@ -4620,9 +4678,39 @@ export async function initializeEditor() {
         }
       }
 
+      function positionImageResizeHandle() {
+        if (!imageResizeHandle) return;
+        if (!resizeHandleImage || !resizeHandleImage.isConnected) {
+          imageResizeHandle.classList.remove('visible');
+          resizeHandleImage = null;
+          return;
+        }
+        const rect = resizeHandleImage.getBoundingClientRect();
+        const left = Math.max(4, Math.round(rect.left) + 4);
+        const top = Math.min(window.innerHeight - 32, Math.max(4, Math.round(rect.bottom) - 30));
+        imageResizeHandle.style.left = `${left}px`;
+        imageResizeHandle.style.top = `${top}px`;
+        imageResizeHandle.classList.add('visible');
+      }
+
+      function attachImageResizeHandle(img) {
+        if (!imageResizeHandle) return;
+        resizeHandleImage = img;
+        positionImageResizeHandle();
+      }
+
+      function hideImageResizeHandle() {
+        resizeHandleImage = null;
+        if (imageResizeHandle) {
+          imageResizeHandle.classList.remove('visible');
+        }
+      }
+
       function repositionImageToolbar() {
         if (selectedImage) {
           updateToolbarPosition(selectedImage);
+        } else {
+          hideImageResizeHandle();
         }
       }
 
@@ -4775,6 +4863,7 @@ export async function initializeEditor() {
 
         updateToolbarState(img);
         updateToolbarPosition(img);
+        attachImageResizeHandle(img);
       }
 
       function hideImageToolbar() {
@@ -4786,6 +4875,7 @@ export async function initializeEditor() {
         if (cropImageBtn) {
           cropImageBtn.disabled = true;
         }
+        hideImageResizeHandle();
       }
 
       document.addEventListener('click', (e) => {
@@ -7073,6 +7163,56 @@ export async function initializeEditor() {
       imageWidthDecreaseBtn?.addEventListener('click', () => {
         changeSelectedImageWidth(1 - IMAGE_RESIZE_STEP);
       });
+
+      imageResizeHandle?.addEventListener('pointerdown', (event) => {
+        if (!isEditMode || !selectedImage) return;
+        event.preventDefault();
+        event.stopPropagation();
+        imageResizeState.active = true;
+        imageResizeState.pointerId = event.pointerId;
+        imageResizeState.startX = event.clientX;
+        imageResizeState.startWidth = getImageWidthPx(selectedImage)
+          || selectedImage.getBoundingClientRect().width
+          || IMAGE_MIN_WIDTH;
+        try {
+          imageResizeHandle.setPointerCapture(event.pointerId);
+        } catch (err) {
+          /* ignore */
+        }
+      });
+
+      imageResizeHandle?.addEventListener('pointermove', (event) => {
+        if (!imageResizeState.active || event.pointerId !== imageResizeState.pointerId) {
+          return;
+        }
+        event.preventDefault();
+        const delta = event.clientX - imageResizeState.startX;
+        const targetWidth = imageResizeState.startWidth + delta;
+        setImageWidthPx(selectedImage, targetWidth);
+        updateWidthDisplayForImage(selectedImage);
+        positionImageResizeHandle();
+      });
+
+      function endImageResize(event) {
+        if (!imageResizeState.active || (event && event.pointerId !== imageResizeState.pointerId)) {
+          return;
+        }
+        imageResizeState.active = false;
+        imageResizeState.pointerId = null;
+        try {
+          imageResizeHandle.releasePointerCapture(event?.pointerId);
+        } catch (err) {
+          /* ignore */
+        }
+        if (selectedImage) {
+          updateToolbarPosition(selectedImage);
+        } else {
+          hideImageResizeHandle();
+        }
+      }
+
+      imageResizeHandle?.addEventListener('pointerup', endImageResize);
+      imageResizeHandle?.addEventListener('pointercancel', endImageResize);
 
       templateBgColorInput?.addEventListener('input', (e) => {
         applyTemplateBackground(e.target.value || '#ffffff');

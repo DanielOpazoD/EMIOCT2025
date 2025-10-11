@@ -782,7 +782,7 @@ body.reading-mode .reading-mode-exit {
 }
 
 /* ===== Panel de herramientas de imagen ===== */
-.image-toolbar {
+.image-toolbar { 
   position: fixed;
   background: #fff;
   border: 2px solid var(--theme-primary);
@@ -798,6 +798,35 @@ body.reading-mode .reading-mode-exit {
 
 .image-toolbar.show {
   display: flex;
+}
+
+.image-resize-handle {
+  position: fixed;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--theme-primary);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--theme-primary);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  cursor: nwse-resize;
+  z-index: 3601;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.image-resize-handle.visible {
+  display: flex;
+}
+
+.image-resize-handle:hover,
+.image-resize-handle:focus-visible {
+  background: var(--theme-primary);
+  color: #fff;
+  border-color: var(--theme-primary);
 }
 
 .image-frame {
