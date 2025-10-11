@@ -37,6 +37,7 @@ export async function initializeEditor() {
       let savedSelection = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
+      let iconPickerRebindTimer = null;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -551,6 +552,7 @@ export async function initializeEditor() {
           scheduleFloatingNotesViewportRefresh();
           ensureVisibleSection({ force: true });
           setActiveTopicListHighlight('');
+          scheduleIconPickerRebind();
           return;
         }
         const nextTopicId = page.dataset.topicId || '';
@@ -570,6 +572,7 @@ export async function initializeEditor() {
         invalidateActiveTopicViewportState();
         refreshFloatingNotesTopicVisibility();
         scheduleFloatingNotesViewportRefresh();
+        scheduleIconPickerRebind();
       }
 
       function setSectionTheme(sectionId, themeClass) {
@@ -753,6 +756,28 @@ export async function initializeEditor() {
           iconPickerTrigger.removeAttribute('data-icon-picker-bound');
         }
         iconPickerTrigger = null;
+      }
+
+      function scheduleIconPickerRebind(delay = 0) {
+        if (iconPickerRebindTimer) {
+          clearTimeout(iconPickerRebindTimer);
+          iconPickerRebindTimer = null;
+        }
+
+        const waitTime = Number.isFinite(delay) ? Math.max(0, delay) : 0;
+
+        iconPickerRebindTimer = setTimeout(() => {
+          iconPickerRebindTimer = null;
+          const raf = typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame
+            : (callback) => setTimeout(callback, 16);
+
+          raf(() => {
+            raf(() => {
+              bindIconPickerTrigger();
+            });
+          });
+        }, waitTime);
       }
 
       function buildIconPicker() {
@@ -8425,6 +8450,7 @@ export async function initializeEditor() {
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
 
       bindIconPickerTrigger();
+      scheduleIconPickerRebind();
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
@@ -9356,12 +9382,12 @@ ${inlineStyles}
     if (isEditMode) {
       enableHtmlPaste();
     }
-    bindIconPickerTrigger();
     hideImageToolbar();
     hideTemplateToolbar();
     savedSelection = null;
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
+    scheduleIconPickerRebind(150);
     window.scrollTo({ top: 0 });
   }
 
