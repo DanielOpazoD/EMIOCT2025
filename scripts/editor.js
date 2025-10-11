@@ -1182,18 +1182,32 @@ export async function initializeEditor() {
         return notes;
       }
 
-      function focusFloatingNoteById(noteId) {
+      function focusFloatingNoteById(noteId, { focusEditable = false } = {}) {
         if (!noteId || !floatingNotesLayer) return;
         let element = floatingNotesLayer.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteId)}"]`);
         const noteData = notesRegistry.get(noteId);
         if (!element && noteData) {
-          element = createFloatingNote({ id: noteData.id, meta: noteData, focus: true });
+          element = createFloatingNote({
+            id: noteData.id,
+            meta: noteData,
+            focus: focusEditable && isEditMode
+          });
         }
         if (!element) return;
         if (floatingNotesHidden) {
           setFloatingNotesVisibility(false);
+        } else {
+          floatingNotesViewportRelaxedMatching = true;
+          refreshFloatingNotesTopicVisibility({ relaxMatching: true });
+          scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
         }
         bringNoteToFront(element);
+        if (focusEditable && isEditMode) {
+          const body = element.querySelector('.floating-note-body');
+          if (body) {
+            setTimeout(() => body.focus(), 0);
+          }
+        }
         element.classList.add('pulse-highlight');
         setTimeout(() => element.classList.remove('pulse-highlight'), 1600);
       }
@@ -1294,7 +1308,7 @@ export async function initializeEditor() {
         viewBtn.title = 'Mostrar nota';
         viewBtn.textContent = '👁️';
         viewBtn.addEventListener('click', () => {
-          focusFloatingNoteById(noteData.id);
+          focusFloatingNoteById(noteData.id, { focusEditable: isEditMode });
         });
         actions.appendChild(viewBtn);
 
@@ -3808,15 +3822,40 @@ export async function initializeEditor() {
           noteIcon.setAttribute('aria-haspopup', 'true');
           if (!noteIcon.dataset.bound) {
             noteIcon.title = 'Notas del tema';
+            const activateTopicNoteIcon = () => {
+              const topicId = page.dataset.topicId || '';
+              if (topicId && isEditMode) {
+                const topicNotes = getTopicNotesForTopic(topicId);
+                if (topicNotes.length > 0) {
+                  focusFloatingNoteById(topicNotes[0].id, { focusEditable: true });
+                } else {
+                  const newNote = createFloatingNote({
+                    topicId,
+                    sectionId: page.dataset.sectionId || currentSectionId || null,
+                    focus: true
+                  });
+                  if (newNote) {
+                    if (floatingNotesHidden) {
+                      setFloatingNotesVisibility(false);
+                    } else {
+                      floatingNotesViewportRelaxedMatching = true;
+                      refreshFloatingNotesTopicVisibility({ relaxMatching: true });
+                      scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
+                    }
+                  }
+                }
+              }
+              toggleTopicNotesPopover(page, noteIcon);
+            };
             noteIcon.addEventListener('click', (event) => {
               event.preventDefault();
               event.stopPropagation();
-              toggleTopicNotesPopover(page, noteIcon);
+              activateTopicNoteIcon();
             });
             noteIcon.addEventListener('keydown', (event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                toggleTopicNotesPopover(page, noteIcon);
+                activateTopicNoteIcon();
               }
             });
             noteIcon.dataset.bound = 'true';
@@ -4947,8 +4986,10 @@ export async function initializeEditor() {
         if (floatingNotesHidden) {
           closeFloatingNoteStyleMenu();
         } else {
+          floatingNotesViewportRelaxedMatching = true;
           clampAllFloatingNotes();
-          scheduleFloatingNotesViewportRefresh();
+          refreshFloatingNotesTopicVisibility({ relaxMatching: true });
+          scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
         }
       }
 
