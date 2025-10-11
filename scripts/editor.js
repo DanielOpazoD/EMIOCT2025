@@ -35,6 +35,7 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let pendingInsertionSnapshot = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -329,6 +330,25 @@ export async function initializeEditor() {
       const imageWidthIncreaseBtn = document.getElementById('imageWidthIncrease');
       const imageWidthDecreaseBtn = document.getElementById('imageWidthDecrease');
       const widthDisplay = document.getElementById('widthDisplay');
+      let imageResizeHandle = document.getElementById('imageResizeHandle');
+      if (!imageResizeHandle) {
+        imageResizeHandle = document.createElement('button');
+        imageResizeHandle.type = 'button';
+        imageResizeHandle.id = 'imageResizeHandle';
+        imageResizeHandle.className = 'image-resize-handle';
+        imageResizeHandle.setAttribute('aria-label', 'Arrastra para ajustar el tamaño de la imagen');
+        imageResizeHandle.title = 'Arrastra para ajustar el tamaño de la imagen';
+        imageResizeHandle.innerHTML = '<span aria-hidden="true">◢</span>';
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+        imageResizeHandle.tabIndex = -1;
+      }
+      if (!imageResizeHandle.isConnected) {
+        const handleHost = document.body || document.documentElement;
+        handleHost?.appendChild(imageResizeHandle);
+      }
+      let imageResizeActive = false;
+      let imageResizeStartX = 0;
+      let imageResizeStartWidth = 0;
       const imageCropModal = document.getElementById('imageCropModal');
       const imageCropStage = document.getElementById('imageCropStage');
       const imageCropPreview = document.getElementById('imageCropPreview');
@@ -1926,6 +1946,26 @@ export async function initializeEditor() {
         };
       }
 
+      function capturePendingInsertionSnapshot() {
+        const liveSelection = window.getSelection();
+        if (isSelectionWithinEditable(liveSelection) && liveSelection?.rangeCount) {
+          const snapshot = createSelectionSnapshot(liveSelection);
+          if (snapshot) {
+            savedSelection = snapshot;
+            pendingInsertionSnapshot = cloneSelectionSnapshot(snapshot);
+            return true;
+          }
+        }
+
+        if (savedSelection) {
+          pendingInsertionSnapshot = cloneSelectionSnapshot(savedSelection);
+          return !!pendingInsertionSnapshot;
+        }
+
+        pendingInsertionSnapshot = null;
+        return false;
+      }
+
       function restoreSelectionSnapshot(snapshot, options = {}) {
         if (!snapshot || !snapshot.range) {
           return false;
@@ -2012,6 +2052,21 @@ export async function initializeEditor() {
         return !!iconPickerSelectionSnapshot;
       }
 
+      function consumePendingInsertionSelection() {
+        if (pendingInsertionSnapshot) {
+          const snapshot = cloneSelectionSnapshot(pendingInsertionSnapshot);
+          pendingInsertionSnapshot = null;
+          if (snapshot && restoreSelectionSnapshot(snapshot, { updateSnapshot: false })) {
+            const selection = window.getSelection();
+            if (isSelectionWithinEditable(selection)) {
+              return selection;
+            }
+          }
+        }
+
+        return resolveSelectionForInsertion();
+      }
+
       function clearIconPickerSelectionSnapshot() {
         iconPickerSelectionSnapshot = null;
       }
@@ -2068,8 +2123,13 @@ export async function initializeEditor() {
         return null;
       }
 
-      function insertNodeAtSelection(node) {
-        const selection = resolveSelectionForInsertion();
+      function insertNodeAtSelection(node, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -2082,8 +2142,13 @@ export async function initializeEditor() {
         return node;
       }
 
-      function insertHtmlAtSelection(html) {
-        const selection = resolveSelectionForInsertion();
+      function insertHtmlAtSelection(html, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -4472,6 +4537,57 @@ export async function initializeEditor() {
         repositionImageToolbar();
       }
 
+      function hideImageResizeHandle() {
+        if (!imageResizeHandle) {
+          return;
+        }
+        imageResizeHandle.classList.remove('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+      }
+
+      function positionImageResizeHandle(img) {
+        if (!imageResizeHandle) {
+          return;
+        }
+        if (!img) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        if (!rect || (!rect.width && !rect.height)) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const handleRect = imageResizeHandle.getBoundingClientRect();
+        const handleWidth = handleRect.width || 18;
+        const handleHeight = handleRect.height || 18;
+
+        let left = rect.left - (handleWidth / 2) + 8;
+        let top = rect.bottom - (handleHeight / 2) - 8;
+
+        const minLeft = 4;
+        const maxLeft = Math.max(minLeft, viewportWidth - handleWidth - 4);
+        const minTop = 4;
+        const maxTop = Math.max(minTop, viewportHeight - handleHeight - 4);
+
+        if (Number.isFinite(left)) {
+          left = Math.min(Math.max(minLeft, left), maxLeft);
+          imageResizeHandle.style.left = Math.round(left) + 'px';
+        }
+
+        if (Number.isFinite(top)) {
+          top = Math.min(Math.max(minTop, top), maxTop);
+          imageResizeHandle.style.top = Math.round(top) + 'px';
+        }
+
+        imageResizeHandle.classList.add('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'false');
+      }
+
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
 
@@ -4481,28 +4597,96 @@ export async function initializeEditor() {
         const toolbarWidth = imageToolbar.offsetWidth || 240;
         const toolbarHeight = imageToolbar.offsetHeight || 160;
 
-        let left = rect.left;
-        let top = rect.top - toolbarHeight - 10;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const imageWidth = rect.width || getImageWidthPx(img) || toolbarWidth;
 
-        if (top < 10) {
-          top = rect.bottom + 10;
+        let left = rect.left + ((imageWidth - toolbarWidth) / 2);
+        let top = rect.top - toolbarHeight - 12;
+
+        if (!Number.isFinite(left)) {
+          left = 12;
         }
 
-        if (top + toolbarHeight > window.innerHeight - 10) {
-          top = Math.max(10, window.innerHeight - toolbarHeight - 10);
+        if (!Number.isFinite(top)) {
+          top = 12;
         }
 
-        if (left + toolbarWidth > window.innerWidth - 10) {
-          left = window.innerWidth - toolbarWidth - 10;
+        if (top < 12) {
+          top = rect.bottom + 12;
         }
 
-        if (left < 10) {
-          left = 10;
-        }
+        const minLeft = 12;
+        const maxLeft = Math.max(minLeft, viewportWidth - toolbarWidth - 12);
+        const minTop = 12;
+        const maxTop = Math.max(minTop, viewportHeight - toolbarHeight - 12);
 
-        imageToolbar.style.left = left + 'px';
-        imageToolbar.style.top = top + 'px';
+        left = Math.min(Math.max(minLeft, left), maxLeft);
+        top = Math.min(Math.max(minTop, top), maxTop);
+
+        imageToolbar.style.left = Math.round(left) + 'px';
+        imageToolbar.style.top = Math.round(top) + 'px';
+
+        positionImageResizeHandle(img);
       }
+
+      function finishImageResize(event) {
+        if (!imageResizeActive) {
+          return;
+        }
+        if (event?.preventDefault) {
+          event.preventDefault();
+        }
+        if (event?.pointerId != null && imageResizeHandle && typeof imageResizeHandle.releasePointerCapture === 'function' && typeof imageResizeHandle.hasPointerCapture === 'function' && imageResizeHandle.hasPointerCapture(event.pointerId)) {
+          try {
+            imageResizeHandle.releasePointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeActive = false;
+        imageResizeHandle?.classList.remove('dragging');
+        repositionImageToolbar();
+      }
+
+      imageResizeHandle?.addEventListener('pointerdown', (event) => {
+        if (!isEditMode || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        imageResizeActive = true;
+        imageResizeStartX = event.clientX;
+        imageResizeStartWidth = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || selectedImage.getBoundingClientRect().width || IMAGE_MIN_WIDTH;
+        if (typeof imageResizeHandle.setPointerCapture === 'function' && event.pointerId != null) {
+          try {
+            imageResizeHandle.setPointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeHandle.classList.add('dragging');
+      });
+
+      imageResizeHandle?.addEventListener('pointermove', (event) => {
+        if (!imageResizeActive || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        const deltaX = imageResizeStartX - event.clientX;
+        const proposedWidth = imageResizeStartWidth + deltaX;
+        setImageWidthPx(selectedImage, proposedWidth);
+        updateWidthDisplayForImage(selectedImage);
+        updateToolbarPosition(selectedImage);
+      });
+
+      imageResizeHandle?.addEventListener('pointerup', finishImageResize);
+      imageResizeHandle?.addEventListener('pointercancel', finishImageResize);
+      imageResizeHandle?.addEventListener('pointerleave', (event) => {
+        if (imageResizeActive) {
+          finishImageResize(event);
+        }
+      });
 
       function updateToolbarState(img) {
         if (!img) return;
@@ -4623,6 +4807,8 @@ export async function initializeEditor() {
       function repositionImageToolbar() {
         if (selectedImage) {
           updateToolbarPosition(selectedImage);
+        } else {
+          hideImageResizeHandle();
         }
       }
 
@@ -4778,11 +4964,13 @@ export async function initializeEditor() {
       }
 
       function hideImageToolbar() {
+        finishImageResize();
         if (selectedImage) {
           selectedImage.classList.remove('selected-image');
           selectedImage = null;
         }
         imageToolbar.classList.remove('show');
+        hideImageResizeHandle();
         if (cropImageBtn) {
           cropImageBtn.disabled = true;
         }
@@ -4792,7 +4980,7 @@ export async function initializeEditor() {
         if (isEditMode && e.target.tagName === 'IMG') {
           e.preventDefault();
           showImageToolbar(e.target);
-        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
+        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure') && !e.target.closest('#imageResizeHandle')) {
           hideImageToolbar();
         }
 
@@ -8091,42 +8279,42 @@ export async function initializeEditor() {
 
       /* === PLANTILLAS === */
       insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTemplateBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertTableBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertCollapseCardBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
@@ -8142,6 +8330,7 @@ export async function initializeEditor() {
             selection.removeAllRanges();
             selection.addRange(range);
             saveCurrentSelection();
+            capturePendingInsertionSnapshot();
           }
         }
 
@@ -8230,7 +8419,8 @@ export async function initializeEditor() {
           card.addEventListener('click', () => {
             const block = createTemplateBlock(template);
             if (!block) return;
-            const insertedBlock = insertNodeAtSelection(block);
+            const selectionForInsert = consumePendingInsertionSelection();
+            const insertedBlock = insertNodeAtSelection(block, { selectionOverride: selectionForInsert });
             if (!insertedBlock) {
               alert('Selecciona un área editable antes de insertar una plantilla.');
               return;
@@ -8247,7 +8437,8 @@ export async function initializeEditor() {
       insertCollapseCardBtn?.addEventListener('click', () => {
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
-        const insertedCard = insertNodeAtSelection(card);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedCard = insertNodeAtSelection(card, { selectionOverride: selectionForInsert });
         if (!insertedCard) {
           alert('Selecciona un área editable antes de insertar la tarjeta.');
           return;
@@ -9477,7 +9668,8 @@ export async function initializeEditor() {
           document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
-              const insertedNode = insertHtmlAtSelection(htmlCode);
+              const selectionForInsert = consumePendingInsertionSelection();
+              const insertedNode = insertHtmlAtSelection(htmlCode, { selectionOverride: selectionForInsert });
               if (insertedNode) {
                 hideModal();
               } else {
@@ -9565,7 +9757,8 @@ export async function initializeEditor() {
         }
         tableHTML += '</tbody></table></div>';
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedNode = insertHtmlAtSelection(tableHTML, { selectionOverride: selectionForInsert });
         if (insertedNode) {
           hideModal();
         } else {
