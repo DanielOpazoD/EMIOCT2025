@@ -35,6 +35,8 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let savedSelectionEditable = null;
+      let savedSelectionPage = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -1719,29 +1721,76 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
+      function clearSavedSelection() {
+        savedSelection = null;
+        savedSelectionEditable = null;
+        savedSelectionPage = null;
+      }
+
+      function getEditableHost(node) {
+        if (!node) {
+          return null;
+        }
+        if (node instanceof HTMLElement && node.isContentEditable) {
+          return node;
+        }
+        if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.ELEMENT_NODE) {
+          const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+          return element ? element.closest('[contenteditable="true"]') : null;
+        }
+        return null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
         if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
+          const range = selection.getRangeAt(0);
+          const anchor = selection.anchorNode || range.startContainer;
+          const focusNode = selection.focusNode || range.endContainer;
+          const editable = getEditableHost(anchor) || getEditableHost(focusNode) || (document.activeElement?.isContentEditable ? document.activeElement : null);
+          const page = editable ? editable.closest('.page') : (document.activeElement?.closest?.('.page') || null);
+          savedSelection = range.cloneRange();
+          savedSelectionEditable = editable && editable.isConnected ? editable : null;
+          savedSelectionPage = page && page.isConnected ? page : null;
           return true;
         }
+        clearSavedSelection();
         return false;
       }
 
       function restoreSelection() {
-        if (savedSelection) {
-          if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
-            return false;
-          }
-          const selection = window.getSelection();
-          selection.removeAllRanges();
+        if (!savedSelection) {
+          return false;
+        }
+        if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
+          clearSavedSelection();
+          return false;
+        }
+
+        let focusTarget = null;
+        if (savedSelectionEditable && savedSelectionEditable.isConnected) {
+          focusTarget = savedSelectionEditable;
+        } else if (savedSelectionPage && savedSelectionPage.isConnected) {
+          focusTarget = savedSelectionPage;
+        } else if (currentPageRef && currentPageRef.isConnected) {
+          focusTarget = currentPageRef;
+        }
+
+        if (focusTarget && typeof focusTarget.focus === 'function') {
           try {
-            selection.addRange(savedSelection);
-            return true;
+            focusTarget.focus({ preventScroll: true });
           } catch (err) {
-            savedSelection = null;
+            focusTarget.focus();
           }
+        }
+
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        try {
+          selection.addRange(savedSelection);
+          return true;
+        } catch (err) {
+          clearSavedSelection();
         }
         return false;
       }
@@ -1784,7 +1833,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1852,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1870,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
@@ -6717,7 +6766,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         hideTemplateToolbar();
       });
 
@@ -6898,7 +6947,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) {
           alert('Por favor, selecciona el texto primero');
-          savedSelection = null;
+          clearSavedSelection();
           return;
         }
 
@@ -6945,7 +6994,7 @@ export async function initializeEditor() {
         }
 
         selection.removeAllRanges();
-        savedSelection = null;
+        clearSavedSelection();
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
@@ -7085,14 +7134,14 @@ export async function initializeEditor() {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
       });
@@ -7875,7 +7924,7 @@ export async function initializeEditor() {
         globalTopicCounter = 1;
         currentPageRef = null;
         currentSectionId = '';
-        savedSelection = null;
+        clearSavedSelection();
         const magicContainer = document.querySelector('.magic-content-container');
         if (magicContainer) {
           magicContainer.innerHTML = '';
@@ -8257,7 +8306,7 @@ export async function initializeEditor() {
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
           hideIconPicker();
-          savedSelection = null;
+          clearSavedSelection();
         }
       });
 
@@ -9384,7 +9433,7 @@ ${inlineStyles}
     }
     hideImageToolbar();
     hideTemplateToolbar();
-    savedSelection = null;
+    clearSavedSelection();
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
     scheduleIconPickerRebind(150);
