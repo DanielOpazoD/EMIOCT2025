@@ -9181,6 +9181,10 @@ ${inlineStyles}
 
     closeTopicNotesPopover();
 
+    // Asegurar que el icon picker se reinicialice correctamente al importar
+    detachIconPickerTrigger();
+    hideIconPicker();
+
     const rawShift = Number.parseFloat(data.documentShift);
     if (Number.isFinite(rawShift)) {
       documentHorizontalShift = Math.min(
