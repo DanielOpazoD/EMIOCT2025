@@ -860,6 +860,44 @@ export async function initializeEditor() {
         iconPickerAnchor = null;
       }
 
+      function getSavedSelectionRect() {
+        if (!savedSelection || !savedSelection.range) {
+          return null;
+        }
+
+        const { range, focusTarget, pageTarget } = savedSelection;
+        if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
+          return null;
+        }
+
+        let rect = null;
+        if (typeof range.getBoundingClientRect === 'function') {
+          rect = range.getBoundingClientRect();
+          if (rect && rect.width === 0 && rect.height === 0 && typeof range.getClientRects === 'function') {
+            const rects = Array.from(range.getClientRects());
+            rect = rects.find(candidate => candidate && (candidate.width > 0 || candidate.height > 0)) || rect;
+          }
+        }
+
+        if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.left)) {
+          const fallbackTarget = (focusTarget && document.contains(focusTarget))
+            ? focusTarget
+            : (pageTarget && document.contains(pageTarget))
+              ? pageTarget
+              : null;
+
+          if (fallbackTarget && typeof fallbackTarget.getBoundingClientRect === 'function') {
+            rect = fallbackTarget.getBoundingClientRect();
+          }
+        }
+
+        if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.left)) {
+          return null;
+        }
+
+        return rect;
+      }
+
       function showIconPicker(anchor) {
         if (!ICON_FEATURE_ENABLED || !anchor) {
           return;
@@ -872,12 +910,50 @@ export async function initializeEditor() {
         if (!restoreSelection()) {
           ensureEditableSelection();
         }
-        const rect = anchor.getBoundingClientRect();
-        const offsetTop = rect.bottom + window.scrollY + 6;
-        const offsetLeft = rect.left + window.scrollX;
-        picker.style.top = `${offsetTop}px`;
-        picker.style.left = `${offsetLeft}px`;
+
+        const selectionRect = getSavedSelectionRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const referenceRect = selectionRect || anchorRect;
+
+        const computedStyle = window.getComputedStyle(picker);
+        const isFixedPosition = computedStyle && computedStyle.position === 'fixed';
+
+        const scrollY = isFixedPosition ? 0 : Number.isFinite(window.scrollY) ? window.scrollY : window.pageYOffset || 0;
+        const scrollX = isFixedPosition ? 0 : Number.isFinite(window.scrollX) ? window.scrollX : window.pageXOffset || 0;
+
+        picker.style.visibility = 'hidden';
         picker.classList.add('show');
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const pickerRect = picker.getBoundingClientRect();
+
+        const baseTop = referenceRect.top + scrollY;
+        const baseBottom = referenceRect.bottom + scrollY;
+
+        let offsetTop = baseBottom + 6;
+        let offsetLeft = referenceRect.left + scrollX;
+
+        if (pickerRect && Number.isFinite(pickerRect.width)) {
+          const minLeft = (isFixedPosition ? 12 : scrollX + 12);
+          const maxLeft = (isFixedPosition ? viewportWidth - 12 : scrollX + viewportWidth - 12) - pickerRect.width;
+          const clampedMaxLeft = Math.max(minLeft, maxLeft);
+          offsetLeft = Math.min(Math.max(minLeft, offsetLeft), clampedMaxLeft);
+        }
+
+        if (pickerRect && Number.isFinite(pickerRect.height)) {
+          const minTop = (isFixedPosition ? 12 : scrollY + 12);
+          const maxBottom = (isFixedPosition ? viewportHeight : scrollY + viewportHeight) - 12;
+          if (offsetTop + pickerRect.height > maxBottom && baseTop - pickerRect.height - 6 >= minTop) {
+            offsetTop = baseTop - pickerRect.height - 6;
+          }
+          const clampedMaxTop = Math.max(minTop, maxBottom - pickerRect.height);
+          offsetTop = Math.min(Math.max(minTop, offsetTop), clampedMaxTop);
+        }
+
+        picker.style.top = `${Math.round(offsetTop)}px`;
+        picker.style.left = `${Math.round(offsetLeft)}px`;
+        picker.style.visibility = '';
         anchor.setAttribute('aria-expanded', 'true');
       }
 
@@ -1719,31 +1795,105 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
+      function isNodeInDocument(node) {
+        if (!node) {
+          return false;
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+          return !!node.parentNode && document.contains(node.parentNode);
+        }
+        return document.contains(node);
+      }
+
+      function resolveEditableAncestor(node) {
+        if (!node) {
+          return null;
+        }
+        const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        if (!element) {
+          return null;
+        }
+        const page = element.closest('.page, .magic-page');
+        if (page) {
+          return page;
+        }
+        if (typeof element.closest === 'function') {
+          return element.closest('[contenteditable="true"]');
+        }
+        return null;
+      }
+
+      function clearSavedSelection() {
+        savedSelection = null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
-          return true;
+        if (!selection || selection.rangeCount === 0) {
+          clearSavedSelection();
+          return false;
         }
-        return false;
+
+        const range = selection.getRangeAt(0).cloneRange();
+        const activeEditable = document.activeElement && document.activeElement.isContentEditable
+          ? document.activeElement
+          : null;
+        const focusTarget = activeEditable || resolveEditableAncestor(range.commonAncestorContainer) || resolveEditableAncestor(range.startContainer) || resolveEditableAncestor(range.endContainer);
+        const pageTarget = focusTarget && typeof focusTarget.closest === 'function'
+          ? focusTarget.closest('.page, .magic-page') || focusTarget
+          : resolveEditableAncestor(range.commonAncestorContainer);
+
+        savedSelection = {
+          range,
+          focusTarget: focusTarget || pageTarget || null,
+          pageTarget: pageTarget || null
+        };
+
+        return true;
       }
 
       function restoreSelection() {
-        if (savedSelection) {
-          if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
-            return false;
-          }
-          const selection = window.getSelection();
-          selection.removeAllRanges();
+        if (!savedSelection || !savedSelection.range) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const { range, focusTarget, pageTarget } = savedSelection;
+        if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+
+        const restoredRange = range.cloneRange();
+
+        let focusElement = null;
+        if (focusTarget && document.contains(focusTarget)) {
+          focusElement = focusTarget;
+        } else if (pageTarget && document.contains(pageTarget)) {
+          focusElement = pageTarget;
+        } else {
+          focusElement = resolveEditableAncestor(restoredRange.commonAncestorContainer) || resolveEditableAncestor(restoredRange.startContainer) || resolveEditableAncestor(restoredRange.endContainer);
+        }
+
+        if (focusElement && typeof focusElement.focus === 'function') {
           try {
-            selection.addRange(savedSelection);
-            return true;
+            focusElement.focus({ preventScroll: true });
           } catch (err) {
-            savedSelection = null;
+            focusElement.focus();
           }
         }
-        return false;
+
+        try {
+          selection.addRange(restoredRange);
+          savedSelection.range = restoredRange.cloneRange();
+          return true;
+        } catch (err) {
+          clearSavedSelection();
+          return false;
+        }
       }
 
       function ensureEditableSelection() {
@@ -1784,7 +1934,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1953,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1971,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
