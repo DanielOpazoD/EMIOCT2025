@@ -860,6 +860,44 @@ export async function initializeEditor() {
         iconPickerAnchor = null;
       }
 
+      function getSavedSelectionRect() {
+        if (!savedSelection || !savedSelection.range) {
+          return null;
+        }
+
+        const { range, focusTarget, pageTarget } = savedSelection;
+        if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
+          return null;
+        }
+
+        let rect = null;
+        if (typeof range.getBoundingClientRect === 'function') {
+          rect = range.getBoundingClientRect();
+          if (rect && rect.width === 0 && rect.height === 0 && typeof range.getClientRects === 'function') {
+            const rects = Array.from(range.getClientRects());
+            rect = rects.find(candidate => candidate && (candidate.width > 0 || candidate.height > 0)) || rect;
+          }
+        }
+
+        if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.left)) {
+          const fallbackTarget = (focusTarget && document.contains(focusTarget))
+            ? focusTarget
+            : (pageTarget && document.contains(pageTarget))
+              ? pageTarget
+              : null;
+
+          if (fallbackTarget && typeof fallbackTarget.getBoundingClientRect === 'function') {
+            rect = fallbackTarget.getBoundingClientRect();
+          }
+        }
+
+        if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.left)) {
+          return null;
+        }
+
+        return rect;
+      }
+
       function showIconPicker(anchor) {
         if (!ICON_FEATURE_ENABLED || !anchor) {
           return;
@@ -872,12 +910,39 @@ export async function initializeEditor() {
         if (!restoreSelection()) {
           ensureEditableSelection();
         }
-        const rect = anchor.getBoundingClientRect();
-        const offsetTop = rect.bottom + window.scrollY + 6;
-        const offsetLeft = rect.left + window.scrollX;
-        picker.style.top = `${offsetTop}px`;
-        picker.style.left = `${offsetLeft}px`;
+
+        const selectionRect = getSavedSelectionRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const referenceRect = selectionRect || anchorRect;
+        const scrollY = Number.isFinite(window.scrollY) ? window.scrollY : window.pageYOffset || 0;
+        const scrollX = Number.isFinite(window.scrollX) ? window.scrollX : window.pageXOffset || 0;
+
+        picker.style.visibility = 'hidden';
         picker.classList.add('show');
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const pickerRect = picker.getBoundingClientRect();
+
+        let offsetTop = referenceRect.bottom + scrollY + 6;
+        let offsetLeft = referenceRect.left + scrollX;
+
+        if (pickerRect && Number.isFinite(pickerRect.width)) {
+          const maxLeft = scrollX + Math.max(12, viewportWidth - pickerRect.width - 12);
+          offsetLeft = Math.min(Math.max(scrollX + 12, offsetLeft), maxLeft);
+        }
+
+        if (pickerRect && Number.isFinite(pickerRect.height)) {
+          const maxBottom = scrollY + viewportHeight - 12;
+          if (offsetTop + pickerRect.height > maxBottom && referenceRect.top - pickerRect.height - 6 >= scrollY + 12) {
+            offsetTop = referenceRect.top + scrollY - pickerRect.height - 6;
+          }
+          offsetTop = Math.max(scrollY + 12, offsetTop);
+        }
+
+        picker.style.top = `${Math.round(offsetTop)}px`;
+        picker.style.left = `${Math.round(offsetLeft)}px`;
+        picker.style.visibility = '';
         anchor.setAttribute('aria-expanded', 'true');
       }
 
