@@ -1182,6 +1182,57 @@ export async function initializeEditor() {
         return notes;
       }
 
+      function revealTopicFloatingNotes(topicId, { focusFirst = false } = {}) {
+        if (!topicId || !floatingNotesLayer) {
+          return false;
+        }
+
+        const topicNotes = getTopicNotesForTopic(topicId);
+        if (!topicNotes.length) {
+          return false;
+        }
+
+        const elements = topicNotes
+          .map(noteData => {
+            if (!noteData?.id) {
+              return null;
+            }
+            let element = floatingNotesLayer.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteData.id)}"]`);
+            if (!element) {
+              element = createFloatingNote({ id: noteData.id, meta: noteData, focus: false });
+            }
+            return element || null;
+          })
+          .filter(Boolean);
+
+        if (!elements.length) {
+          return false;
+        }
+
+        setFloatingNotesVisibility(false, { relaxMatching: true });
+
+        requestAnimationFrame(() => {
+          elements.forEach(note => {
+            applyFloatingNoteTopicVisibility(note, { relaxMatching: true });
+          });
+
+          if (focusFirst) {
+            const target = elements[0];
+            bringNoteToFront(target);
+            if (isEditMode) {
+              const body = target.querySelector('.floating-note-body');
+              if (body && body.contentEditable === 'true') {
+                body.focus();
+              }
+            }
+            target.classList.add('pulse-highlight');
+            setTimeout(() => target.classList.remove('pulse-highlight'), 1600);
+          }
+        });
+
+        return true;
+      }
+
       function focusFloatingNoteById(noteId) {
         if (!noteId || !floatingNotesLayer) return;
         let element = floatingNotesLayer.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteId)}"]`);
@@ -3807,16 +3858,40 @@ export async function initializeEditor() {
           noteIcon.setAttribute('tabindex', '0');
           noteIcon.setAttribute('aria-haspopup', 'true');
           if (!noteIcon.dataset.bound) {
-            noteIcon.title = 'Notas del tema';
-            noteIcon.addEventListener('click', (event) => {
+            const handleTopicNoteIconActivate = (event) => {
               event.preventDefault();
               event.stopPropagation();
-              toggleTopicNotesPopover(page, noteIcon);
-            });
+              const topicId = page?.dataset.topicId || '';
+              if (!topicId) {
+                toggleTopicNotesPopover(page, noteIcon);
+                return;
+              }
+              if (isEditMode) {
+                const revealed = revealTopicFloatingNotes(topicId, { focusFirst: true });
+                if (!revealed) {
+                  setFloatingNotesVisibility(false, { relaxMatching: true });
+                  const newNote = createFloatingNote({
+                    topicId,
+                    sectionId: page.dataset.sectionId || currentSectionId || null,
+                    focus: true
+                  });
+                  if (!newNote) {
+                    toggleTopicNotesPopover(page, noteIcon);
+                  } else {
+                    closeTopicNotesPopover();
+                  }
+                } else {
+                  closeTopicNotesPopover();
+                }
+              } else {
+                toggleTopicNotesPopover(page, noteIcon);
+              }
+            };
+            noteIcon.title = 'Notas del tema';
+            noteIcon.addEventListener('click', handleTopicNoteIconActivate);
             noteIcon.addEventListener('keydown', (event) => {
               if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                toggleTopicNotesPopover(page, noteIcon);
+                handleTopicNoteIconActivate(event);
               }
             });
             noteIcon.dataset.bound = 'true';
@@ -4940,7 +5015,8 @@ export async function initializeEditor() {
         toggleNotesBtn.textContent = floatingNotesHidden ? '🙈' : '👁️';
       }
 
-      function setFloatingNotesVisibility(hidden) {
+      function setFloatingNotesVisibility(hidden, options = {}) {
+        const { relaxMatching = !hidden } = options || {};
         floatingNotesHidden = !!hidden;
         document.body.classList.toggle('notes-hidden', floatingNotesHidden);
         refreshToggleNotesButton();
@@ -4948,7 +5024,11 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu();
         } else {
           clampAllFloatingNotes();
-          scheduleFloatingNotesViewportRefresh();
+          if (relaxMatching) {
+            scheduleFloatingNotesViewportRefresh({ relaxMatching: true });
+          } else {
+            scheduleFloatingNotesViewportRefresh();
+          }
         }
       }
 
