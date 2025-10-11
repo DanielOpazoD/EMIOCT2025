@@ -687,6 +687,25 @@ body.reading-mode .reading-mode-exit {
   display: grid;
 }
 
+.color-palette-action {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 4px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  transition: background 0.1s, border-color 0.1s, transform 0.1s;
+}
+
+.color-palette-action:hover {
+  background: #f1f5f9;
+  border-color: rgba(71, 85, 105, 0.8);
+  transform: translateY(-1px);
+}
+
 .color-swatch {
   width: 20px;
   height: 20px;
@@ -2530,6 +2549,13 @@ body.edit-mode .box {
   position: relative;
   overflow-x: auto;
   max-width: 100%
+}
+
+.inline-symbol {
+  display: inline-block;
+  line-height: 1em;
+  vertical-align: baseline;
+  white-space: pre;
 }
 
 table {
