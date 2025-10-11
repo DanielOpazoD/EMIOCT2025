@@ -702,6 +702,46 @@ body.reading-mode .reading-mode-exit {
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
 }
 
+.color-swatch.color-swatch-action {
+  background: #fff;
+  border-style: dashed;
+  font-size: 0.75rem;
+  font-weight: 600;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+}
+
+.color-swatch.color-swatch-action:hover {
+  transform: scale(1.05);
+  border-color: rgba(71, 85, 105, 0.6);
+  box-shadow: none;
+  background: #f8fafc;
+}
+
+.edit-toolbar #highlightBtn {
+  position: relative;
+  --highlight-brush-color: #facc15;
+  --highlight-brush-shadow: rgba(250, 204, 21, 0.28);
+}
+
+.edit-toolbar #highlightBtn.is-highlight-active {
+  border-color: var(--highlight-brush-color);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18), 0 0 0 4px var(--highlight-brush-shadow);
+}
+
+.edit-toolbar #highlightBtn.is-highlight-active::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--highlight-brush-color);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2);
+}
+
 .icon-picker {
   position: fixed;
   z-index: 9999;
@@ -716,6 +756,15 @@ body.reading-mode .reading-mode-exit {
   display: none;
   gap: 4px;
   grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+}
+
+.editor-inline-icon {
+  font-size: 1em;
+  line-height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: baseline;
 }
 
 .icon-picker.show {

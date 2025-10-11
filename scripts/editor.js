@@ -684,6 +684,8 @@ export async function initializeEditor() {
       const textColorPalette = document.getElementById('textColorPalette');
       const highlightBtn = document.getElementById('highlightBtn');
       const textColorBtn = document.getElementById('textColorBtn');
+      const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
+      const fontSizeDecreaseBtn = document.getElementById('fontSizeDecreaseBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
       const insertTableBtn = document.getElementById('insertTableBtn');
@@ -728,6 +730,10 @@ export async function initializeEditor() {
       ];
 
       let copiedFormat = null;
+      let highlightBrushActive = false;
+      let highlightBrushColor = null;
+      let highlightPaletteMode = 'instant';
+      let highlightStopControl = null;
 
       const tableResizers = new WeakMap();
 
@@ -800,7 +806,7 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
-            const inserted = insertTextAtSelection(`${symbol} `);
+            const inserted = insertInlineIcon(symbol);
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
             }
@@ -1021,13 +1027,13 @@ export async function initializeEditor() {
         trigger.setAttribute('aria-expanded', 'false');
 
         const pointerHandler = () => {
-          saveCurrentSelection();
+          saveCurrentSelection({ preserveExisting: true });
         };
 
         const clickHandler = (event) => {
           event.preventDefault();
           event.stopPropagation();
-          saveCurrentSelection();
+          saveCurrentSelection({ preserveExisting: true });
           const picker = ensureIconPicker();
           if (!picker) {
             return;
@@ -1038,7 +1044,7 @@ export async function initializeEditor() {
         const keyHandler = (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            saveCurrentSelection();
+            saveCurrentSelection({ preserveExisting: true });
             toggleIconPicker(trigger);
           }
         };
@@ -1829,10 +1835,13 @@ export async function initializeEditor() {
         savedSelection = null;
       }
 
-      function saveCurrentSelection() {
+      function saveCurrentSelection(options = {}) {
+        const { preserveExisting = false } = options;
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0) {
-          clearSavedSelection();
+          if (!preserveExisting) {
+            clearSavedSelection();
+          }
           return false;
         }
 
@@ -1975,6 +1984,34 @@ export async function initializeEditor() {
         selection.addRange(range);
         clearSavedSelection();
         return textNode;
+      }
+
+      function insertInlineIcon(symbol) {
+        if (typeof symbol !== 'string' || !symbol) {
+          return null;
+        }
+        const selection = ensureEditableSelection();
+        if (!selection || !selection.rangeCount) return null;
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+
+        const iconSpan = document.createElement('span');
+        iconSpan.classList.add('editor-inline-icon');
+        iconSpan.setAttribute('data-inline-icon', 'true');
+        iconSpan.textContent = symbol;
+
+        const trailingSpace = document.createTextNode('\u00A0');
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(iconSpan);
+        fragment.appendChild(trailingSpace);
+
+        range.insertNode(fragment);
+        range.setStartAfter(trailingSpace);
+        range.setEndAfter(trailingSpace);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        clearSavedSelection();
+        return iconSpan;
       }
 
       function normalizeColorToHex(color, fallback = '#ffffff') {
@@ -3067,6 +3104,8 @@ export async function initializeEditor() {
         let selectedCell = null;
         let highlightedColumnIndex = null;
         let currentResizer = null;
+        const TABLE_SHIFT_STEP = 20;
+        const TABLE_SHIFT_LIMIT = 480;
 
         const actionButtons = Array.from(tableMenu.querySelectorAll('[data-action]'));
 
@@ -3134,6 +3173,7 @@ export async function initializeEditor() {
           if (!table.dataset.borderWidth) table.dataset.borderWidth = '1';
           if (!table.dataset.hideVerticalBorders) table.dataset.hideVerticalBorders = 'false';
           if (!table.dataset.hideHorizontalBorders) table.dataset.hideHorizontalBorders = 'false';
+          if (!table.dataset.tableOffsetX) table.dataset.tableOffsetX = '0';
         }
 
         function countColumns(table) {
@@ -3156,6 +3196,7 @@ export async function initializeEditor() {
           const lineHeight = parseFloat(selectedTable.dataset.lineHeight || '1.25');
           const paddingY = parseInt(selectedTable.dataset.paddingY || '4', 10);
           const margin = parseInt(selectedTable.dataset.tableMargin || '6', 10);
+          const offsetX = parseInt(selectedTable.dataset.tableOffsetX || '0', 10) || 0;
           const cells = selectedTable.querySelectorAll('th,td');
           cells.forEach(cell => {
             cell.style.lineHeight = lineHeight.toString();
@@ -3166,6 +3207,7 @@ export async function initializeEditor() {
           selectedTable.style.marginBottom = margin + 'px';
           selectedTable.style.marginLeft = margin + 'px';
           selectedTable.style.marginRight = margin + 'px';
+          selectedTable.style.transform = offsetX !== 0 ? `translateX(${offsetX}px)` : '';
         }
 
         function updateSpacingControls() {
@@ -3505,8 +3547,27 @@ export async function initializeEditor() {
             case 'open-tools':
               openTools();
               break;
+            case 'shift-left':
+              shiftTable('left');
+              break;
+            case 'shift-right':
+              shiftTable('right');
+              break;
           }
           updateMenuState();
+        }
+
+        function shiftTable(direction) {
+          if (!selectedTable) return;
+          const current = parseInt(selectedTable.dataset.tableOffsetX || '0', 10) || 0;
+          const delta = direction === 'left' ? -TABLE_SHIFT_STEP : TABLE_SHIFT_STEP;
+          let next = current + delta;
+          if (!Number.isFinite(next)) {
+            next = 0;
+          }
+          next = Math.max(-TABLE_SHIFT_LIMIT, Math.min(TABLE_SHIFT_LIMIT, next));
+          selectedTable.dataset.tableOffsetX = String(next);
+          applySpacing();
         }
 
         actionButtons.forEach(btn => {
@@ -6977,7 +7038,7 @@ export async function initializeEditor() {
       });
 
       /* === PALETAS DE COLOR MEJORADAS === */
-      function createColorPalette(paletteId, colors, isHighlight) {
+      function createColorPalette(paletteId, colors, isHighlight, options = {}) {
         const palette = document.getElementById(paletteId);
         if (!palette) return;
 
@@ -6994,8 +7055,12 @@ export async function initializeEditor() {
           });
           swatch.addEventListener('click', (e) => {
             e.stopPropagation();
-            applyColor(color, isHighlight);
-            palette.classList.remove('show');
+            if (typeof options.onColorSelect === 'function') {
+              options.onColorSelect(color, { palette, isHighlight, event: e });
+            } else {
+              applyColor(color, isHighlight);
+              palette.classList.remove('show');
+            }
           });
           palette.appendChild(swatch);
         });
@@ -7010,8 +7075,13 @@ export async function initializeEditor() {
         });
         customSwatch.addEventListener('change', (e) => {
           e.stopPropagation();
-          applyColor(e.target.value, isHighlight);
-          palette.classList.remove('show');
+          const value = e.target.value;
+          if (typeof options.onColorSelect === 'function') {
+            options.onColorSelect(value, { palette, isHighlight, event: e, isCustom: true });
+          } else {
+            applyColor(value, isHighlight);
+            palette.classList.remove('show');
+          }
         });
         palette.appendChild(customSwatch);
       }
@@ -7025,17 +7095,151 @@ export async function initializeEditor() {
         }
       }
 
-      function applyColor(color, isHighlight) {
-        if (!restoreSelection()) {
-          alert('Por favor, selecciona el texto primero');
-          return;
+      function ensureHighlightStopVisibility() {
+        if (!highlightStopControl) return;
+        highlightStopControl.hidden = !highlightBrushActive;
+      }
+
+      function getHighlightShadowColor(color) {
+        const fallback = 'rgba(250, 204, 21, 0.28)';
+        if (!color) return fallback;
+        const hex = normalizeColorToHex(color, color);
+        if (!hex || !hex.startsWith('#')) {
+          return fallback;
+        }
+        let normalized = hex;
+        if (hex.length === 4) {
+          normalized = '#' + hex.slice(1).split('').map(ch => ch + ch).join('');
+        }
+        if (normalized.length !== 7) {
+          return fallback;
+        }
+        const r = parseInt(normalized.slice(1, 3), 16);
+        const g = parseInt(normalized.slice(3, 5), 16);
+        const b = parseInt(normalized.slice(5, 7), 16);
+        if ([r, g, b].some(value => Number.isNaN(value))) {
+          return fallback;
+        }
+        return `rgba(${r}, ${g}, ${b}, 0.28)`;
+      }
+
+      function updateHighlightButtonState() {
+        if (!highlightBtn) return;
+        highlightBtn.classList.toggle('is-highlight-active', highlightBrushActive);
+        if (highlightBrushActive && highlightBrushColor) {
+          highlightBtn.style.setProperty('--highlight-brush-color', highlightBrushColor);
+          highlightBtn.style.setProperty('--highlight-brush-shadow', getHighlightShadowColor(highlightBrushColor));
+        } else {
+          highlightBtn.style.removeProperty('--highlight-brush-color');
+          highlightBtn.style.removeProperty('--highlight-brush-shadow');
+        }
+      }
+
+      function setHighlightBrushColor(color, activate = true) {
+        if (!color) return;
+        highlightBrushColor = color;
+        if (activate) {
+          highlightBrushActive = true;
+        }
+        updateHighlightButtonState();
+        ensureHighlightStopVisibility();
+      }
+
+      function deactivateHighlightBrush(options = {}) {
+        const { keepPalette = false } = options;
+        highlightBrushActive = false;
+        highlightBrushColor = options.keepColor ? highlightBrushColor : null;
+        updateHighlightButtonState();
+        ensureHighlightStopVisibility();
+        if (!keepPalette) {
+          highlightPalette?.classList.remove('show');
+        }
+      }
+
+      function openHighlightPalette(anchor, mode = 'instant') {
+        if (!highlightPalette || !anchor) return;
+        highlightPaletteMode = mode;
+        const rect = anchor.getBoundingClientRect();
+        highlightPalette.style.left = `${rect.left}px`;
+        highlightPalette.style.top = `${rect.bottom + 5}px`;
+        textColorPalette?.classList.remove('show');
+        if (highlightStopControl) {
+          highlightStopControl.hidden = mode !== 'brush' || !highlightBrushActive;
+        }
+        highlightPalette.classList.add('show');
+      }
+
+      function handleHighlightColorSelection(color, context = {}) {
+        if (!color) return;
+
+        let applied = false;
+        const mode = highlightPaletteMode;
+
+        if (mode !== 'brush') {
+          if (!savedSelection) {
+            const selection = window.getSelection();
+            if (selection && selection.rangeCount && !selection.isCollapsed) {
+              saveCurrentSelection({ preserveExisting: true });
+            }
+          }
+          if (savedSelection) {
+            applied = applyColor(color, true, { silent: mode === 'edit', preserveSavedSelection: false });
+          }
         }
 
-        const selection = window.getSelection();
-        if (!selection.rangeCount || selection.isCollapsed) {
-          alert('Por favor, selecciona el texto primero');
-          savedSelection = null;
-          return;
+        if (!applied && mode === 'brush') {
+          setHighlightBrushColor(color, true);
+        }
+
+        const palette = context.palette || highlightPalette;
+        palette?.classList.remove('show');
+        ensureHighlightStopVisibility();
+      }
+
+      function isHighlightElement(element) {
+        if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+        if (element.dataset.highlightColor) return true;
+        if (element.style && element.style.backgroundColor) {
+          const inlineBg = element.style.backgroundColor.trim();
+          if (inlineBg && inlineBg !== 'transparent' && inlineBg !== 'rgba(0, 0, 0, 0)') {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function applyColor(color, isHighlight, options = {}) {
+        const {
+          silent = false,
+          selection: explicitSelection = null,
+          skipRestore = false,
+          keepSelection = false,
+          preserveSavedSelection = false
+        } = options;
+
+        let selection = explicitSelection;
+
+        if (!selection) {
+          if (!skipRestore && !restoreSelection()) {
+            if (!silent) {
+              alert('Por favor, selecciona el texto primero');
+            }
+            if (!preserveSavedSelection) {
+              savedSelection = null;
+            }
+            return false;
+          }
+          selection = window.getSelection();
+        }
+
+        if (!selection || !selection.rangeCount || selection.isCollapsed) {
+          if (!silent) {
+            alert('Por favor, selecciona el texto primero');
+          }
+          if (!preserveSavedSelection) {
+            savedSelection = null;
+          }
+          return false;
         }
 
         const styleWithCss = supportsCommand('styleWithCSS');
@@ -7068,6 +7272,7 @@ export async function initializeEditor() {
           const wrapper = document.createElement('span');
           if (isHighlight) {
             wrapper.style.backgroundColor = color;
+            wrapper.dataset.highlightColor = color;
           } else {
             wrapper.style.color = color;
           }
@@ -7080,17 +7285,36 @@ export async function initializeEditor() {
           }
         }
 
-        selection.removeAllRanges();
-        savedSelection = null;
+        if (!keepSelection) {
+          selection.removeAllRanges();
+        }
+        if (!preserveSavedSelection) {
+          savedSelection = null;
+        }
+        return true;
       }
 
-      createColorPalette('highlightPalette', highlightColors, true);
+      createColorPalette('highlightPalette', highlightColors, true, { onColorSelect: handleHighlightColorSelection });
+      if (highlightPalette && !highlightStopControl) {
+        highlightStopControl = document.createElement('button');
+        highlightStopControl.type = 'button';
+        highlightStopControl.className = 'color-swatch color-swatch-action';
+        highlightStopControl.title = 'Detener destacado continuo';
+        highlightStopControl.setAttribute('aria-label', 'Detener destacado continuo');
+        highlightStopControl.textContent = '⏹️';
+        highlightStopControl.addEventListener('click', (event) => {
+          event.stopPropagation();
+          deactivateHighlightBrush();
+        });
+        highlightPalette.appendChild(highlightStopControl);
+        ensureHighlightStopVisibility();
+      }
       createColorPalette('textColorPalette', textColors, false);
 
       const handleColorButtonPointerDown = (event) => {
         if (event.pointerType !== 'mouse' || event.button === 0) {
           event.preventDefault();
-          saveCurrentSelection();
+          saveCurrentSelection({ preserveExisting: true });
         }
       };
 
@@ -7099,30 +7323,91 @@ export async function initializeEditor() {
 
       highlightBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
+        const selection = window.getSelection();
+        const hasSelection = selection && selection.rangeCount && !selection.isCollapsed;
 
-        if (!saveCurrentSelection()) {
-          alert('Por favor, selecciona el texto que deseas destacar');
+        if (hasSelection) {
+          saveCurrentSelection({ preserveExisting: true });
+          openHighlightPalette(e.currentTarget, 'instant');
+        } else {
+          if (!highlightBrushActive) {
+            highlightBrushActive = true;
+            updateHighlightButtonState();
+          }
+          openHighlightPalette(e.currentTarget, 'brush');
+        }
+      });
+
+      const highlightBrushKeyTriggers = new Set([
+        'Shift', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'
+      ]);
+
+      function scheduleHighlightBrushApplication() {
+        if (!highlightBrushActive || !highlightBrushColor) return;
+        if (highlightPalette?.classList.contains('show') && highlightPaletteMode !== 'brush') {
           return;
         }
+        setTimeout(() => {
+          if (!highlightBrushActive || !highlightBrushColor) return;
+          const selection = window.getSelection();
+          if (!selection || !selection.rangeCount || selection.isCollapsed) return;
+          const content = selection.toString();
+          if (!content || !content.trim()) return;
+          const applied = applyColor(highlightBrushColor, true, {
+            silent: true,
+            selection,
+            skipRestore: true,
+            keepSelection: true,
+            preserveSavedSelection: true
+          });
+          if (applied) {
+            if (typeof selection.collapseToEnd === 'function') {
+              selection.collapseToEnd();
+            } else {
+              const lastRange = selection.getRangeAt(selection.rangeCount - 1);
+              const collapseRange = document.createRange();
+              collapseRange.setStart(lastRange.endContainer, lastRange.endOffset);
+              collapseRange.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(collapseRange);
+            }
+            savedSelection = null;
+          }
+        }, 0);
+      }
 
-        const btn = e.currentTarget;
-        const btnRect = btn.getBoundingClientRect();
+      document.addEventListener('pointerup', scheduleHighlightBrushApplication);
+      document.addEventListener('keyup', (event) => {
+        if (!highlightBrushActive) return;
+        if (highlightBrushKeyTriggers.has(event.key)) {
+          scheduleHighlightBrushApplication();
+        }
+      });
 
-        highlightPalette.style.left = btnRect.left + 'px';
-        highlightPalette.style.top = (btnRect.bottom + 5) + 'px';
-
-        textColorPalette.classList.remove('show');
-        highlightPalette.classList.add('show');
+      document.addEventListener('dblclick', (event) => {
+        if (!highlightPalette) return;
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (highlightPalette.contains(target)) return;
+        const highlightElement = target.closest('[data-highlight-color], span[style*="background"], font[style*="background"]');
+        if (!highlightElement || !isHighlightElement(highlightElement)) return;
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(highlightElement);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        saveCurrentSelection({ preserveExisting: true });
+        openHighlightPalette(highlightElement, 'edit');
       });
 
       textColorBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        if (!saveCurrentSelection()) {
+        if (!saveCurrentSelection({ preserveExisting: true })) {
           alert('Por favor, selecciona el texto al que deseas cambiar el color');
           return;
         }
-        
+
         const btn = e.currentTarget;
         const btnRect = btn.getBoundingClientRect();
         
@@ -7227,11 +7512,12 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('click', (e) => {
-        if (!e.target.closest('#highlightBtn') && !e.target.closest('#highlightPalette')) {
+        if (highlightPalette && !e.target.closest('#highlightBtn') && !e.target.closest('#highlightPalette')) {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
             savedSelection = null;
+            ensureHighlightStopVisibility();
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
@@ -8586,6 +8872,90 @@ export async function initializeEditor() {
         applyIndentSnapshot(targets, delta);
       }
 
+      const FONT_SCALE_STEP = 0.12;
+      const FONT_SCALE_MIN = 8;
+      const FONT_SCALE_MAX = 96;
+
+      function resolveFontSizeWrapper(node) {
+        if (!node) return null;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          return node.closest('[data-font-size-wrapper="true"]');
+        }
+        if (node.parentElement) {
+          return node.parentElement.closest('[data-font-size-wrapper="true"]');
+        }
+        return null;
+      }
+
+      function computeFontSizeReference(range, wrapper) {
+        if (wrapper) {
+          return wrapper;
+        }
+        if (range.startContainer.nodeType === Node.ELEMENT_NODE) {
+          return range.startContainer;
+        }
+        if (range.startContainer.parentElement) {
+          return range.startContainer.parentElement;
+        }
+        return document.activeElement;
+      }
+
+      function calculateScaledFontSize(reference, increase) {
+        if (!reference) return null;
+        const computed = window.getComputedStyle(reference);
+        const currentSize = parseFloat(computed.fontSize || '0') || 14;
+        const ratio = increase ? (1 + FONT_SCALE_STEP) : (1 - FONT_SCALE_STEP);
+        let next = Math.round(currentSize * ratio);
+        next = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, next));
+        return next;
+      }
+
+      function adjustSelectionFontSize(increase) {
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount || selection.isCollapsed) {
+          alert('Selecciona el texto que deseas ajustar.');
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const startWrapper = resolveFontSizeWrapper(range.startContainer);
+        const endWrapper = resolveFontSizeWrapper(range.endContainer);
+        let targetWrapper = null;
+
+        if (startWrapper && startWrapper === endWrapper) {
+          targetWrapper = startWrapper;
+        }
+
+        const reference = computeFontSizeReference(range, targetWrapper);
+        const newSize = calculateScaledFontSize(reference, increase);
+        if (!newSize) {
+          alert('No se pudo calcular un tamaño de fuente válido.');
+          return false;
+        }
+
+        if (!targetWrapper) {
+          const span = document.createElement('span');
+          span.dataset.fontSizeWrapper = 'true';
+          span.style.fontSize = `${newSize}px`;
+          try {
+            range.surroundContents(span);
+          } catch (error) {
+            const fragment = range.extractContents();
+            span.appendChild(fragment);
+            range.insertNode(span);
+          }
+          targetWrapper = span;
+        } else {
+          targetWrapper.style.fontSize = `${newSize}px`;
+        }
+
+        const updatedRange = document.createRange();
+        updatedRange.selectNodeContents(targetWrapper);
+        selection.removeAllRanges();
+        selection.addRange(updatedRange);
+        return true;
+      }
+
       editBtn?.addEventListener('click', toggleEditMode);
 
       document.getElementById('undoBtn')?.addEventListener('click', () => execCmd('undo'));
@@ -8596,6 +8966,14 @@ export async function initializeEditor() {
           execCmd('fontSize', this.value);
           this.value = '';
         }
+      });
+
+      fontSizeIncreaseBtn?.addEventListener('click', () => {
+        adjustSelectionFontSize(true);
+      });
+
+      fontSizeDecreaseBtn?.addEventListener('click', () => {
+        adjustSelectionFontSize(false);
       });
       
       document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
