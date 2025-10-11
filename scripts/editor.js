@@ -798,6 +798,9 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
+            if (!restoreSelection()) {
+              ensureEditableSelection();
+            }
             const inserted = insertTextAtSelection(`${symbol} `);
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
