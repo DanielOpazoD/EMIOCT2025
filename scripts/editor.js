@@ -35,6 +35,10 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let pendingInsertionSnapshot = null;
+      let activeSelectionMarkerSnapshot = null;
+      const SELECTION_MARKER_ATTR = 'data-selection-marker-id';
+      const SELECTION_FOCUS_ATTR = 'data-selection-focus-id';
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -329,6 +333,25 @@ export async function initializeEditor() {
       const imageWidthIncreaseBtn = document.getElementById('imageWidthIncrease');
       const imageWidthDecreaseBtn = document.getElementById('imageWidthDecrease');
       const widthDisplay = document.getElementById('widthDisplay');
+      let imageResizeHandle = document.getElementById('imageResizeHandle');
+      if (!imageResizeHandle) {
+        imageResizeHandle = document.createElement('button');
+        imageResizeHandle.type = 'button';
+        imageResizeHandle.id = 'imageResizeHandle';
+        imageResizeHandle.className = 'image-resize-handle';
+        imageResizeHandle.setAttribute('aria-label', 'Arrastra para ajustar el tamaño de la imagen');
+        imageResizeHandle.title = 'Arrastra para ajustar el tamaño de la imagen';
+        imageResizeHandle.innerHTML = '<span aria-hidden="true">◢</span>';
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+        imageResizeHandle.tabIndex = -1;
+      }
+      if (!imageResizeHandle.isConnected) {
+        const handleHost = document.body || document.documentElement;
+        handleHost?.appendChild(imageResizeHandle);
+      }
+      let imageResizeActive = false;
+      let imageResizeStartX = 0;
+      let imageResizeStartWidth = 0;
       const imageCropModal = document.getElementById('imageCropModal');
       const imageCropStage = document.getElementById('imageCropStage');
       const imageCropPreview = document.getElementById('imageCropPreview');
@@ -1884,6 +1907,175 @@ export async function initializeEditor() {
         return null;
       }
 
+      function ensureSelectionFocusId(element) {
+        if (!(element instanceof HTMLElement)) {
+          return null;
+        }
+        if (!element.hasAttribute(SELECTION_FOCUS_ATTR)) {
+          element.setAttribute(SELECTION_FOCUS_ATTR, generateUniqueId('selection-focus'));
+        }
+        return element.getAttribute(SELECTION_FOCUS_ATTR);
+      }
+
+      function createSelectionMarkerNode(id) {
+        const marker = document.createElement('span');
+        marker.setAttribute('aria-hidden', 'true');
+        marker.setAttribute(SELECTION_MARKER_ATTR, id);
+        marker.dataset.selectionMarker = 'true';
+        marker.style.position = 'absolute';
+        marker.style.width = '0px';
+        marker.style.height = '0px';
+        marker.style.padding = '0';
+        marker.style.margin = '0';
+        marker.style.overflow = 'hidden';
+        marker.style.pointerEvents = 'none';
+        marker.style.lineHeight = '0';
+        marker.style.opacity = '0';
+        marker.style.userSelect = 'none';
+        marker.style.whiteSpace = 'nowrap';
+        return marker;
+      }
+
+      function removeSelectionMarkerById(id) {
+        if (!id) {
+          return;
+        }
+        const marker = document.querySelector(`[${SELECTION_MARKER_ATTR}="${id}"]`);
+        if (marker && marker.parentNode) {
+          marker.parentNode.removeChild(marker);
+        }
+      }
+
+      function clearSelectionMarkerSnapshot(markerSnapshot) {
+        if (!markerSnapshot) {
+          return;
+        }
+        removeSelectionMarkerById(markerSnapshot.startId);
+        if (!markerSnapshot.collapsed && markerSnapshot.endId && markerSnapshot.endId !== markerSnapshot.startId) {
+          removeSelectionMarkerById(markerSnapshot.endId);
+        }
+        if (activeSelectionMarkerSnapshot === markerSnapshot) {
+          activeSelectionMarkerSnapshot = null;
+        }
+      }
+
+      function createSelectionMarkerSnapshotFromRange(range) {
+        if (!range || !isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
+          return null;
+        }
+
+        clearSelectionMarkerSnapshot(activeSelectionMarkerSnapshot);
+
+        const collapsed = range.collapsed;
+        const startId = generateUniqueId('selection-marker');
+        const startMarker = createSelectionMarkerNode(startId);
+        const startRange = range.cloneRange();
+        startRange.collapse(true);
+        startRange.insertNode(startMarker);
+
+        let endId = startId;
+        if (!collapsed) {
+          endId = generateUniqueId('selection-marker');
+          const endMarker = createSelectionMarkerNode(endId);
+          const endRange = range.cloneRange();
+          endRange.collapse(false);
+          endRange.insertNode(endMarker);
+        }
+
+        const focusElement = resolveEditableAncestor(startMarker)
+          || resolveEditableAncestor(range.commonAncestorContainer)
+          || startMarker.parentElement;
+        const focusId = ensureSelectionFocusId(focusElement);
+
+        let container = focusElement;
+        if (container && typeof container.closest === 'function') {
+          const contextual = container.closest('.floating-note-content, .floating-note, .page, .magic-page');
+          if (contextual) {
+            container = contextual;
+          }
+        }
+        const pageId = ensureSelectionFocusId(container);
+
+        const snapshot = {
+          startId,
+          endId,
+          collapsed,
+          focusId: focusId || null,
+          pageId: pageId || null
+        };
+
+        activeSelectionMarkerSnapshot = snapshot;
+        return snapshot;
+      }
+
+      function restoreSelectionFromMarker(markerSnapshot) {
+        if (!markerSnapshot) {
+          return false;
+        }
+
+        const startMarker = document.querySelector(`[${SELECTION_MARKER_ATTR}="${markerSnapshot.startId}"]`);
+        if (!startMarker) {
+          clearSelectionMarkerSnapshot(markerSnapshot);
+          return false;
+        }
+
+        let endMarker = startMarker;
+        if (!markerSnapshot.collapsed) {
+          endMarker = document.querySelector(`[${SELECTION_MARKER_ATTR}="${markerSnapshot.endId}"]`);
+          if (!endMarker) {
+            startMarker.remove();
+            clearSelectionMarkerSnapshot(markerSnapshot);
+            return false;
+          }
+        }
+
+        const range = document.createRange();
+        range.setStartBefore(startMarker);
+        if (markerSnapshot.collapsed) {
+          range.collapse(true);
+        } else {
+          range.setEndBefore(endMarker);
+        }
+
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        const focusSelector = markerSnapshot.focusId
+          ? `[${SELECTION_FOCUS_ATTR}="${markerSnapshot.focusId}"]`
+          : null;
+        const pageSelector = markerSnapshot.pageId
+          ? `[${SELECTION_FOCUS_ATTR}="${markerSnapshot.pageId}"]`
+          : null;
+
+        let focusElement = focusSelector ? document.querySelector(focusSelector) : null;
+        if ((!focusElement || !document.contains(focusElement)) && pageSelector) {
+          focusElement = document.querySelector(pageSelector);
+        }
+        if (!focusElement || !document.contains(focusElement)) {
+          focusElement = resolveEditableAncestor(startMarker) || resolveEditableAncestor(selection.anchorNode);
+        }
+
+        if (focusElement && typeof focusElement.focus === 'function') {
+          try {
+            focusElement.focus({ preventScroll: true });
+          } catch (err) {
+            focusElement.focus();
+          }
+        }
+
+        if (!markerSnapshot.collapsed && endMarker !== startMarker) {
+          endMarker.remove();
+        }
+        startMarker.remove();
+
+        if (activeSelectionMarkerSnapshot === markerSnapshot) {
+          activeSelectionMarkerSnapshot = null;
+        }
+
+        return true;
+      }
+
       function clearSavedSelection() {
         savedSelection = null;
       }
@@ -1924,6 +2116,69 @@ export async function initializeEditor() {
             ? snapshot.pageTarget
             : null
         };
+      }
+
+      function buildPendingInsertionSnapshotFromSelection(selection) {
+        if (!selection || selection.rangeCount === 0) {
+          return null;
+        }
+
+        const fallbackSnapshot = createSelectionSnapshot(selection);
+        const markerSnapshot = createSelectionMarkerSnapshotFromRange(selection.getRangeAt(0));
+
+        if (!fallbackSnapshot && !markerSnapshot) {
+          return null;
+        }
+
+        return {
+          marker: markerSnapshot || null,
+          fallback: fallbackSnapshot || null
+        };
+      }
+
+      function capturePendingInsertionSnapshot() {
+        if (pendingInsertionSnapshot?.marker) {
+          clearSelectionMarkerSnapshot(pendingInsertionSnapshot.marker);
+        }
+        pendingInsertionSnapshot = null;
+
+        let snapshot = null;
+        const liveSelection = window.getSelection();
+
+        if (isSelectionWithinEditable(liveSelection) && liveSelection?.rangeCount) {
+          snapshot = buildPendingInsertionSnapshotFromSelection(liveSelection);
+        }
+
+        if (!snapshot && savedSelection) {
+          if (restoreSelectionSnapshot(savedSelection, { updateSnapshot: false })) {
+            const restoredSelection = window.getSelection();
+            if (isSelectionWithinEditable(restoredSelection) && restoredSelection.rangeCount > 0) {
+              snapshot = buildPendingInsertionSnapshotFromSelection(restoredSelection);
+            }
+          }
+        }
+
+        if (!snapshot) {
+          if (savedSelection) {
+            const fallbackClone = cloneSelectionSnapshot(savedSelection);
+            if (fallbackClone) {
+              pendingInsertionSnapshot = { marker: null, fallback: fallbackClone };
+              return true;
+            }
+          }
+          return false;
+        }
+
+        if (snapshot.fallback) {
+          savedSelection = cloneSelectionSnapshot(snapshot.fallback);
+        }
+
+        pendingInsertionSnapshot = {
+          marker: snapshot.marker || null,
+          fallback: snapshot.fallback ? cloneSelectionSnapshot(snapshot.fallback) : null
+        };
+
+        return true;
       }
 
       function restoreSelectionSnapshot(snapshot, options = {}) {
@@ -2012,6 +2267,39 @@ export async function initializeEditor() {
         return !!iconPickerSelectionSnapshot;
       }
 
+      function consumePendingInsertionSelection() {
+        if (pendingInsertionSnapshot) {
+          const snapshot = pendingInsertionSnapshot;
+          pendingInsertionSnapshot = null;
+
+          let selection = null;
+          let restored = false;
+
+          if (snapshot.marker) {
+            restored = restoreSelectionFromMarker(snapshot.marker);
+            if (restored) {
+              selection = window.getSelection();
+            } else {
+              clearSelectionMarkerSnapshot(snapshot.marker);
+            }
+          }
+
+          if (!restored && snapshot.fallback) {
+            const fallbackClone = cloneSelectionSnapshot(snapshot.fallback);
+            if (fallbackClone && restoreSelectionSnapshot(fallbackClone, { updateSnapshot: false })) {
+              selection = window.getSelection();
+              restored = isSelectionWithinEditable(selection);
+            }
+          }
+
+          if (restored && selection && isSelectionWithinEditable(selection)) {
+            return selection;
+          }
+        }
+
+        return resolveSelectionForInsertion();
+      }
+
       function clearIconPickerSelectionSnapshot() {
         iconPickerSelectionSnapshot = null;
       }
@@ -2068,8 +2356,13 @@ export async function initializeEditor() {
         return null;
       }
 
-      function insertNodeAtSelection(node) {
-        const selection = resolveSelectionForInsertion();
+      function insertNodeAtSelection(node, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -2082,8 +2375,13 @@ export async function initializeEditor() {
         return node;
       }
 
-      function insertHtmlAtSelection(html) {
-        const selection = resolveSelectionForInsertion();
+      function insertHtmlAtSelection(html, options = {}) {
+        const { selectionOverride = null } = options;
+
+        let selection = selectionOverride;
+        if (!selection || !selection.rangeCount || !isSelectionWithinEditable(selection)) {
+          selection = resolveSelectionForInsertion();
+        }
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -2185,6 +2483,10 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!isSelectionWithinEditable(selection)) {
           return;
+        }
+        if (activeSelectionMarkerSnapshot) {
+          clearSelectionMarkerSnapshot(activeSelectionMarkerSnapshot);
+          pendingInsertionSnapshot = null;
         }
         saveCurrentSelection();
       });
@@ -4029,6 +4331,10 @@ export async function initializeEditor() {
       function hideModal() {
         modalOverlay.classList.remove('show');
         modalContent.innerHTML = '';
+        if (activeSelectionMarkerSnapshot) {
+          clearSelectionMarkerSnapshot(activeSelectionMarkerSnapshot);
+        }
+        pendingInsertionSnapshot = null;
       }
 
       modalOverlay.addEventListener('click', (e) => {
@@ -4472,6 +4778,57 @@ export async function initializeEditor() {
         repositionImageToolbar();
       }
 
+      function hideImageResizeHandle() {
+        if (!imageResizeHandle) {
+          return;
+        }
+        imageResizeHandle.classList.remove('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'true');
+      }
+
+      function positionImageResizeHandle(img) {
+        if (!imageResizeHandle) {
+          return;
+        }
+        if (!img) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        if (!rect || (!rect.width && !rect.height)) {
+          hideImageResizeHandle();
+          return;
+        }
+
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const handleRect = imageResizeHandle.getBoundingClientRect();
+        const handleWidth = handleRect.width || 18;
+        const handleHeight = handleRect.height || 18;
+
+        let left = rect.left - (handleWidth / 2) + 8;
+        let top = rect.bottom - (handleHeight / 2) - 8;
+
+        const minLeft = 4;
+        const maxLeft = Math.max(minLeft, viewportWidth - handleWidth - 4);
+        const minTop = 4;
+        const maxTop = Math.max(minTop, viewportHeight - handleHeight - 4);
+
+        if (Number.isFinite(left)) {
+          left = Math.min(Math.max(minLeft, left), maxLeft);
+          imageResizeHandle.style.left = Math.round(left) + 'px';
+        }
+
+        if (Number.isFinite(top)) {
+          top = Math.min(Math.max(minTop, top), maxTop);
+          imageResizeHandle.style.top = Math.round(top) + 'px';
+        }
+
+        imageResizeHandle.classList.add('show');
+        imageResizeHandle.setAttribute('aria-hidden', 'false');
+      }
+
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
 
@@ -4481,28 +4838,79 @@ export async function initializeEditor() {
         const toolbarWidth = imageToolbar.offsetWidth || 240;
         const toolbarHeight = imageToolbar.offsetHeight || 160;
 
-        let left = rect.left;
-        let top = rect.top - toolbarHeight - 10;
+        const effectiveWidth = rect.width || getImageWidthPx(img) || toolbarWidth;
+        const effectiveHeight = rect.height || img.naturalHeight || toolbarHeight;
 
-        if (top < 10) {
-          top = rect.bottom + 10;
+        const centerX = rect.left + (effectiveWidth / 2);
+        const centerY = rect.top + (effectiveHeight / 2);
+
+        if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) {
+          return;
         }
 
-        if (top + toolbarHeight > window.innerHeight - 10) {
-          top = Math.max(10, window.innerHeight - toolbarHeight - 10);
-        }
+        imageToolbar.style.left = Math.round(centerX) + 'px';
+        imageToolbar.style.top = Math.round(centerY) + 'px';
 
-        if (left + toolbarWidth > window.innerWidth - 10) {
-          left = window.innerWidth - toolbarWidth - 10;
-        }
-
-        if (left < 10) {
-          left = 10;
-        }
-
-        imageToolbar.style.left = left + 'px';
-        imageToolbar.style.top = top + 'px';
+        positionImageResizeHandle(img);
       }
+
+      function finishImageResize(event) {
+        if (!imageResizeActive) {
+          return;
+        }
+        if (event?.preventDefault) {
+          event.preventDefault();
+        }
+        if (event?.pointerId != null && imageResizeHandle && typeof imageResizeHandle.releasePointerCapture === 'function' && typeof imageResizeHandle.hasPointerCapture === 'function' && imageResizeHandle.hasPointerCapture(event.pointerId)) {
+          try {
+            imageResizeHandle.releasePointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeActive = false;
+        imageResizeHandle?.classList.remove('dragging');
+        repositionImageToolbar();
+      }
+
+      imageResizeHandle?.addEventListener('pointerdown', (event) => {
+        if (!isEditMode || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        imageResizeActive = true;
+        imageResizeStartX = event.clientX;
+        imageResizeStartWidth = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || selectedImage.getBoundingClientRect().width || IMAGE_MIN_WIDTH;
+        if (typeof imageResizeHandle.setPointerCapture === 'function' && event.pointerId != null) {
+          try {
+            imageResizeHandle.setPointerCapture(event.pointerId);
+          } catch (err) {
+            /* noop */
+          }
+        }
+        imageResizeHandle.classList.add('dragging');
+      });
+
+      imageResizeHandle?.addEventListener('pointermove', (event) => {
+        if (!imageResizeActive || !selectedImage) {
+          return;
+        }
+        event.preventDefault();
+        const deltaX = imageResizeStartX - event.clientX;
+        const proposedWidth = imageResizeStartWidth + deltaX;
+        setImageWidthPx(selectedImage, proposedWidth);
+        updateWidthDisplayForImage(selectedImage);
+        updateToolbarPosition(selectedImage);
+      });
+
+      imageResizeHandle?.addEventListener('pointerup', finishImageResize);
+      imageResizeHandle?.addEventListener('pointercancel', finishImageResize);
+      imageResizeHandle?.addEventListener('pointerleave', (event) => {
+        if (imageResizeActive) {
+          finishImageResize(event);
+        }
+      });
 
       function updateToolbarState(img) {
         if (!img) return;
@@ -4623,6 +5031,8 @@ export async function initializeEditor() {
       function repositionImageToolbar() {
         if (selectedImage) {
           updateToolbarPosition(selectedImage);
+        } else {
+          hideImageResizeHandle();
         }
       }
 
@@ -4778,11 +5188,13 @@ export async function initializeEditor() {
       }
 
       function hideImageToolbar() {
+        finishImageResize();
         if (selectedImage) {
           selectedImage.classList.remove('selected-image');
           selectedImage = null;
         }
         imageToolbar.classList.remove('show');
+        hideImageResizeHandle();
         if (cropImageBtn) {
           cropImageBtn.disabled = true;
         }
@@ -4792,7 +5204,7 @@ export async function initializeEditor() {
         if (isEditMode && e.target.tagName === 'IMG') {
           e.preventDefault();
           showImageToolbar(e.target);
-        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
+        } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure') && !e.target.closest('#imageResizeHandle')) {
           hideImageToolbar();
         }
 
@@ -8091,42 +8503,42 @@ export async function initializeEditor() {
 
       /* === PLANTILLAS === */
       insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTemplateBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertTableBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
       insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+        capturePendingInsertionSnapshot();
       });
 
       insertCollapseCardBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          capturePendingInsertionSnapshot();
         }
       });
 
@@ -8142,6 +8554,7 @@ export async function initializeEditor() {
             selection.removeAllRanges();
             selection.addRange(range);
             saveCurrentSelection();
+            capturePendingInsertionSnapshot();
           }
         }
 
@@ -8230,7 +8643,8 @@ export async function initializeEditor() {
           card.addEventListener('click', () => {
             const block = createTemplateBlock(template);
             if (!block) return;
-            const insertedBlock = insertNodeAtSelection(block);
+            const selectionForInsert = consumePendingInsertionSelection();
+            const insertedBlock = insertNodeAtSelection(block, { selectionOverride: selectionForInsert });
             if (!insertedBlock) {
               alert('Selecciona un área editable antes de insertar una plantilla.');
               return;
@@ -8247,7 +8661,8 @@ export async function initializeEditor() {
       insertCollapseCardBtn?.addEventListener('click', () => {
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
-        const insertedCard = insertNodeAtSelection(card);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedCard = insertNodeAtSelection(card, { selectionOverride: selectionForInsert });
         if (!insertedCard) {
           alert('Selecciona un área editable antes de insertar la tarjeta.');
           return;
@@ -9477,7 +9892,8 @@ export async function initializeEditor() {
           document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
-              const insertedNode = insertHtmlAtSelection(htmlCode);
+              const selectionForInsert = consumePendingInsertionSelection();
+              const insertedNode = insertHtmlAtSelection(htmlCode, { selectionOverride: selectionForInsert });
               if (insertedNode) {
                 hideModal();
               } else {
@@ -9565,7 +9981,8 @@ export async function initializeEditor() {
         }
         tableHTML += '</tbody></table></div>';
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
+        const selectionForInsert = consumePendingInsertionSelection();
+        const insertedNode = insertHtmlAtSelection(tableHTML, { selectionOverride: selectionForInsert });
         if (insertedNode) {
           hideModal();
         } else {
