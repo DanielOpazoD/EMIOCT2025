@@ -1719,30 +1719,93 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
+      function getEditableAncestor(node) {
+        let current = node;
+        while (current) {
+          if (current.nodeType === Node.ELEMENT_NODE && current.isContentEditable) {
+            return current;
+          }
+          current = current.parentNode;
+        }
+        return null;
+      }
+
+      function clearSavedSelection() {
+        savedSelection = null;
+      }
+
       function saveCurrentSelection() {
         const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
-          return true;
+        if (!selection || selection.rangeCount === 0) {
+          clearSavedSelection();
+          return false;
         }
-        return false;
+
+        const range = selection.getRangeAt(0);
+        if (!range) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const activeEditable = document.activeElement && document.activeElement.isContentEditable
+          ? document.activeElement
+          : null;
+        const rangeEditable = getEditableAncestor(range.startContainer) || getEditableAncestor(range.endContainer);
+        const focusTarget = activeEditable || rangeEditable;
+        const page = focusTarget?.closest?.('.page') || rangeEditable?.closest?.('.page') || null;
+
+        savedSelection = {
+          range: range.cloneRange(),
+          focusTarget: focusTarget && focusTarget.isConnected ? focusTarget : null,
+          page: page && page.isConnected ? page : null
+        };
+
+        return true;
       }
 
       function restoreSelection() {
-        if (savedSelection) {
-          if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
-            return false;
-          }
-          const selection = window.getSelection();
-          selection.removeAllRanges();
+        if (!savedSelection || !savedSelection.range) {
+          return false;
+        }
+
+        const { range, focusTarget, page } = savedSelection;
+        const startNode = range.startContainer;
+        const endNode = range.endContainer;
+
+        if (!document.contains(startNode) || !document.contains(endNode)) {
+          clearSavedSelection();
+          return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection) {
+          return false;
+        }
+
+        const fallbackEditable = getEditableAncestor(startNode) || getEditableAncestor(endNode);
+        const target = (focusTarget && focusTarget.isConnected ? focusTarget : null)
+          || (page && page.isConnected ? page : null)
+          || fallbackEditable;
+
+        if (target && typeof target.focus === 'function') {
           try {
-            selection.addRange(savedSelection);
-            return true;
+            target.focus({ preventScroll: true });
           } catch (err) {
-            savedSelection = null;
+            target.focus();
           }
         }
+
+        selection.removeAllRanges();
+        const restoredRange = range.cloneRange();
+
+        try {
+          selection.addRange(restoredRange);
+          savedSelection.range = restoredRange.cloneRange();
+          return true;
+        } catch (err) {
+          clearSavedSelection();
+        }
+
         return false;
       }
 
@@ -1784,7 +1847,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1866,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1884,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
@@ -6717,7 +6780,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         hideTemplateToolbar();
       });
 
@@ -6898,7 +6961,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) {
           alert('Por favor, selecciona el texto primero');
-          savedSelection = null;
+          clearSavedSelection();
           return;
         }
 
@@ -6945,7 +7008,7 @@ export async function initializeEditor() {
         }
 
         selection.removeAllRanges();
-        savedSelection = null;
+        clearSavedSelection();
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
@@ -7085,14 +7148,14 @@ export async function initializeEditor() {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
       });
@@ -7875,7 +7938,7 @@ export async function initializeEditor() {
         globalTopicCounter = 1;
         currentPageRef = null;
         currentSectionId = '';
-        savedSelection = null;
+        clearSavedSelection();
         const magicContainer = document.querySelector('.magic-content-container');
         if (magicContainer) {
           magicContainer.innerHTML = '';
@@ -8257,7 +8320,7 @@ export async function initializeEditor() {
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
           hideIconPicker();
-          savedSelection = null;
+          clearSavedSelection();
         }
       });
 
@@ -9384,7 +9447,7 @@ ${inlineStyles}
     }
     hideImageToolbar();
     hideTemplateToolbar();
-    savedSelection = null;
+    clearSavedSelection();
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
     scheduleIconPickerRebind(150);
