@@ -758,7 +758,7 @@ export async function initializeEditor() {
         iconPickerTrigger = null;
       }
 
-      function scheduleIconPickerRebind(delay = 0) {
+      function scheduleIconPickerRebind(delay = 0, sourceLabel = '') {
         if (iconPickerRebindTimer) {
           clearTimeout(iconPickerRebindTimer);
           iconPickerRebindTimer = null;
@@ -775,6 +775,9 @@ export async function initializeEditor() {
           raf(() => {
             raf(() => {
               bindIconPickerTrigger();
+              if (sourceLabel) {
+                console.log(sourceLabel);
+              }
             });
           });
         }, waitTime);
@@ -9180,6 +9183,8 @@ ${inlineStyles}
     }
 
     closeTopicNotesPopover();
+    detachIconPickerTrigger();
+    hideIconPicker();
 
     const rawShift = Number.parseFloat(data.documentShift);
     if (Number.isFinite(rawShift)) {
@@ -9387,7 +9392,7 @@ ${inlineStyles}
     savedSelection = null;
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
-    scheduleIconPickerRebind(150);
+    scheduleIconPickerRebind(0, 'Icon picker reconectado después de importar secciones');
     window.scrollTo({ top: 0 });
   }
 
@@ -9640,6 +9645,9 @@ ${inlineStyles}
       alert(`Se ignoraron archivos no compatibles: ${ignoredFiles.map(f => f.name).join(', ')}`);
     }
 
+    detachIconPickerTrigger();
+    hideIconPicker();
+
     const existingTopicIds = new Set(pages.map(p => p.dataset.topicId).filter(Boolean));
 
     try {
@@ -9678,6 +9686,7 @@ ${inlineStyles}
       alert('Error al cargar archivos: ' + error.message);
     } finally {
       e.target.value = '';
+      scheduleIconPickerRebind(0, 'Icon picker reconectado después de cargar HTML');
     }
   });
 
