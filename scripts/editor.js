@@ -4689,37 +4689,14 @@ export async function initializeEditor() {
         const { relaxMatching = false } = options;
         const currentTopic = getCurrentTopicId();
         const noteTopicId = resolveNoteTopicId(note);
-        let shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
-        let viewportState = null;
+
+        const shouldShow = currentTopic && noteTopicId ? noteTopicId === currentTopic : false;
 
         if (shouldShow) {
-          viewportState = getActiveTopicViewportState();
-          if (!viewportState) {
-            shouldShow = true;
-          } else if (!relaxMatching) {
-            const storedOffset = Number.parseFloat(note.dataset.pageOffsetTop || '');
-            const storedRelative = Number.parseFloat(note.dataset.relativeTop || '');
-            let positionMatches = true;
-
-            if (Number.isFinite(storedOffset)) {
-              const delta = Math.abs(viewportState.viewportTopOffset - storedOffset);
-              const tolerance = Math.max(180, viewportState.viewportHeight * 0.45);
-              positionMatches = delta <= tolerance;
-            } else if (Number.isFinite(storedRelative)) {
-              const deltaRatio = Math.abs(viewportState.relativeCenter - storedRelative);
-              const ratioTolerance = Math.max(
-                0.18,
-                (viewportState.viewportHeight / viewportState.pageHeight) * 1.25
-              );
-              positionMatches = deltaRatio <= ratioTolerance;
-            }
-
-            shouldShow = positionMatches;
+          const viewportState = getActiveTopicViewportState();
+          if (viewportState) {
+            syncNoteViewportAnchors(note, viewportState, { force: relaxMatching });
           }
-        }
-
-        if (shouldShow && viewportState) {
-          syncNoteViewportAnchors(note, viewportState, { force: relaxMatching });
         }
 
         if (!shouldShow && floatingNoteDragState.note === note) {
