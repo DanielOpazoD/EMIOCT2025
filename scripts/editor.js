@@ -914,8 +914,12 @@ export async function initializeEditor() {
         const selectionRect = getSavedSelectionRect();
         const anchorRect = anchor.getBoundingClientRect();
         const referenceRect = selectionRect || anchorRect;
-        const scrollY = Number.isFinite(window.scrollY) ? window.scrollY : window.pageYOffset || 0;
-        const scrollX = Number.isFinite(window.scrollX) ? window.scrollX : window.pageXOffset || 0;
+
+        const computedStyle = window.getComputedStyle(picker);
+        const isFixedPosition = computedStyle && computedStyle.position === 'fixed';
+
+        const scrollY = isFixedPosition ? 0 : Number.isFinite(window.scrollY) ? window.scrollY : window.pageYOffset || 0;
+        const scrollX = isFixedPosition ? 0 : Number.isFinite(window.scrollX) ? window.scrollX : window.pageXOffset || 0;
 
         picker.style.visibility = 'hidden';
         picker.classList.add('show');
@@ -924,20 +928,27 @@ export async function initializeEditor() {
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
         const pickerRect = picker.getBoundingClientRect();
 
-        let offsetTop = referenceRect.bottom + scrollY + 6;
+        const baseTop = referenceRect.top + scrollY;
+        const baseBottom = referenceRect.bottom + scrollY;
+
+        let offsetTop = baseBottom + 6;
         let offsetLeft = referenceRect.left + scrollX;
 
         if (pickerRect && Number.isFinite(pickerRect.width)) {
-          const maxLeft = scrollX + Math.max(12, viewportWidth - pickerRect.width - 12);
-          offsetLeft = Math.min(Math.max(scrollX + 12, offsetLeft), maxLeft);
+          const minLeft = (isFixedPosition ? 12 : scrollX + 12);
+          const maxLeft = (isFixedPosition ? viewportWidth - 12 : scrollX + viewportWidth - 12) - pickerRect.width;
+          const clampedMaxLeft = Math.max(minLeft, maxLeft);
+          offsetLeft = Math.min(Math.max(minLeft, offsetLeft), clampedMaxLeft);
         }
 
         if (pickerRect && Number.isFinite(pickerRect.height)) {
-          const maxBottom = scrollY + viewportHeight - 12;
-          if (offsetTop + pickerRect.height > maxBottom && referenceRect.top - pickerRect.height - 6 >= scrollY + 12) {
-            offsetTop = referenceRect.top + scrollY - pickerRect.height - 6;
+          const minTop = (isFixedPosition ? 12 : scrollY + 12);
+          const maxBottom = (isFixedPosition ? viewportHeight : scrollY + viewportHeight) - 12;
+          if (offsetTop + pickerRect.height > maxBottom && baseTop - pickerRect.height - 6 >= minTop) {
+            offsetTop = baseTop - pickerRect.height - 6;
           }
-          offsetTop = Math.max(scrollY + 12, offsetTop);
+          const clampedMaxTop = Math.max(minTop, maxBottom - pickerRect.height);
+          offsetTop = Math.min(Math.max(minTop, offsetTop), clampedMaxTop);
         }
 
         picker.style.top = `${Math.round(offsetTop)}px`;
