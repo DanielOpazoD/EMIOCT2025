@@ -8094,6 +8094,18 @@ export async function initializeEditor() {
         placeholder.innerHTML = '&nbsp;';
         newPage.appendChild(placeholder);
 
+        const magicContainer = document.querySelector('.magic-content-container');
+        if (magicContainer) {
+          const magicId = `magic-topic-${topicId}`;
+          const magicTopic = document.createElement('div');
+          magicTopic.id = magicId;
+          magicTopic.className = 'magic-topic';
+          magicTopic.dataset.sourceTopicId = topicId;
+          magicTopic.innerHTML = '<p>Contenido mágico del tema.</p>';
+          magicContainer.appendChild(magicTopic);
+          newPage.dataset.magicAnchorId = magicId;
+        }
+
         let insertBefore = null;
         if (section.temas.length > 0) {
           const lastTopic = section.temas[section.temas.length - 1];
