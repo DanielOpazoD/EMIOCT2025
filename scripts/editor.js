@@ -8351,7 +8351,21 @@ export async function initializeEditor() {
         });
 
         window.addEventListener('resize', hideIconPicker);
-        document.addEventListener('scroll', hideIconPicker, true);
+        document.addEventListener('scroll', (event) => {
+          if (!iconPicker || !iconPicker.classList.contains('show')) {
+            return;
+          }
+          const target = event.target;
+          if (target instanceof Element) {
+            if (iconPicker.contains(target)) {
+              return;
+            }
+            if (target.closest('.edit-toolbar')) {
+              return;
+            }
+          }
+          hideIconPicker();
+        }, true);
       } else if (insertIconBtn) {
         insertIconBtn.disabled = true;
         insertIconBtn.setAttribute('aria-disabled', 'true');
