@@ -4702,9 +4702,14 @@ export async function initializeEditor() {
             let positionMatches = true;
 
             if (Number.isFinite(storedOffset)) {
-              const delta = Math.abs(viewportState.viewportTopOffset - storedOffset);
-              const tolerance = Math.max(180, viewportState.viewportHeight * 0.45);
-              positionMatches = delta <= tolerance;
+              const currentRelative = viewportState.relativeCenter;
+              const storedRelativeFromOffset = storedOffset / (viewportState.pageHeight || 1);
+              const deltaRatio = Math.abs(currentRelative - storedRelativeFromOffset);
+              const ratioTolerance = Math.max(
+                0.18,
+                (viewportState.viewportHeight / viewportState.pageHeight) * 1.25
+              );
+              positionMatches = deltaRatio <= ratioTolerance;
             } else if (Number.isFinite(storedRelative)) {
               const deltaRatio = Math.abs(viewportState.relativeCenter - storedRelative);
               const ratioTolerance = Math.max(
