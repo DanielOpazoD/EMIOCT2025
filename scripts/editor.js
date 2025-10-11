@@ -17,6 +17,12 @@ import {
   sanitizeNoteTitleHtml,
   getNoteTitlePlainText
 } from './modules/notes/noteUtils.js';
+import {
+  createSelectionBookmark,
+  restoreRangeFromBookmark,
+  findEditableHost,
+  captureSelectionSnapshot
+} from './modules/editorSelection.js';
 
 export async function initializeEditor() {
       let isEditMode = false;
@@ -35,9 +41,12 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let savedSelectionEditable = null;
+      let savedSelectionBookmark = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let selectionTrackerBound = false;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -798,6 +807,10 @@ export async function initializeEditor() {
           btn.title = `Insertar ${symbol}`;
           btn.addEventListener('click', (event) => {
             event.preventDefault();
+            focusSavedSelectionEditable();
+            if (!restoreSelection()) {
+              ensureEditableSelection();
+            }
             const inserted = insertTextAtSelection(`${symbol} `);
             if (!inserted) {
               alert('Selecciona un área editable antes de insertar iconos.');
@@ -1719,34 +1732,149 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       /* === UTILIDADES === */
-      function saveCurrentSelection() {
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          savedSelection = selection.getRangeAt(0).cloneRange();
-          return true;
+      function clearSavedSelection() {
+        savedSelection = null;
+        savedSelectionEditable = null;
+        savedSelectionBookmark = null;
+      }
+
+      function applySelectionSnapshot(snapshot) {
+        if (!snapshot || !snapshot.range || !snapshot.editable) {
+          return false;
+        }
+
+        savedSelectionEditable = snapshot.editable;
+        savedSelection = snapshot.range.cloneRange ? snapshot.range.cloneRange() : snapshot.range;
+        savedSelectionBookmark = snapshot.bookmark
+          || createSelectionBookmark(savedSelection, savedSelectionEditable);
+
+        if (!savedSelectionBookmark) {
+          savedSelection = null;
+          savedSelectionEditable = null;
+          return false;
+        }
+
+        return true;
+      }
+
+      function focusSavedSelectionEditable() {
+        let target = savedSelectionEditable;
+        if ((!target || !target.isConnected) && savedSelectionBookmark?.topicId) {
+          const candidate = findPageByTopicId(savedSelectionBookmark.topicId);
+          if (candidate) {
+            target = candidate;
+            savedSelectionEditable = candidate;
+          }
+        }
+        if (!target || !target.isConnected) {
+          return false;
+        }
+        if (typeof target.focus === 'function') {
+          try {
+            target.focus({ preventScroll: true });
+          } catch (error) {
+            target.focus();
+          }
+          return document.activeElement === target || target.contains(document.activeElement);
         }
         return false;
+      }
+
+      function saveCurrentSelection() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return false;
+        }
+
+        const fallbackEditable = findEditableHost(document.activeElement);
+        const snapshot = captureSelectionSnapshot(selection, { fallbackEditable });
+        if (!snapshot) {
+          return false;
+        }
+
+        return applySelectionSnapshot(snapshot);
+      }
+
+      function handleDocumentSelectionChange() {
+        if (!isEditMode) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return;
+        }
+
+        const fallbackEditable = findEditableHost(document.activeElement);
+        const snapshot = captureSelectionSnapshot(selection, { fallbackEditable });
+        if (!snapshot) {
+          return;
+        }
+
+        applySelectionSnapshot(snapshot);
+      }
+
+      if (!selectionTrackerBound) {
+        document.addEventListener('selectionchange', handleDocumentSelectionChange);
+        selectionTrackerBound = true;
       }
 
       function restoreSelection() {
         if (savedSelection) {
-          if (!document.contains(savedSelection.startContainer) || !document.contains(savedSelection.endContainer)) {
-            savedSelection = null;
-            return false;
-          }
-          const selection = window.getSelection();
-          selection.removeAllRanges();
-          try {
-            selection.addRange(savedSelection);
-            return true;
-          } catch (err) {
+          const startConnected = document.contains(savedSelection.startContainer);
+          const endConnected = document.contains(savedSelection.endContainer);
+          if (startConnected && endConnected) {
+            if (savedSelectionEditable && !document.contains(savedSelectionEditable)) {
+              savedSelectionEditable = null;
+            }
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            try {
+              selection.addRange(savedSelection);
+              return true;
+            } catch (err) {
+              savedSelection = null;
+            }
+          } else {
             savedSelection = null;
           }
         }
+
+        if (savedSelectionEditable && !document.contains(savedSelectionEditable)) {
+          savedSelectionEditable = null;
+        }
+
+        if (savedSelectionBookmark) {
+          let editable = savedSelectionEditable;
+          if ((!editable || !editable.isConnected) && savedSelectionBookmark.topicId) {
+            const candidate = findPageByTopicId(savedSelectionBookmark.topicId);
+            if (candidate) {
+              editable = candidate;
+              savedSelectionEditable = candidate;
+            }
+          }
+
+          if (editable && editable.isConnected) {
+            const restoredRange = restoreRangeFromBookmark(savedSelectionBookmark, editable);
+            if (restoredRange) {
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(restoredRange);
+              savedSelection = restoredRange.cloneRange();
+              savedSelectionBookmark = createSelectionBookmark(restoredRange, editable);
+              return true;
+            }
+          }
+        }
+
+        clearSavedSelection();
         return false;
       }
 
       function ensureEditableSelection() {
+        if (savedSelection && savedSelectionEditable) {
+          focusSavedSelectionEditable();
+        }
         if (restoreSelection()) {
           const restored = window.getSelection();
           if (restored.rangeCount > 0) {
@@ -1771,6 +1899,11 @@ export async function initializeEditor() {
         range.collapse(false);
         selection.removeAllRanges();
         selection.addRange(range);
+        if (target instanceof HTMLElement) {
+          savedSelectionEditable = target;
+          savedSelection = range.cloneRange();
+          savedSelectionBookmark = createSelectionBookmark(range, target);
+        }
         return selection;
       }
 
@@ -1784,7 +1917,7 @@ export async function initializeEditor() {
         range.setEndAfter(node);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return node;
       }
 
@@ -1803,7 +1936,7 @@ export async function initializeEditor() {
         }
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return nodes[0] || null;
       }
 
@@ -1821,7 +1954,7 @@ export async function initializeEditor() {
         range.setEndAfter(textNode);
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         return textNode;
       }
 
@@ -6717,7 +6850,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        clearSavedSelection();
         hideTemplateToolbar();
       });
 
@@ -6898,7 +7031,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) {
           alert('Por favor, selecciona el texto primero');
-          savedSelection = null;
+          clearSavedSelection();
           return;
         }
 
@@ -6945,7 +7078,7 @@ export async function initializeEditor() {
         }
 
         selection.removeAllRanges();
-        savedSelection = null;
+        clearSavedSelection();
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
@@ -7085,14 +7218,14 @@ export async function initializeEditor() {
           const wasOpen = highlightPalette.classList.contains('show');
           highlightPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
         if (!e.target.closest('#textColorBtn') && !e.target.closest('#textColorPalette')) {
           const wasOpen = textColorPalette.classList.contains('show');
           textColorPalette.classList.remove('show');
           if (wasOpen) {
-            savedSelection = null;
+            clearSavedSelection();
           }
         }
       });
@@ -7875,7 +8008,7 @@ export async function initializeEditor() {
         globalTopicCounter = 1;
         currentPageRef = null;
         currentSectionId = '';
-        savedSelection = null;
+        clearSavedSelection();
         const magicContainer = document.querySelector('.magic-content-container');
         if (magicContainer) {
           magicContainer.innerHTML = '';
@@ -8257,7 +8390,7 @@ export async function initializeEditor() {
           highlightPalette.classList.remove('show');
           textColorPalette.classList.remove('show');
           hideIconPicker();
-          savedSelection = null;
+          clearSavedSelection();
         }
       });
 
@@ -9384,7 +9517,7 @@ ${inlineStyles}
     }
     hideImageToolbar();
     hideTemplateToolbar();
-    savedSelection = null;
+    clearSavedSelection();
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
     scheduleIconPickerRebind(150);
