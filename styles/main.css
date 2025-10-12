@@ -639,9 +639,19 @@ body.reading-mode .reading-mode-exit {
   border-color: var(--theme-primary);
 }
 
+.edit-toolbar button.brush-mode {
+  background: #fde68a;
+  border-color: #fbbf24;
+  color: #92400e;
+}
+
 .edit-toolbar select {
   min-width: 70px;
   font-size: 1.05rem;
+}
+
+#fontFamilySelect {
+  min-width: 150px;
 }
 
 .toolbar-separator {
