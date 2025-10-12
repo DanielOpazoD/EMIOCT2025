@@ -2,6 +2,7 @@ import { BaseModule } from './BaseModule.js';
 import { ToolbarController } from '../controllers/ToolbarController.js';
 import { PanelController } from '../controllers/PanelController.js';
 import { ModalController } from '../controllers/ModalController.js';
+import { TopbarController } from '../controllers/TopbarController.js';
 import { ThemeManager } from '../managers/ThemeManager.js';
 import { LayoutManager } from '../managers/LayoutManager.js';
 
@@ -12,7 +13,8 @@ export class UIModule extends BaseModule {
     this.controllers = {
       toolbar: new ToolbarController(this),
       panel: new PanelController(this),
-      modal: new ModalController(this)
+      modal: new ModalController(this),
+      topbar: new TopbarController(this)
     };
 
     this.theme = new ThemeManager(this);
@@ -43,6 +45,10 @@ export class UIModule extends BaseModule {
 
     this.subscribeToState('ui.readingMode', ({ value }) => {
       this.layout.toggleReadingMode(value);
+    });
+
+    this.subscribeToState('documentShift', ({ value }) => {
+      this.layout.updateDocumentShift(value);
     });
   }
 
