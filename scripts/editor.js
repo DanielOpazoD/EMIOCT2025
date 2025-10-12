@@ -687,9 +687,10 @@ export async function initializeEditor() {
       const textColorBtn = document.getElementById('textColorBtn');
       const fontSizeDecreaseBtn = document.getElementById('fontSizeDecreaseBtn');
       const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
+      const fontFamilySelect = document.getElementById('fontFamilySelect');
+      const boldBtn = document.getElementById('boldBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
-      const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
       const tableMenu = document.getElementById('tableMenu');
       const tableMenuSize = document.getElementById('tableMenuSize');
@@ -734,6 +735,9 @@ export async function initializeEditor() {
       let persistentHighlightTimer = null;
       let persistentHighlightResumeTimer = null;
       let suppressPersistentHighlight = false;
+
+      let persistentBoldActive = false;
+      let persistentBoldTimer = null;
 
       let copiedFormat = null;
 
@@ -2301,9 +2305,94 @@ export async function initializeEditor() {
         return 16;
       }
 
+      function collectTextSegmentsForRange(range) {
+        if (!range) {
+          return [];
+        }
+
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              if (!range.intersectsNode(node)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!node.nodeValue || !node.nodeValue.trim()) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        const originalNodes = [];
+        while (walker.nextNode()) {
+          originalNodes.push(walker.currentNode);
+        }
+
+        if (originalNodes.length === 0) {
+          return [];
+        }
+
+        const segments = [];
+
+        originalNodes.forEach((node) => {
+          if (!node || node.nodeType !== Node.TEXT_NODE) {
+            return;
+          }
+
+          const isStartNode = node === range.startContainer;
+          const isEndNode = node === range.endContainer;
+          const length = node.nodeValue.length;
+          let startOffset = isStartNode ? range.startOffset : 0;
+          let endOffset = isEndNode ? range.endOffset : length;
+
+          startOffset = Math.max(0, Math.min(startOffset, length));
+          endOffset = Math.max(startOffset, Math.min(endOffset, length));
+
+          if (endOffset <= startOffset) {
+            return;
+          }
+
+          let workingNode = node;
+
+          if (endOffset < workingNode.nodeValue.length) {
+            workingNode.splitText(endOffset);
+            if (isEndNode) {
+              range.setEnd(workingNode, workingNode.nodeValue.length);
+            }
+          }
+
+          if (startOffset > 0) {
+            const newNode = workingNode.splitText(startOffset);
+            if (isStartNode) {
+              range.setStart(newNode, 0);
+            }
+            if (isEndNode && !isStartNode) {
+              range.setEnd(newNode, newNode.nodeValue.length);
+            }
+            workingNode = newNode;
+          }
+
+          if (isStartNode && isEndNode) {
+            range.setEnd(workingNode, workingNode.nodeValue.length);
+          }
+
+          segments.push(workingNode);
+        });
+
+        return segments;
+      }
+
       function adjustFontSizeProportionally(direction) {
         const selection = resolveSelectionForInsertion();
         if (!selection || selection.rangeCount === 0) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
+        if (selection.isCollapsed) {
           alert('Selecciona el texto que deseas modificar');
           return false;
         }
@@ -2315,33 +2404,219 @@ export async function initializeEditor() {
 
         const factor = direction === 'decrease' ? (1 / FONT_SCALE_FACTOR) : FONT_SCALE_FACTOR;
 
-        if (selection.isCollapsed) {
+        const textNodes = collectTextSegmentsForRange(range);
+
+        if (textNodes.length === 0) {
           alert('Selecciona el texto que deseas modificar');
           return false;
         }
 
-        const contextElement = getRangeContextElement(range);
-        const currentSize = getFontSizeFromElement(contextElement);
-        const newSize = clampFontSize(currentSize * factor);
-        const wrapper = document.createElement('span');
-        wrapper.style.fontSize = `${newSize}px`;
-        wrapper.style.lineHeight = 'inherit';
-        wrapper.style.display = 'inline';
+        const styledNodes = [];
 
-        try {
-          range.surroundContents(wrapper);
-        } catch (err) {
-          const fragment = range.extractContents();
-          wrapper.appendChild(fragment);
-          range.insertNode(wrapper);
+        textNodes.forEach((node) => {
+          const styled = applyFontSizeToTextNode(node, factor);
+          if (styled) {
+            styledNodes.push(styled);
+          }
+        });
+
+        if (styledNodes.length === 0) {
+          alert('No se pudo ajustar el tamaño del texto seleccionado');
+          return false;
         }
 
+        const firstNode = styledNodes[0];
+        const lastNode = styledNodes[styledNodes.length - 1];
         const updatedRange = document.createRange();
-        updatedRange.selectNodeContents(wrapper);
+        updatedRange.setStart(firstNode, 0);
+        updatedRange.setEnd(lastNode, lastNode.nodeValue.length);
         selection.removeAllRanges();
         selection.addRange(updatedRange);
         clearSavedSelection();
         return true;
+      }
+
+      function applyFontSizeToTextNode(textNode, factor) {
+        if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
+          return null;
+        }
+
+        const content = textNode.nodeValue;
+        if (!content || !content.trim()) {
+          return null;
+        }
+
+        const referenceElement = textNode.parentElement instanceof HTMLElement
+          ? textNode.parentElement
+          : (textNode.parentNode instanceof HTMLElement ? textNode.parentNode : null);
+        const baseSize = getFontSizeFromElement(referenceElement);
+        const newSize = clampFontSize(baseSize * factor);
+
+        if (referenceElement instanceof HTMLElement && referenceElement.childNodes.length === 1) {
+          referenceElement.style.fontSize = `${newSize}px`;
+          if (!referenceElement.style.lineHeight) {
+            referenceElement.style.lineHeight = 'inherit';
+          }
+          if (!referenceElement.style.display) {
+            referenceElement.style.display = 'inline';
+          }
+          return textNode;
+        }
+
+        const wrapper = document.createElement('span');
+        wrapper.style.fontSize = `${newSize}px`;
+        wrapper.style.lineHeight = 'inherit';
+        wrapper.style.display = 'inline';
+        const parent = textNode.parentNode;
+        if (!parent) {
+          return null;
+        }
+        parent.insertBefore(wrapper, textNode);
+        wrapper.appendChild(textNode);
+        return textNode;
+      }
+
+      function normalizeFontElementsInRange(range, fontFamily) {
+        if (!range) {
+          return;
+        }
+
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode(node) {
+              if (!range.intersectsNode(node)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!(node instanceof HTMLElement)) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return node.tagName === 'FONT' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+            }
+          }
+        );
+
+        const fonts = [];
+        while (walker.nextNode()) {
+          fonts.push(walker.currentNode);
+        }
+
+        fonts.forEach((fontEl) => {
+          if (!(fontEl instanceof HTMLElement)) {
+            return;
+          }
+          const span = document.createElement('span');
+          if (fontFamily) {
+            span.style.fontFamily = fontFamily;
+          }
+          while (fontEl.firstChild) {
+            span.appendChild(fontEl.firstChild);
+          }
+          fontEl.replaceWith(span);
+        });
+      }
+
+      function applyFontFamilyToRange(range, fontFamily) {
+        if (!range || range.collapsed || !fontFamily) {
+          return false;
+        }
+
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+
+        const styleWithCss = supportsCommand('styleWithCSS');
+        if (styleWithCss) {
+          document.execCommand('styleWithCSS', false, true);
+        }
+
+        let applied = false;
+        if (supportsCommand('fontName')) {
+          try {
+            applied = document.execCommand('fontName', false, fontFamily);
+          } catch (err) {
+            applied = false;
+          }
+        }
+
+        if (styleWithCss) {
+          document.execCommand('styleWithCSS', false, false);
+        }
+
+        if (!applied) {
+          const segments = collectTextSegmentsForRange(range);
+          if (segments.length === 0) {
+            return false;
+          }
+
+          segments.forEach((node) => {
+            const parent = node.parentNode;
+            if (!parent) {
+              return;
+            }
+            const directParent = node.parentElement;
+            if (directParent instanceof HTMLElement && directParent.childNodes.length === 1) {
+              directParent.style.fontFamily = fontFamily;
+              if (!directParent.style.display) {
+                directParent.style.display = 'inline';
+              }
+            } else {
+              const span = document.createElement('span');
+              span.style.fontFamily = fontFamily;
+              span.style.display = 'inline';
+              parent.insertBefore(span, node);
+              span.appendChild(node);
+            }
+          });
+
+          applied = true;
+        } else {
+          normalizeFontElementsInRange(range, fontFamily);
+        }
+
+        return applied;
+      }
+
+      function applyBoldToRange(range) {
+        if (!range || range.collapsed) {
+          return null;
+        }
+
+        const segments = collectTextSegmentsForRange(range);
+        if (segments.length === 0) {
+          return null;
+        }
+
+        segments.forEach((node) => {
+          const parentElement = node.parentElement instanceof HTMLElement ? node.parentElement : null;
+          let isAlreadyBold = false;
+          if (parentElement) {
+            const computedWeight = parseInt(window.getComputedStyle(parentElement).fontWeight, 10);
+            if (Number.isFinite(computedWeight) && computedWeight >= 600) {
+              isAlreadyBold = true;
+            } else if (parentElement.closest('strong, b')) {
+              isAlreadyBold = true;
+            }
+          }
+
+          if (isAlreadyBold) {
+            return;
+          }
+
+          const container = node.parentNode;
+          if (!container) {
+            return;
+          }
+
+          const strong = document.createElement('strong');
+          container.insertBefore(strong, node);
+          strong.appendChild(node);
+        });
+
+        return segments;
       }
 
       function normalizeColorToHex(color, fallback = '#ffffff') {
@@ -7614,6 +7889,24 @@ export async function initializeEditor() {
         }
       }
 
+      function activatePersistentBold() {
+        persistentBoldActive = true;
+        if (boldBtn) {
+          boldBtn.classList.add('active');
+        }
+      }
+
+      function deactivatePersistentBold() {
+        persistentBoldActive = false;
+        if (persistentBoldTimer) {
+          clearTimeout(persistentBoldTimer);
+          persistentBoldTimer = null;
+        }
+        if (boldBtn) {
+          boldBtn.classList.remove('active');
+        }
+      }
+
       function isTransparentColor(value) {
         if (!value) {
           return true;
@@ -7662,6 +7955,50 @@ export async function initializeEditor() {
         persistentHighlightTimer = setTimeout(() => {
           persistentHighlightTimer = null;
           applyPersistentHighlightIfNeeded();
+        }, 35);
+      }
+
+      function applyPersistentBoldIfNeeded() {
+        if (!persistentBoldActive || !isEditMode) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+
+        if (!isSelectionWithinEditable(selection)) {
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        const segments = applyBoldToRange(range);
+        if (!segments || segments.length === 0) {
+          return;
+        }
+
+        const firstNode = segments[0];
+        const lastNode = segments[segments.length - 1];
+        const updatedRange = document.createRange();
+        updatedRange.setStart(firstNode, 0);
+        updatedRange.setEnd(lastNode, lastNode.nodeValue.length);
+        selection.removeAllRanges();
+        selection.addRange(updatedRange);
+      }
+
+      function schedulePersistentBold() {
+        if (!persistentBoldActive) {
+          return;
+        }
+
+        if (persistentBoldTimer) {
+          clearTimeout(persistentBoldTimer);
+        }
+
+        persistentBoldTimer = setTimeout(() => {
+          persistentBoldTimer = null;
+          applyPersistentBoldIfNeeded();
         }, 35);
       }
 
@@ -7836,6 +8173,14 @@ export async function initializeEditor() {
           selection.addRange(range);
         }
 
+        if (isHighlight && !isClearHighlightColor(color)) {
+          const clearedExistingHighlight = clearHighlightFromRange(range);
+          if (clearedExistingHighlight) {
+            storedRanges.length = 0;
+            storedRanges.push(range.cloneRange());
+          }
+        }
+
         const styleWithCss = supportsCommand('styleWithCSS');
         if (styleWithCss) {
           document.execCommand('styleWithCSS', false, true);
@@ -7907,6 +8252,7 @@ export async function initializeEditor() {
       textColorBtn?.addEventListener('pointerdown', handleColorButtonPointerDown);
       fontSizeIncreaseBtn?.addEventListener('pointerdown', handleColorButtonPointerDown);
       fontSizeDecreaseBtn?.addEventListener('pointerdown', handleColorButtonPointerDown);
+      fontFamilySelect?.addEventListener('pointerdown', handleColorButtonPointerDown);
 
       highlightBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -7952,6 +8298,41 @@ export async function initializeEditor() {
         adjustFontSizeProportionally('decrease');
       });
 
+      boldBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (!isEditMode) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        const hasValidSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed && isSelectionWithinEditable(selection);
+
+        if (hasValidSelection) {
+          const range = selection.getRangeAt(0);
+          const segments = applyBoldToRange(range);
+          if (!segments) {
+            execCmd('bold');
+          } else {
+            const firstNode = segments[0];
+            const lastNode = segments[segments.length - 1];
+            const updatedRange = document.createRange();
+            updatedRange.setStart(firstNode, 0);
+            updatedRange.setEnd(lastNode, lastNode.nodeValue.length);
+            selection.removeAllRanges();
+            selection.addRange(updatedRange);
+          }
+          return;
+        }
+
+        if (persistentBoldActive) {
+          deactivatePersistentBold();
+        } else {
+          activatePersistentBold();
+        }
+      });
+
       document.addEventListener('mouseup', (event) => {
         if (!isEditMode) {
           return;
@@ -7960,6 +8341,7 @@ export async function initializeEditor() {
           return;
         }
         schedulePersistentHighlight();
+        schedulePersistentBold();
       });
 
       document.addEventListener('keyup', (event) => {
@@ -7971,6 +8353,18 @@ export async function initializeEditor() {
         const isSelectAll = key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey);
         if (keys.includes(key) || isSelectAll) {
           schedulePersistentHighlight();
+        }
+      });
+
+      document.addEventListener('keyup', (event) => {
+        if (!isEditMode || !persistentBoldActive) {
+          return;
+        }
+        const key = typeof event.key === 'string' ? event.key : '';
+        const triggerKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'End', 'Home', 'PageUp', 'PageDown'];
+        const isSelectAll = key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey);
+        if (triggerKeys.includes(key) || isSelectAll) {
+          schedulePersistentBold();
         }
       });
 
@@ -8054,15 +8448,50 @@ export async function initializeEditor() {
           alert('Por favor, selecciona el texto al que deseas cambiar el color');
           return;
         }
-        
+
         const btn = e.currentTarget;
         const btnRect = btn.getBoundingClientRect();
-        
+
         textColorPalette.style.left = btnRect.left + 'px';
         textColorPalette.style.top = (btnRect.bottom + 5) + 'px';
 
         highlightPalette.classList.remove('show');
         textColorPalette.classList.add('show');
+      });
+
+      fontFamilySelect?.addEventListener('change', (event) => {
+        const selectedValue = event.target.value;
+        if (!selectedValue) {
+          return;
+        }
+
+        if (!restoreSelection()) {
+          alert('Selecciona el texto que deseas modificar');
+          event.target.value = '';
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          alert('Selecciona el texto que deseas modificar');
+          event.target.value = '';
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        const applied = applyFontFamilyToRange(range, selectedValue);
+        if (!applied) {
+          alert('No se pudo aplicar la fuente seleccionada');
+        } else {
+          const updatedRange = document.createRange();
+          updatedRange.setStart(range.startContainer, range.startOffset);
+          updatedRange.setEnd(range.endContainer, range.endOffset);
+          selection.removeAllRanges();
+          selection.addRange(updatedRange);
+        }
+
+        clearSavedSelection();
+        event.target.value = '';
       });
 
       function copySelectedFormat() {
@@ -8200,19 +8629,6 @@ export async function initializeEditor() {
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection({ keepWhenEmpty: true });
-          captureToolbarInsertionSnapshot();
-        }
-      });
-
-      insertTableBtn?.addEventListener('pointerdown', (event) => {
-        preventPointerFocusShift(event);
-        saveCurrentSelection({ keepWhenEmpty: true });
-        captureToolbarInsertionSnapshot();
-      });
-
-      insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
           captureToolbarInsertionSnapshot();
@@ -9428,6 +9844,7 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+          deactivatePersistentBold();
         }
       }
       
@@ -9556,7 +9973,6 @@ export async function initializeEditor() {
         }
       });
       
-      document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
@@ -9643,59 +10059,6 @@ export async function initializeEditor() {
         } catch (e) {
           alert('Error al copiar: ' + e.message);
         }
-      });
-
-      /* === INSERTAR TABLA === */
-      document.getElementById('insertTableBtn')?.addEventListener('click', () => {
-        showModal(`
-          <div class="modal-header">
-            <h3>Insertar Tabla</h3>
-            <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('show')">&times;</button>
-          </div>
-          <div class="modal-body">
-            <label>Filas: <input type="number" id="tableRows" class="modal-input" value="3" min="1" max="20">
-</label>
-            <label>Columnas: <input type="number" id="tableCols" class="modal-input" value="3" min="1" max="10"></label>
-          </div>
-          <div class="modal-footer">
-            <button class="modal-btn" onclick="document.getElementById('modalOverlay').classList.remove('show')">Cancelar</button>
-            <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
-          </div>
-        `);
-        setTimeout(() => {
-          document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-            const rows = parseInt(document.getElementById('tableRows').value) || 3;
-            const cols = parseInt(document.getElementById('tableCols').value) || 3;
-
-            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-            for (let i = 0; i < cols; i++) {
-              tableHTML += `<th>Encabezado ${i + 1}</th>`;
-            }
-            tableHTML += '</tr></thead><tbody>';
-
-            for (let i = 0; i < rows; i++) {
-              tableHTML += '<tr>';
-              for (let j = 0; j < cols; j++) {
-                tableHTML += '<td>Celda</td>';
-              }
-              tableHTML += '</tr>';
-            }
-            tableHTML += '</tbody></table></div>';
-
-            if (!primeToolbarInsertionSelection()) {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-              return;
-            }
-
-            const insertedNode = insertHtmlAtSelection(tableHTML);
-            if (insertedNode) {
-              hideModal();
-              clearToolbarInsertionSnapshot();
-            } else {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-            }
-          });
-        }, 100);
       });
 
       /* === BUSCAR Y REEMPLAZAR === */
