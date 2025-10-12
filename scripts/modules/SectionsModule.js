@@ -12,25 +12,50 @@ const DOCUMENT_SHIFT_MAX = 1500;
 const SECTION_COLLECTION_KEYS = [
   'sections',
   'secciones',
+  'tematicas',
+  'chapters',
+  'capitulos',
+  'groups',
+  'grupos',
   'items',
   'lista',
   'list',
   'data',
   'values',
   'collection',
-  'entries'
+  'entries',
+  'children',
+  'pages',
+  'paginas'
 ];
 
 const TOPIC_COLLECTION_KEYS = [
   'temas',
   'topics',
+  'temasAgrupados',
+  'temasSeccion',
+  'children',
+  'pages',
+  'paginas',
   'items',
   'lista',
   'list',
   'data',
   'values',
   'collection',
-  'entries'
+  'entries',
+  'contenido'
+];
+
+const KNOWN_THEME_CLASSES = [
+  'theme-blue',
+  'theme-green',
+  'theme-purple',
+  'theme-orange',
+  'theme-teal',
+  'theme-rose',
+  'theme-sand',
+  'theme-slate'
 ];
 
 function isPlainObject(value) {
@@ -39,7 +64,88 @@ function isPlainObject(value) {
 
 function filterObjectEntries(collection) {
   return collection
-    .filter((item) => item !== null && item !== undefined && isPlainObject(item));
+    .filter((item) => item !== null && item !== undefined)
+    .map((item) => {
+      if (isPlainObject(item)) {
+        return item;
+      }
+      if (typeof item === 'string') {
+        return { html: item };
+      }
+      return null;
+    })
+    .filter((item) => item !== null);
+}
+
+function extractThemeFromClassList(element) {
+  const themeClass = Array.from(element.classList).find((cls) => cls.startsWith('theme-'));
+  return themeClass || '';
+}
+
+function normalizeTheme(theme) {
+  if (typeof theme !== 'string' || !theme.trim()) {
+    return DEFAULT_SECTION_THEME;
+  }
+  const trimmed = theme.trim();
+  if (KNOWN_THEME_CLASSES.includes(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('theme-')) {
+    return trimmed;
+  }
+  return DEFAULT_SECTION_THEME;
+}
+
+function extractTopicHtml(topicData) {
+  const candidates = [
+    topicData?.html,
+    topicData?.contenido,
+    topicData?.body,
+    topicData?.content,
+    topicData?.texto,
+    topicData?.text,
+    topicData?.htmlContent,
+    topicData?.descripcion
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string') {
+      return candidate;
+    }
+  }
+
+  if (Array.isArray(topicData?.paragraphs)) {
+    return topicData.paragraphs
+      .filter((paragraph) => typeof paragraph === 'string')
+      .map((paragraph) => `<p>${paragraph}</p>`)
+      .join('');
+  }
+
+  if (Array.isArray(topicData?.contenido)) {
+    return topicData.contenido
+      .filter((entry) => typeof entry === 'string')
+      .map((entry) => `<p>${entry}</p>`)
+      .join('');
+  }
+
+  if (Array.isArray(topicData?.blocks)) {
+    return topicData.blocks
+      .map((block) => {
+        if (typeof block === 'string') {
+          return `<p>${block}</p>`;
+        }
+        if (isPlainObject(block) && typeof block.html === 'string') {
+          return block.html;
+        }
+        if (isPlainObject(block) && typeof block.text === 'string') {
+          return `<p>${block.text}</p>`;
+        }
+        return '';
+      })
+      .join('');
+  }
+
+  return '';
 }
 
 function toArrayFromCollection(source, candidateKeys) {
@@ -149,12 +255,13 @@ export class SectionsModule extends BaseModule {
 
     pages.forEach((page) => {
       const sectionId = page.dataset.sectionId || generateUniqueId('section');
-      const sectionName = page.dataset.sectionName || DEFAULT_SECTION_NAME;
+      const sectionName = page.dataset.sectionName || page.dataset.sectionNombre || DEFAULT_SECTION_NAME;
       const topicId = page.dataset.topicId || page.id || generateUniqueId('topic');
       const title = page.dataset.topicTitle
+        || page.dataset.topicNombre
         || this.extractHeadingTitle(page)
         || `${DEFAULT_TOPIC_NAME} ${this.pageElements.size + 1}`;
-      const theme = page.dataset.theme || DEFAULT_SECTION_THEME;
+      const theme = normalizeTheme(page.dataset.theme || extractThemeFromClassList(page));
 
       page.dataset.sectionId = sectionId;
       page.dataset.sectionName = sectionName;
@@ -162,6 +269,7 @@ export class SectionsModule extends BaseModule {
       page.dataset.topicTitle = title;
       page.dataset.theme = theme;
       page.id = page.id || topicId;
+      this.applyThemeToPage(page, theme);
 
       this.applyPageEditability(page, isEditing);
 
@@ -194,6 +302,8 @@ export class SectionsModule extends BaseModule {
       const firstTopic = firstSection.topics[0];
       this.state.set('currentSection', firstSection.id, { addToHistory: false, silent: true });
       this.state.set('currentPage', this.createStatePagePayload(firstTopic), { addToHistory: false, silent: true });
+      const initialTheme = firstTopic?.theme || firstSection?.theme || DEFAULT_SECTION_THEME;
+      this.applyThemeToBody(initialTheme);
     }
 
     if (!this.specialty && this.specialtyTitleElement?.textContent) {
@@ -227,6 +337,10 @@ export class SectionsModule extends BaseModule {
     const firstTopic = firstSection?.topics[0] || null;
     this.state.set('currentSection', firstSection?.id || null, { addToHistory: false });
     this.state.set('currentPage', this.createStatePagePayload(firstTopic), { addToHistory: false });
+    if (firstTopic || firstSection) {
+      const initialTheme = firstTopic?.theme || firstSection?.theme || DEFAULT_SECTION_THEME;
+      this.applyThemeToBody(initialTheme);
+    }
 
     this.emitSectionsUpdate();
     this.reflectEditMode(this.state.get('editMode'));
@@ -296,12 +410,16 @@ export class SectionsModule extends BaseModule {
 
   normalizeSection(sectionData, index) {
     const id = sectionData?.id ? String(sectionData.id).trim() : generateUniqueId('section');
-    const rawName = sectionData?.nombre ?? sectionData?.name ?? sectionData?.title;
+    const rawName = sectionData?.nombre
+      ?? sectionData?.name
+      ?? sectionData?.title
+      ?? sectionData?.titulo
+      ?? sectionData?.heading;
     const name = rawName ? String(rawName).trim() : `${DEFAULT_SECTION_NAME} ${index + 1}`;
     const collapsed = typeof sectionData?.collapsed === 'boolean'
       ? sectionData.collapsed
       : !!sectionData?.colapsado;
-    const theme = sectionData?.theme ? String(sectionData.theme).trim() : DEFAULT_SECTION_THEME;
+    const theme = normalizeTheme(sectionData?.theme || sectionData?.tema || sectionData?.colorTema);
 
     const topicsSource = this.resolveTopicsCollection(sectionData);
 
@@ -323,24 +441,21 @@ export class SectionsModule extends BaseModule {
 
   normalizeTopic(topicData, context) {
     const id = topicData?.id ? String(topicData.id).trim() : generateUniqueId('topic');
-    const rawTitle = topicData?.titulo ?? topicData?.title ?? topicData?.nombre;
+    const rawTitle = topicData?.titulo
+      ?? topicData?.title
+      ?? topicData?.nombre
+      ?? topicData?.heading
+      ?? topicData?.tema
+      ?? topicData?.tituloTema;
     const title = rawTitle ? String(rawTitle).trim() : `${DEFAULT_TOPIC_NAME} ${context.index + 1}`;
 
-    const theme = topicData?.theme
-      ? String(topicData.theme).trim()
-      : context.sectionTheme;
+    const theme = normalizeTheme(topicData?.theme || topicData?.tema || context.sectionTheme);
 
     const sectionName = topicData?.sectionName
       ? String(topicData.sectionName).trim()
       : context.sectionName;
 
-    const htmlSource = typeof topicData?.html === 'string'
-      ? topicData.html
-      : typeof topicData?.contenido === 'string'
-        ? topicData.contenido
-        : typeof topicData?.body === 'string'
-          ? topicData.body
-          : '';
+    const htmlSource = extractTopicHtml(topicData);
 
     return {
       id,
@@ -360,8 +475,14 @@ export class SectionsModule extends BaseModule {
     const directCandidates = [
       sectionData.temas,
       sectionData.topics,
+      sectionData.temasAgrupados,
+      sectionData.temasSeccion,
+      sectionData.children,
+      sectionData.pages,
+      sectionData.paginas,
       sectionData.temas?.items,
-      sectionData.topics?.items
+      sectionData.topics?.items,
+      sectionData.children?.items
     ];
 
     for (const candidate of directCandidates) {
@@ -392,11 +513,14 @@ export class SectionsModule extends BaseModule {
         page.className = 'page';
         page.dataset.sectionId = section.id;
         page.dataset.sectionName = section.name;
+        const pageTheme = normalizeTheme(topic.theme || section.theme || DEFAULT_SECTION_THEME);
         page.dataset.topicId = topic.id;
         page.dataset.topicTitle = topic.title;
-        page.dataset.theme = topic.theme || section.theme || DEFAULT_SECTION_THEME;
+        page.dataset.theme = pageTheme;
         page.id = topic.id;
         page.innerHTML = topic.html || '';
+
+        this.applyThemeToPage(page, pageTheme);
 
         this.applyPageEditability(page, isEditing);
 
@@ -442,6 +566,34 @@ export class SectionsModule extends BaseModule {
       this.specialtyTitleElement.setAttribute('title', title);
       document.title = title;
     }
+  }
+
+  applyThemeToBody(theme) {
+    if (typeof document === 'undefined' || !document.body) {
+      return;
+    }
+    const normalized = normalizeTheme(theme);
+    const classes = Array.from(document.body.classList);
+    classes
+      .filter((cls) => cls.startsWith('theme-'))
+      .forEach((cls) => document.body.classList.remove(cls));
+    if (normalized) {
+      document.body.classList.add(normalized);
+    }
+  }
+
+  applyThemeToPage(page, theme) {
+    if (!page) {
+      return;
+    }
+    const normalized = normalizeTheme(theme);
+    Array.from(page.classList)
+      .filter((cls) => cls.startsWith('theme-'))
+      .forEach((cls) => page.classList.remove(cls));
+    if (normalized) {
+      page.classList.add(normalized);
+    }
+    page.dataset.theme = normalized;
   }
 
   applyPageEditability(page, isEditing) {
@@ -544,6 +696,13 @@ export class SectionsModule extends BaseModule {
       this.scrollTopicIntoView(topicId);
     }
 
+    const pageElement = this.pageElements.get(topic.id);
+    if (pageElement) {
+      this.applyThemeToPage(pageElement, topic.theme || section.theme);
+    }
+
+    this.applyThemeToBody(topic.theme || section.theme);
+
     this.emitSectionsUpdate();
     this.editor.emit('sections:topic-selected', { section, topic });
   }
@@ -609,6 +768,62 @@ export class SectionsModule extends BaseModule {
     });
   }
 
+  getActiveTopicContext() {
+    const currentPage = this.state.get('currentPage');
+    const topicId = currentPage?.dataset?.topicId || currentPage?.topicId;
+    if (!topicId) {
+      return null;
+    }
+
+    let targetSection = null;
+    let targetTopic = null;
+    for (const section of this.sections) {
+      const candidate = section.topics.find((item) => item.id === topicId);
+      if (candidate) {
+        targetSection = section;
+        targetTopic = candidate;
+        break;
+      }
+    }
+
+    if (!targetSection || !targetTopic) {
+      return null;
+    }
+
+    const fallbackElement = typeof document !== 'undefined'
+      ? document.getElementById(topicId)
+      : null;
+    const pageElement = this.pageElements.get(topicId) || fallbackElement || null;
+
+    return {
+      section: targetSection,
+      topic: targetTopic,
+      pageElement
+    };
+  }
+
+  applyThemeToActiveTopic(theme, { updateSection = false } = {}) {
+    const context = this.getActiveTopicContext();
+    if (!context) {
+      return false;
+    }
+
+    const normalized = normalizeTheme(theme);
+    context.topic.theme = normalized;
+
+    if (updateSection) {
+      context.section.theme = normalized;
+    }
+
+    if (context.pageElement) {
+      this.applyThemeToPage(context.pageElement, normalized);
+    }
+
+    this.applyThemeToBody(normalized);
+    this.emitSectionsUpdate();
+    return true;
+  }
+
   updateTopicFromPage(page, { updateTitle = false } = {}) {
     if (!page) {
       return;
@@ -666,6 +881,33 @@ export class SectionsModule extends BaseModule {
         }))
       })),
       documentShift: this.state.get('documentShift') ?? 0
+    };
+  }
+
+  exportActiveTopic() {
+    const context = this.getActiveTopicContext();
+    if (!context) {
+      return null;
+    }
+
+    const { section, topic, pageElement } = context;
+    const html = pageElement?.innerHTML ?? topic.html ?? '';
+
+    return {
+      specialty: this.specialty,
+      documentShift: this.state.get('documentShift') ?? 0,
+      section: {
+        id: section.id,
+        name: section.name,
+        theme: section.theme
+      },
+      topic: {
+        id: topic.id,
+        title: topic.title,
+        theme: topic.theme,
+        sectionId: topic.sectionId,
+        html
+      }
     };
   }
 }
