@@ -88,9 +88,20 @@
           <option value="6">Muy grande</option>
           <option value="7">Enorme</option>
         </select>
+        <select id="fontFamilySelect" title="Fuente">
+          <option value="">Fuente</option>
+          <option value="inherit">Predeterminada</option>
+          <option value="'Arial', sans-serif">Arial</option>
+          <option value="'Helvetica Neue', Helvetica, Arial, sans-serif">Helvetica</option>
+          <option value="'Times New Roman', Times, serif">Times New Roman</option>
+          <option value="'Georgia', serif">Georgia</option>
+          <option value="'Verdana', Geneva, sans-serif">Verdana</option>
+          <option value="'Trebuchet MS', sans-serif">Trebuchet</option>
+          <option value="'Courier New', Courier, monospace">Courier New</option>
+        </select>
         <button id="fontSizeDecreaseBtn" title="Reducir tamaño proporcional">−</button>
         <button id="fontSizeIncreaseBtn" title="Aumentar tamaño proporcional">+</button>
-        <button id="boldBtn" title="Negrita (Ctrl+B)"><strong>B</strong></button>
+        <button id="boldBtn" title="Negrita (Ctrl+B)" aria-pressed="false"><strong>B</strong></button>
         <button id="italicBtn" title="Cursiva (Ctrl+I)"><em>I</em></button>
         <button id="underlineBtn" title="Subrayado (Ctrl+U)"><u>U</u></button>
       </div>
@@ -121,7 +132,6 @@
       <div class="toolbar-separator"></div>
 
       <div class="toolbar-group">
-        <button id="insertTableBtn" title="Tabla">📊</button>
         <button id="insertUlBtn" title="Lista">•</button>
         <button id="insertOlBtn" title="Numerada">1.</button>
         <button id="insertHtmlBtn" title="HTML personalizado">&lt;/&gt;</button>
