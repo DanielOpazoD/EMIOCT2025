@@ -31,6 +31,9 @@ export class SectionsModule extends BaseModule {
 
     this.subscribeToState('currentSection', () => this.emitSectionsUpdate());
     this.subscribeToState('currentPage', () => this.emitSectionsUpdate());
+    this.subscribeToState('editMode', ({ value }) => this.reflectEditMode(value));
+
+    this.reflectEditMode(this.state.get('editMode'));
   }
 
   cacheDom() {
@@ -53,6 +56,8 @@ export class SectionsModule extends BaseModule {
 
     const sectionMap = new Map();
 
+    const isEditing = !!this.state.get('editMode');
+
     pages.forEach((page) => {
       const sectionId = page.dataset.sectionId || generateUniqueId('section');
       const sectionName = page.dataset.sectionName || DEFAULT_SECTION_NAME;
@@ -68,6 +73,8 @@ export class SectionsModule extends BaseModule {
       page.dataset.topicTitle = title;
       page.dataset.theme = theme;
       page.id = page.id || topicId;
+
+      this.applyPageEditability(page, isEditing);
 
       if (!sectionMap.has(sectionId)) {
         sectionMap.set(sectionId, {
@@ -133,6 +140,7 @@ export class SectionsModule extends BaseModule {
     this.state.set('currentPage', this.createStatePagePayload(firstTopic), { addToHistory: false });
 
     this.emitSectionsUpdate();
+    this.reflectEditMode(this.state.get('editMode'));
 
     return {
       sections: this.getSnapshot().sections,
@@ -142,17 +150,49 @@ export class SectionsModule extends BaseModule {
   }
 
   normalizeImportPayload(payload) {
-    const topLevelSections = Array.isArray(payload.sections) ? payload.sections : null;
-    const nestedSections = Array.isArray(payload?.sections?.sections) ? payload.sections.sections : null;
-    const resolvedSections = topLevelSections || nestedSections || [];
+    if (Array.isArray(payload)) {
+      return {
+        sections: payload,
+        specialty: '',
+        documentShift: null
+      };
+    }
 
-    const specialty = typeof payload.specialty === 'string'
-      ? payload.specialty.trim()
-      : typeof payload?.sections?.specialty === 'string'
-        ? payload.sections.specialty.trim()
-        : '';
+    const sectionCandidates = [
+      payload?.sections,
+      payload?.secciones,
+      payload?.sections?.sections,
+      payload?.sections?.secciones,
+      payload?.secciones?.sections,
+      payload?.secciones?.secciones
+    ];
 
-    const rawShift = payload.documentShift ?? payload?.sections?.documentShift;
+    let resolvedSections = [];
+    for (const candidate of sectionCandidates) {
+      if (Array.isArray(candidate)) {
+        resolvedSections = candidate;
+        break;
+      }
+      if (candidate && Array.isArray(candidate.sections)) {
+        resolvedSections = candidate.sections;
+        break;
+      }
+    }
+
+    const specialtyCandidates = [
+      payload?.specialty,
+      payload?.especialidad,
+      payload?.sections?.specialty,
+      payload?.sections?.especialidad,
+      payload?.secciones?.specialty,
+      payload?.secciones?.especialidad
+    ];
+
+    const specialty = specialtyCandidates.find((value) => typeof value === 'string' && value.trim())?.trim() || '';
+
+    const rawShift = payload?.documentShift
+      ?? payload?.sections?.documentShift
+      ?? payload?.secciones?.documentShift;
     const documentShift = Number.isFinite(Number(rawShift))
       ? clamp(Number(rawShift), DOCUMENT_SHIFT_MIN, DOCUMENT_SHIFT_MAX)
       : null;
@@ -166,13 +206,20 @@ export class SectionsModule extends BaseModule {
 
   normalizeSection(sectionData, index) {
     const id = sectionData?.id ? String(sectionData.id).trim() : generateUniqueId('section');
-    const name = sectionData?.nombre ? String(sectionData.nombre).trim() : `${DEFAULT_SECTION_NAME} ${index + 1}`;
-    const collapsed = !!sectionData?.collapsed;
+    const rawName = sectionData?.nombre ?? sectionData?.name ?? sectionData?.title;
+    const name = rawName ? String(rawName).trim() : `${DEFAULT_SECTION_NAME} ${index + 1}`;
+    const collapsed = typeof sectionData?.collapsed === 'boolean'
+      ? sectionData.collapsed
+      : !!sectionData?.colapsado;
     const theme = sectionData?.theme ? String(sectionData.theme).trim() : DEFAULT_SECTION_THEME;
 
-    const topics = Array.isArray(sectionData?.temas) ? sectionData.temas : [];
+    const topicsSource = Array.isArray(sectionData?.temas)
+      ? sectionData.temas
+      : Array.isArray(sectionData?.topics)
+        ? sectionData.topics
+        : [];
 
-    const normalizedTopics = topics.map((topicData, topicIndex) => this.normalizeTopic(topicData, {
+    const normalizedTopics = topicsSource.map((topicData, topicIndex) => this.normalizeTopic(topicData, {
       sectionId: id,
       sectionName: name,
       sectionTheme: theme,
@@ -190,11 +237,8 @@ export class SectionsModule extends BaseModule {
 
   normalizeTopic(topicData, context) {
     const id = topicData?.id ? String(topicData.id).trim() : generateUniqueId('topic');
-    const title = topicData?.titulo
-      ? String(topicData.titulo).trim()
-      : topicData?.title
-        ? String(topicData.title).trim()
-        : `${DEFAULT_TOPIC_NAME} ${context.index + 1}`;
+    const rawTitle = topicData?.titulo ?? topicData?.title ?? topicData?.nombre;
+    const title = rawTitle ? String(rawTitle).trim() : `${DEFAULT_TOPIC_NAME} ${context.index + 1}`;
 
     const theme = topicData?.theme
       ? String(topicData.theme).trim()
@@ -204,12 +248,16 @@ export class SectionsModule extends BaseModule {
       ? String(topicData.sectionName).trim()
       : context.sectionName;
 
-    const html = typeof topicData?.html === 'string' ? topicData.html : '';
+    const htmlSource = typeof topicData?.html === 'string'
+      ? topicData.html
+      : typeof topicData?.contenido === 'string'
+        ? topicData.contenido
+        : '';
 
     return {
       id,
       title,
-      html,
+      html: htmlSource,
       theme,
       sectionId: context.sectionId,
       sectionName: sectionName
@@ -220,6 +268,8 @@ export class SectionsModule extends BaseModule {
     this.clearDocumentPages();
 
     const fragment = document.createDocumentFragment();
+
+    const isEditing = !!this.state.get('editMode');
 
     this.sections.forEach((section) => {
       section.topics.forEach((topic) => {
@@ -232,6 +282,8 @@ export class SectionsModule extends BaseModule {
         page.dataset.theme = topic.theme || section.theme || DEFAULT_SECTION_THEME;
         page.id = topic.id;
         page.innerHTML = topic.html || '';
+
+        this.applyPageEditability(page, isEditing);
 
         fragment.appendChild(page);
         this.pageElements.set(topic.id, page);
@@ -274,6 +326,30 @@ export class SectionsModule extends BaseModule {
     if (title) {
       this.specialtyTitleElement.setAttribute('title', title);
       document.title = title;
+    }
+  }
+
+  applyPageEditability(page, isEditing) {
+    if (!page) {
+      return;
+    }
+    const editable = !!isEditing;
+    page.contentEditable = editable ? 'true' : 'false';
+    page.spellcheck = editable;
+    page.classList.toggle('page--editing', editable);
+    if (editable) {
+      page.setAttribute('role', 'textbox');
+      page.setAttribute('aria-multiline', 'true');
+      if (!page.dataset.editListenersBound) {
+        const handleInput = () => this.updateTopicFromPage(page, { updateTitle: false });
+        const handleBlur = () => this.updateTopicFromPage(page, { updateTitle: true });
+        this.addDomListener(page, 'input', handleInput);
+        this.addDomListener(page, 'blur', handleBlur);
+        page.dataset.editListenersBound = 'true';
+      }
+    } else {
+      page.removeAttribute('role');
+      page.removeAttribute('aria-multiline');
     }
   }
 
@@ -408,6 +484,53 @@ export class SectionsModule extends BaseModule {
       const count = snapshot.totalTopics;
       const label = count === 1 ? 'tema' : 'temas';
       this.topicCountElement.textContent = `${count} ${label}`;
+    }
+  }
+
+  reflectEditMode(isEditing) {
+    const editable = !!isEditing;
+    this.pageElements.forEach((page) => {
+      this.applyPageEditability(page, editable);
+    });
+  }
+
+  updateTopicFromPage(page, { updateTitle = false } = {}) {
+    if (!page) {
+      return;
+    }
+
+    const topicId = page.dataset.topicId;
+    const sectionId = page.dataset.sectionId;
+    if (!topicId || !sectionId) {
+      return;
+    }
+
+    const section = this.sections.find((item) => item.id === sectionId);
+    if (!section) {
+      return;
+    }
+
+    const topic = section.topics.find((item) => item.id === topicId);
+    if (!topic) {
+      return;
+    }
+
+    topic.html = page.innerHTML;
+
+    if (updateTitle) {
+      const newTitle = this.extractHeadingTitle(page) || page.dataset.topicTitle || topic.title;
+      if (newTitle && newTitle !== topic.title) {
+        topic.title = newTitle;
+        page.dataset.topicTitle = newTitle;
+
+        const currentPage = this.state.get('currentPage');
+        const currentTopicId = currentPage?.dataset?.topicId || currentPage?.topicId;
+        if (currentTopicId === topicId) {
+          this.state.set('currentPage', this.createStatePagePayload(topic), { addToHistory: false });
+        } else {
+          this.emitSectionsUpdate();
+        }
+      }
     }
   }
 

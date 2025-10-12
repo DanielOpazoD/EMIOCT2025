@@ -19,8 +19,9 @@ export class PersistenceModule extends BaseModule {
       const data = JSON.parse(raw);
       const sectionsModule = this.editor.modules?.sections;
 
-      if (data.sections && sectionsModule?.importData) {
-        sectionsModule.importData(data.sections);
+      const sectionsPayload = data?.sections ?? data?.secciones;
+      if (sectionsPayload && sectionsModule?.importData) {
+        sectionsModule.importData(sectionsPayload);
       } else if (sectionsModule && typeof data.specialty === 'string') {
         sectionsModule.specialty = data.specialty;
         sectionsModule.updateSpecialtyTitle?.();

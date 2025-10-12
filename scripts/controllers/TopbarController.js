@@ -41,6 +41,7 @@ export class TopbarController {
     this.themeDropdown = null;
     this.themeButtons = [];
     this.cacheSaveBtn = null;
+    this.editButton = null;
 
     this.importInput = document.getElementById('importDataInput');
     this.loadHtmlInput = document.getElementById('loadHtmlInput');
@@ -70,6 +71,7 @@ export class TopbarController {
     this.readingModeBtn = this.bindButton('readingModeBtn', () => this.toggleReadingMode());
     this.notesViewBtn = this.bindButton('notesViewBtn', () => this.toggleNotesVisibility());
     this.cacheSaveBtn = this.bindButton('cacheSaveBtn', () => this.handleManualSave());
+    this.editButton = this.bindButton('editBtn', () => this.toggleEditMode());
     this.bindButton('loadHtmlBtn', () => this.triggerInput(this.loadHtmlInput));
     this.bindButton('importDataBtn', () => this.triggerInput(this.importInput));
     this.bindButton('exportDataBtn', () => this.exportSnapshot());
@@ -134,12 +136,14 @@ export class TopbarController {
     this.uiModule.subscribeToState('documentShift', ({ value }) => this.updateShiftUi(value));
     this.uiModule.subscribeToState('ui.readingMode', ({ value }) => this.reflectReadingMode(value));
     this.uiModule.subscribeToState('notes.hidden', ({ value }) => this.reflectNotesVisibility(value));
+    this.uiModule.subscribeToState('editMode', ({ value }) => this.reflectEditMode(value));
 
     const initialZoom = this.state.get('zoom') ?? DEFAULT_ZOOM;
     this.updateZoomUi(initialZoom);
     this.updateShiftUi(this.state.get('documentShift') ?? 0);
     this.reflectReadingMode(this.state.get('ui.readingMode'));
     this.reflectNotesVisibility(this.state.get('notes.hidden'));
+    this.reflectEditMode(this.state.get('editMode'));
 
     this.restoreTopbarTheme();
   }
@@ -200,6 +204,23 @@ export class TopbarController {
       this.editor.emit('notes:toggle-visibility');
     }
     this.closeDropdowns();
+  }
+
+  toggleEditMode(forceValue) {
+    const current = !!this.state.get('editMode');
+    const next = typeof forceValue === 'boolean' ? forceValue : !current;
+    this.state.set('editMode', next, { addToHistory: false });
+  }
+
+  reflectEditMode(isActive) {
+    const active = !!isActive;
+    if (this.editButton) {
+      this.editButton.classList.toggle('active', active);
+      this.editButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    if (document.body) {
+      document.body.classList.toggle('edit-mode', active);
+    }
   }
 
   reflectNotesVisibility(hidden) {
@@ -336,12 +357,17 @@ export class TopbarController {
       const text = await file.text();
       const payload = JSON.parse(text);
 
-      if (payload.sections && this.editor.modules?.sections?.importData) {
+      const hasSectionData = payload?.sections || payload?.secciones;
+      if (hasSectionData && this.editor.modules?.sections?.importData) {
         this.editor.modules.sections.importData(payload);
       }
 
-      if (payload.notes && this.editor.modules?.notes) {
-        this.editor.modules.notes.importData(payload.notes);
+      const notesPayload = payload?.notes ?? payload?.notas;
+      if (notesPayload && this.editor.modules?.notes) {
+        const normalizedNotes = Array.isArray(notesPayload)
+          ? { notes: notesPayload }
+          : notesPayload;
+        this.editor.modules.notes.importData(normalizedNotes);
       }
 
       if (typeof payload.notesHidden === 'boolean') {
