@@ -746,6 +746,14 @@ export async function initializeEditor() {
       let iconPickerGlobalHandlersBound = false;
 
       function stopIconPickerPropagation(event) {
+        if (!event) {
+          return;
+        }
+
+        if (event.type === 'pointerdown') {
+          preventPointerFocusShift(event);
+        }
+
         event.stopPropagation();
       }
 
@@ -801,7 +809,8 @@ export async function initializeEditor() {
 
         const isMouseLike = pointerType === ''
           || pointerType === 'mouse'
-          || pointerType === 'pen';
+          || pointerType === 'pen'
+          || pointerType === 'touch';
 
         if (isMouseLike) {
           const button = typeof event.button === 'number' ? event.button : 0;
