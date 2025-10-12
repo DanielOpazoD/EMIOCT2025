@@ -644,6 +644,10 @@ body.reading-mode .reading-mode-exit {
   font-size: 1.05rem;
 }
 
+#fontFamilySelect {
+  min-width: 140px;
+}
+
 .toolbar-separator {
   width: 1px;
   height: 20px;

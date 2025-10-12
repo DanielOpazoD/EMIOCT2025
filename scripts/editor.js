@@ -39,6 +39,12 @@ export async function initializeEditor() {
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let editorHistory = null;
+      const persistentBoldState = {
+        active: false,
+        applying: false,
+        pendingTimer: null
+      };
       const cropState = {
         image: null,
         isSelecting: false,
@@ -687,9 +693,10 @@ export async function initializeEditor() {
       const textColorBtn = document.getElementById('textColorBtn');
       const fontSizeDecreaseBtn = document.getElementById('fontSizeDecreaseBtn');
       const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
+      const fontFamilySelect = document.getElementById('fontFamilySelect');
+      const boldBtn = document.getElementById('boldBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
-      const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
       const tableMenu = document.getElementById('tableMenu');
       const tableMenuSize = document.getElementById('tableMenuSize');
@@ -734,6 +741,83 @@ export async function initializeEditor() {
       let persistentHighlightTimer = null;
       let persistentHighlightResumeTimer = null;
       let suppressPersistentHighlight = false;
+
+      function setPersistentBoldMode(active) {
+        if (persistentBoldState.pendingTimer) {
+          clearTimeout(persistentBoldState.pendingTimer);
+          persistentBoldState.pendingTimer = null;
+        }
+        persistentBoldState.active = !!active;
+        persistentBoldState.applying = false;
+        if (boldBtn) {
+          boldBtn.classList.toggle('active', persistentBoldState.active);
+          boldBtn.setAttribute('aria-pressed', persistentBoldState.active ? 'true' : 'false');
+        }
+      }
+
+      function applyPersistentBoldToSelection() {
+        if (!persistentBoldState.active || persistentBoldState.applying) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+        if (!isSelectionWithinEditable(selection)) {
+          return;
+        }
+
+        persistentBoldState.applying = true;
+        performEditorAction('bold-brush', () => {
+          const result = document.execCommand('bold', false, null);
+          return result !== false;
+        });
+        persistentBoldState.applying = false;
+        saveCurrentSelection({ keepWhenEmpty: true });
+      }
+
+      function schedulePersistentBold() {
+        if (!persistentBoldState.active) {
+          return;
+        }
+        if (persistentBoldState.pendingTimer) {
+          clearTimeout(persistentBoldState.pendingTimer);
+        }
+        persistentBoldState.pendingTimer = window.setTimeout(() => {
+          persistentBoldState.pendingTimer = null;
+          applyPersistentBoldToSelection();
+        }, 40);
+      }
+
+      function handleBoldCommand(options = {}) {
+        const { allowPersistentMode = false } = options;
+        if (!isEditMode) {
+          return false;
+        }
+
+        const selection = window.getSelection();
+        const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed && isSelectionWithinEditable(selection);
+
+        if (persistentBoldState.active && allowPersistentMode && !hasSelection) {
+          setPersistentBoldMode(false);
+          return true;
+        }
+
+        if (hasSelection) {
+          const result = performEditorAction('bold', () => document.execCommand('bold', false, null));
+          clearSavedSelection();
+          return result;
+        }
+
+        if (allowPersistentMode) {
+          setPersistentBoldMode(!persistentBoldState.active);
+          return true;
+        }
+
+        const result = performEditorAction('bold', () => document.execCommand('bold', false, null));
+        clearSavedSelection();
+        return result;
+      }
 
       let copiedFormat = null;
 
@@ -2047,6 +2131,261 @@ export async function initializeEditor() {
         }
       }
 
+      function performEditorAction(label, actionFn, options = {}) {
+        if (typeof actionFn !== 'function') {
+          return false;
+        }
+
+        if (editorHistory && typeof editorHistory.perform === 'function') {
+          return editorHistory.perform(label, actionFn, options);
+        }
+
+        return actionFn();
+      }
+
+      function createEditorHistory() {
+        const entries = [];
+        let index = -1;
+        let restoring = false;
+        let debounceTimer = null;
+        const MAX_ENTRIES = 80;
+
+        function ensurePagesHaveIds() {
+          pages.forEach(page => {
+            if (page && !page.dataset.pageId) {
+              page.dataset.pageId = generateUniqueId('page');
+            }
+          });
+        }
+
+        function snapshot() {
+          ensurePagesHaveIds();
+          const pageStates = pages.map(page => ({
+            id: page?.dataset?.pageId || '',
+            html: page?.innerHTML || ''
+          }));
+          const liveSelection = createSelectionSnapshot(window.getSelection());
+          const selectionSnapshot = cloneSelectionSnapshot(savedSelection || liveSelection);
+          return { pages: pageStates, selection: selectionSnapshot };
+        }
+
+        function areSnapshotsEqual(a, b) {
+          if (!a || !b) {
+            return false;
+          }
+          const pagesA = Array.isArray(a.pages) ? a.pages : [];
+          const pagesB = Array.isArray(b.pages) ? b.pages : [];
+          if (pagesA.length !== pagesB.length) {
+            return false;
+          }
+          for (let i = 0; i < pagesA.length; i++) {
+            const pageA = pagesA[i];
+            const pageB = pagesB[i];
+            if ((pageA?.id || '') !== (pageB?.id || '')) {
+              return false;
+            }
+            if ((pageA?.html || '') !== (pageB?.html || '')) {
+              return false;
+            }
+          }
+          return true;
+        }
+
+        function applyState(state) {
+          if (!state || !Array.isArray(state.pages)) {
+            return false;
+          }
+
+          restoring = true;
+          ensurePagesHaveIds();
+
+          const pageMap = new Map();
+          pages.forEach(page => {
+            if (page?.dataset?.pageId) {
+              pageMap.set(page.dataset.pageId, page);
+            }
+          });
+
+          state.pages.forEach(pageState => {
+            if (!pageState) return;
+            const page = pageMap.get(pageState.id);
+            if (page) {
+              page.innerHTML = pageState.html;
+            }
+          });
+
+          scheduleIconPickerRebind();
+          tableMenuAPI?.refresh?.();
+
+          restoring = false;
+
+          if (state.selection) {
+            const clonedSelection = cloneSelectionSnapshot(state.selection);
+            if (clonedSelection) {
+              restoreSelectionSnapshot(clonedSelection, { updateSnapshot: true });
+              savedSelection = cloneSelectionSnapshot(clonedSelection);
+            }
+          } else {
+            savedSelection = null;
+          }
+
+          return true;
+        }
+
+        function commit(label = '') {
+          if (restoring) {
+            return false;
+          }
+
+          const state = snapshot();
+          if (entries.length && index >= 0) {
+            const current = entries[index];
+            if (areSnapshotsEqual(current.state, state)) {
+              current.state.selection = state.selection;
+              return false;
+            }
+          }
+
+          entries.splice(index + 1);
+          entries.push({ label, state });
+          if (entries.length > MAX_ENTRIES) {
+            entries.splice(0, entries.length - MAX_ENTRIES);
+          }
+          index = entries.length - 1;
+          return true;
+        }
+
+        function perform(label, actionFn, options = {}) {
+          if (restoring) {
+            return actionFn();
+          }
+
+          const result = actionFn();
+
+          if (options && options.skipHistory) {
+            return result;
+          }
+
+          if (result === false) {
+            return result;
+          }
+
+          commit(label);
+          return result;
+        }
+
+        function undo() {
+          if (index <= 0) {
+            return false;
+          }
+          index -= 1;
+          return applyState(entries[index]?.state);
+        }
+
+        function redo() {
+          if (index >= entries.length - 1) {
+            return false;
+          }
+          index += 1;
+          return applyState(entries[index]?.state);
+        }
+
+        function initialize() {
+          entries.length = 0;
+          index = -1;
+          commit('initial');
+        }
+
+        function scheduleAutoCapture(label = 'auto') {
+          if (restoring) {
+            return;
+          }
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+          }
+          debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+            commit(label);
+          }, 250);
+        }
+
+        function isRestoring() {
+          return restoring;
+        }
+
+        return {
+          perform,
+          undo,
+          redo,
+          initialize,
+          scheduleAutoCapture,
+          isRestoring
+        };
+      }
+
+      function handleEditableMutations(mutations) {
+        if (!isEditMode || !editorHistory || editorHistory.isRestoring()) {
+          return;
+        }
+
+        const hasRelevantChange = mutations.some(mutation => {
+          const target = mutation.target;
+          if (!(target instanceof Node)) {
+            return false;
+          }
+          let element = null;
+          if (target.nodeType === Node.TEXT_NODE) {
+            element = target.parentElement;
+          } else if (target instanceof HTMLElement) {
+            element = target;
+          }
+          if (!element) {
+            return false;
+          }
+          return !!element.closest('.page, .magic-page, [contenteditable="true"]');
+        });
+
+        if (hasRelevantChange) {
+          editorHistory.scheduleAutoCapture('mutation');
+        }
+      }
+
+      const editableMutationObserver = new MutationObserver(handleEditableMutations);
+
+      function startHistoryObservers() {
+        editableMutationObserver.disconnect();
+        const root = document.body;
+        if (root) {
+          editableMutationObserver.observe(root, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['style', 'class']
+          });
+        }
+      }
+
+      function stopHistoryObservers() {
+        editableMutationObserver.disconnect();
+      }
+
+      editorHistory = createEditorHistory();
+
+      function handleEditableInput(event) {
+        if (!isEditMode || !editorHistory || editorHistory.isRestoring()) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        if (!target.closest('.page, .magic-page, [contenteditable="true"]')) {
+          return;
+        }
+        editorHistory.scheduleAutoCapture('input');
+      }
+
       function saveCurrentSelection(options = {}) {
         const { keepWhenEmpty = false } = options;
         const selection = window.getSelection();
@@ -2158,36 +2497,44 @@ export async function initializeEditor() {
       }
 
       function insertNodeAtSelection(node) {
-        const selection = resolveSelectionForInsertion();
-        if (!selection || !selection.rangeCount) return null;
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(node);
-        range.setStartAfter(node);
-        range.setEndAfter(node);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return node;
+        if (!node) {
+          return null;
+        }
+
+        return performEditorAction('insert-node', () => {
+          const selection = resolveSelectionForInsertion();
+          if (!selection || !selection.rangeCount) return null;
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.setEndAfter(node);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return node;
+        });
       }
 
       function insertHtmlAtSelection(html) {
-        const selection = resolveSelectionForInsertion();
-        if (!selection || !selection.rangeCount) return null;
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const fragment = range.createContextualFragment(html);
-        const nodes = Array.from(fragment.childNodes);
-        range.insertNode(fragment);
-        const lastNode = nodes[nodes.length - 1];
-        if (lastNode) {
-          range.setStartAfter(lastNode);
-          range.setEndAfter(lastNode);
-        }
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return nodes[0] || null;
+        return performEditorAction('insert-html', () => {
+          const selection = resolveSelectionForInsertion();
+          if (!selection || !selection.rangeCount) return null;
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const fragment = range.createContextualFragment(html);
+          const nodes = Array.from(fragment.childNodes);
+          range.insertNode(fragment);
+          const lastNode = nodes[nodes.length - 1];
+          if (lastNode) {
+            range.setStartAfter(lastNode);
+            range.setEndAfter(lastNode);
+          }
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return nodes[0] || null;
+        });
       }
 
       function getRangeContextElement(range) {
@@ -2213,58 +2560,60 @@ export async function initializeEditor() {
           return null;
         }
 
-        const {
-          selectionOverride = null,
-          preserveContextStyle = false
-        } = options;
+        return performEditorAction('insert-text', () => {
+          const {
+            selectionOverride = null,
+            preserveContextStyle = false
+          } = options;
 
-        let selection = selectionOverride;
-        if (selection && (!selection.rangeCount || !isSelectionWithinEditable(selection))) {
-          selection = null;
-        }
-
-        if (!selection) {
-          selection = resolveSelectionForInsertion();
-        }
-
-        if (!selection || !selection.rangeCount) {
-          return null;
-        }
-
-        const range = selection.getRangeAt(0);
-        const contextElement = preserveContextStyle ? getRangeContextElement(range) : null;
-        range.deleteContents();
-
-        let insertedNode = null;
-        if (contextElement && preserveContextStyle) {
-          try {
-            const computed = window.getComputedStyle(contextElement);
-            const fontSize = (computed && computed.fontSize) ? computed.fontSize : '';
-            if (fontSize && fontSize !== 'auto') {
-              const span = document.createElement('span');
-              span.textContent = text;
-              span.style.fontSize = fontSize;
-              span.style.lineHeight = 'inherit';
-              span.style.fontFamily = 'inherit';
-              span.style.display = 'inline';
-              insertedNode = span;
-            }
-          } catch (err) {
-            insertedNode = null;
+          let selection = selectionOverride;
+          if (selection && (!selection.rangeCount || !isSelectionWithinEditable(selection))) {
+            selection = null;
           }
-        }
 
-        if (!insertedNode) {
-          insertedNode = document.createTextNode(text);
-        }
+          if (!selection) {
+            selection = resolveSelectionForInsertion();
+          }
 
-        range.insertNode(insertedNode);
-        range.setStartAfter(insertedNode);
-        range.setEndAfter(insertedNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return insertedNode;
+          if (!selection || !selection.rangeCount) {
+            return null;
+          }
+
+          const range = selection.getRangeAt(0);
+          const contextElement = preserveContextStyle ? getRangeContextElement(range) : null;
+          range.deleteContents();
+
+          let insertedNode = null;
+          if (contextElement && preserveContextStyle) {
+            try {
+              const computed = window.getComputedStyle(contextElement);
+              const fontSize = (computed && computed.fontSize) ? computed.fontSize : '';
+              if (fontSize && fontSize !== 'auto') {
+                const span = document.createElement('span');
+                span.textContent = text;
+                span.style.fontSize = fontSize;
+                span.style.lineHeight = 'inherit';
+                span.style.fontFamily = 'inherit';
+                span.style.display = 'inline';
+                insertedNode = span;
+              }
+            } catch (err) {
+              insertedNode = null;
+            }
+          }
+
+          if (!insertedNode) {
+            insertedNode = document.createTextNode(text);
+          }
+
+          range.insertNode(insertedNode);
+          range.setStartAfter(insertedNode);
+          range.setEndAfter(insertedNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return insertedNode;
+        });
       }
 
       document.addEventListener('selectionchange', () => {
@@ -2308,40 +2657,224 @@ export async function initializeEditor() {
           return false;
         }
 
+        if (selection.isCollapsed) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
         const range = selection.getRangeAt(0);
         if (!range) {
           return false;
         }
 
         const factor = direction === 'decrease' ? (1 / FONT_SCALE_FACTOR) : FONT_SCALE_FACTOR;
+        const contextElement = getRangeContextElement(range);
+        const currentSize = getFontSizeFromElement(contextElement);
+        const newSize = clampFontSize(currentSize * factor);
+        const segments = collectEditableTextSegments(range);
+
+        if (!segments.length) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
+        return performEditorAction(direction === 'decrease' ? 'font-size-decrease' : 'font-size-increase', () => {
+          const wrappers = wrapSegmentsWithStyles(segments, {
+            fontSize: `${newSize}px`,
+            lineHeight: 'inherit',
+            display: 'inline'
+          });
+
+          if (!wrappers.length) {
+            return false;
+          }
+
+          restoreSelectionFromNodes(wrappers);
+          clearSavedSelection();
+          return true;
+        });
+      }
+
+      function applyFontFamilyToSelection(fontFamilyValue) {
+        const selection = resolveSelectionForInsertion();
+        if (!selection || selection.rangeCount === 0) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
 
         if (selection.isCollapsed) {
           alert('Selecciona el texto que deseas modificar');
           return false;
         }
 
-        const contextElement = getRangeContextElement(range);
-        const currentSize = getFontSizeFromElement(contextElement);
-        const newSize = clampFontSize(currentSize * factor);
-        const wrapper = document.createElement('span');
-        wrapper.style.fontSize = `${newSize}px`;
-        wrapper.style.lineHeight = 'inherit';
-        wrapper.style.display = 'inline';
-
-        try {
-          range.surroundContents(wrapper);
-        } catch (err) {
-          const fragment = range.extractContents();
-          wrapper.appendChild(fragment);
-          range.insertNode(wrapper);
+        const range = selection.getRangeAt(0);
+        if (!range) {
+          return false;
         }
 
-        const updatedRange = document.createRange();
-        updatedRange.selectNodeContents(wrapper);
+        const segments = collectEditableTextSegments(range);
+        if (!segments.length) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
+        const styles = {
+          fontFamily: fontFamilyValue || 'inherit'
+        };
+
+        return performEditorAction('font-family-change', () => {
+          const wrappers = wrapSegmentsWithStyles(segments, styles);
+          if (!wrappers.length) {
+            return false;
+          }
+          restoreSelectionFromNodes(wrappers);
+          clearSavedSelection();
+          return true;
+        });
+      }
+
+      function collectEditableTextSegments(range) {
+        if (!range) {
+          return [];
+        }
+
+        const segments = [];
+        const walker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              if (!rangeIntersectsNode(range, node)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!node.textContent || !node.textContent.trim()) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              const parent = node.parentElement;
+              if (!parent) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!parent.closest('.page, [contenteditable="true"]')) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          const startOffset = node === range.startContainer ? range.startOffset : 0;
+          const endOffset = node === range.endContainer ? range.endOffset : node.length;
+          if (endOffset > startOffset) {
+            segments.push({ node, startOffset, endOffset });
+          }
+        }
+
+        return segments;
+      }
+
+      function wrapSegmentsWithStyles(segments, styles) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+          return [];
+        }
+
+        const wrappers = [];
+
+        segments.forEach(segment => {
+          let { node, startOffset, endOffset } = segment;
+          if (!node || !node.parentNode) {
+            return;
+          }
+
+          if (endOffset > node.length) {
+            endOffset = node.length;
+          }
+
+          if (endOffset <= startOffset) {
+            return;
+          }
+
+          if (endOffset < node.length) {
+            node.splitText(endOffset);
+          }
+
+          if (startOffset > 0) {
+            node = node.splitText(startOffset);
+          }
+
+          const parent = node.parentElement;
+          if (parent instanceof HTMLElement && parent.childNodes.length === 1 && parent.tagName === 'SPAN') {
+            Object.entries(styles).forEach(([key, value]) => {
+              if (value !== undefined && value !== null) {
+                parent.style[key] = value;
+              }
+            });
+            if (!parent.style.display) {
+              parent.style.display = 'inline';
+            }
+            wrappers.push(parent);
+            return;
+          }
+
+          const span = document.createElement('span');
+          Object.entries(styles).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+              span.style[key] = value;
+            }
+          });
+          if (!span.style.display) {
+            span.style.display = 'inline';
+          }
+          node.parentNode.insertBefore(span, node);
+          span.appendChild(node);
+          wrappers.push(span);
+        });
+
+        return wrappers;
+      }
+
+      function restoreSelectionFromNodes(nodes) {
+        if (!nodes || !nodes.length) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection) {
+          return;
+        }
+
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        if (!first || !last) {
+          return;
+        }
+
+        const range = document.createRange();
+        range.setStartBefore(first);
+        range.setEndAfter(last);
         selection.removeAllRanges();
-        selection.addRange(updatedRange);
-        clearSavedSelection();
-        return true;
+        selection.addRange(range);
+      }
+
+      function rangeIntersectsNode(range, node) {
+        if (!range || !node) {
+          return false;
+        }
+
+        if (typeof range.intersectsNode === 'function') {
+          try {
+            return range.intersectsNode(node);
+          } catch (err) {
+            return false;
+          }
+        }
+
+        const nodeRange = document.createRange();
+        nodeRange.selectNode(node);
+        const before = range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
+        const after = range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0;
+        return !(before || after);
       }
 
       function normalizeColorToHex(color, fallback = '#ffffff') {
@@ -7812,85 +8345,89 @@ export async function initializeEditor() {
           return false;
         }
 
-        if (isHighlight && isClearHighlightColor(color)) {
+        const actionLabel = isHighlight ? 'highlight-change' : 'color-change';
+
+        return performEditorAction(actionLabel, () => {
+          if (isHighlight && isClearHighlightColor(color)) {
+            const selection = window.getSelection();
+            if (selection) {
+              selection.removeAllRanges();
+            }
+            const cleared = clearHighlightFromRange(range);
+            if (selection && cleared) {
+              const restoredRange = range.cloneRange();
+              selection.addRange(restoredRange);
+            }
+            return cleared;
+          }
+
           const selection = window.getSelection();
+          const storedRanges = [];
+          for (let i = 0; i < (selection ? selection.rangeCount : 0); i++) {
+            storedRanges.push(selection.getRangeAt(i).cloneRange());
+          }
+
           if (selection) {
             selection.removeAllRanges();
+            selection.addRange(range);
           }
-          const cleared = clearHighlightFromRange(range);
-          if (selection && cleared) {
-            const restoredRange = range.cloneRange();
-            selection.addRange(restoredRange);
+
+          const styleWithCss = supportsCommand('styleWithCSS');
+          if (styleWithCss) {
+            document.execCommand('styleWithCSS', false, true);
           }
-          return cleared;
-        }
 
-        const selection = window.getSelection();
-        const storedRanges = [];
-        for (let i = 0; i < (selection ? selection.rangeCount : 0); i++) {
-          storedRanges.push(selection.getRangeAt(i).cloneRange());
-        }
+          let command = 'foreColor';
+          if (isHighlight) {
+            if (supportsCommand('hiliteColor')) {
+              command = 'hiliteColor';
+            } else if (supportsCommand('backColor')) {
+              command = 'backColor';
+            } else {
+              command = null;
+            }
+          }
 
-        if (selection) {
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
+          let applied = false;
+          if (command) {
+            try {
+              applied = document.execCommand(command, false, color);
+            } catch (err) {
+              applied = false;
+            }
+          }
 
-        const styleWithCss = supportsCommand('styleWithCSS');
-        if (styleWithCss) {
-          document.execCommand('styleWithCSS', false, true);
-        }
+          if (styleWithCss) {
+            document.execCommand('styleWithCSS', false, false);
+          }
 
-        let command = 'foreColor';
-        if (isHighlight) {
-          if (supportsCommand('hiliteColor')) {
-            command = 'hiliteColor';
-          } else if (supportsCommand('backColor')) {
-            command = 'backColor';
+          if (selection) {
+            selection.removeAllRanges();
+            storedRanges.forEach(stored => selection.addRange(stored));
+          }
+
+          if (applied) {
+            return true;
+          }
+
+          const wrapper = document.createElement('span');
+          if (isHighlight) {
+            wrapper.style.backgroundColor = color;
+            wrapper.classList.add('text-highlighted');
           } else {
-            command = null;
+            wrapper.style.color = color;
           }
-        }
 
-        let applied = false;
-        if (command) {
           try {
-            applied = document.execCommand(command, false, color);
-          } catch (err) {
-            applied = false;
+            range.surroundContents(wrapper);
+          } catch (e) {
+            const fragment = range.extractContents();
+            wrapper.appendChild(fragment);
+            range.insertNode(wrapper);
           }
-        }
 
-        if (styleWithCss) {
-          document.execCommand('styleWithCSS', false, false);
-        }
-
-        if (selection) {
-          selection.removeAllRanges();
-          storedRanges.forEach(stored => selection.addRange(stored));
-        }
-
-        if (applied) {
           return true;
-        }
-
-        const wrapper = document.createElement('span');
-        if (isHighlight) {
-          wrapper.style.backgroundColor = color;
-          wrapper.classList.add('text-highlighted');
-        } else {
-          wrapper.style.color = color;
-        }
-
-        try {
-          range.surroundContents(wrapper);
-        } catch (e) {
-          const fragment = range.extractContents();
-          wrapper.appendChild(fragment);
-          range.insertNode(wrapper);
-        }
-
-        return true;
+        });
       }
 
       createColorPalette('highlightPalette', highlightColors, true);
@@ -7952,6 +8489,17 @@ export async function initializeEditor() {
         adjustFontSizeProportionally('decrease');
       });
 
+      fontFamilySelect?.addEventListener('change', () => {
+        const value = fontFamilySelect.value;
+        if (!value) {
+          return;
+        }
+        applyFontFamilyToSelection(value);
+        fontFamilySelect.value = '';
+      });
+
+      document.addEventListener('input', handleEditableInput, true);
+
       document.addEventListener('mouseup', (event) => {
         if (!isEditMode) {
           return;
@@ -7960,17 +8508,23 @@ export async function initializeEditor() {
           return;
         }
         schedulePersistentHighlight();
+        schedulePersistentBold();
       });
 
       document.addEventListener('keyup', (event) => {
-        if (!isEditMode || !persistentHighlight.active) {
+        if (!isEditMode) {
           return;
         }
         const key = typeof event.key === 'string' ? event.key : '';
         const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'End', 'Home', 'PageUp', 'PageDown'];
         const isSelectAll = key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey);
-        if (keys.includes(key) || isSelectAll) {
+
+        if (persistentHighlight.active && (keys.includes(key) || isSelectAll)) {
           schedulePersistentHighlight();
+        }
+
+        if (persistentBoldState.active && (keys.includes(key) || isSelectAll)) {
+          schedulePersistentBold();
         }
       });
 
@@ -8116,38 +8670,40 @@ export async function initializeEditor() {
           return false;
         }
 
-        const selection = window.getSelection();
-        if (!selection || selection.rangeCount === 0) {
-          return false;
-        }
+        return performEditorAction('apply-format', () => {
+          const selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0) {
+            return false;
+          }
 
-        const range = selection.getRangeAt(0);
-        if (!range || range.collapsed) {
-          return false;
-        }
+          const range = selection.getRangeAt(0);
+          if (!range || range.collapsed) {
+            return false;
+          }
 
-        const span = document.createElement('span');
-        span.style.fontFamily = copiedFormat.fontFamily;
-        span.style.fontSize = copiedFormat.fontSize;
-        span.style.fontWeight = copiedFormat.fontWeight;
-        span.style.fontStyle = copiedFormat.fontStyle;
-        span.style.textDecoration = copiedFormat.textDecoration;
-        span.style.color = copiedFormat.color;
-        span.style.backgroundColor = copiedFormat.backgroundColor;
+          const span = document.createElement('span');
+          span.style.fontFamily = copiedFormat.fontFamily;
+          span.style.fontSize = copiedFormat.fontSize;
+          span.style.fontWeight = copiedFormat.fontWeight;
+          span.style.fontStyle = copiedFormat.fontStyle;
+          span.style.textDecoration = copiedFormat.textDecoration;
+          span.style.color = copiedFormat.color;
+          span.style.backgroundColor = copiedFormat.backgroundColor;
 
-        try {
-          range.surroundContents(span);
-        } catch (error) {
-          const fragment = range.extractContents();
-          span.appendChild(fragment);
-          range.insertNode(span);
-        }
+          try {
+            range.surroundContents(span);
+          } catch (error) {
+            const fragment = range.extractContents();
+            span.appendChild(fragment);
+            range.insertNode(span);
+          }
 
-        const selectionRange = document.createRange();
-        selectionRange.selectNodeContents(span);
-        selection.removeAllRanges();
-        selection.addRange(selectionRange);
-        return true;
+          const selectionRange = document.createRange();
+          selectionRange.selectNodeContents(span);
+          selection.removeAllRanges();
+          selection.addRange(selectionRange);
+          return true;
+        });
       }
 
       document.getElementById('copyFormatBtn')?.addEventListener('click', () => {
@@ -8200,19 +8756,6 @@ export async function initializeEditor() {
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection({ keepWhenEmpty: true });
-          captureToolbarInsertionSnapshot();
-        }
-      });
-
-      insertTableBtn?.addEventListener('pointerdown', (event) => {
-        preventPointerFocusShift(event);
-        saveCurrentSelection({ keepWhenEmpty: true });
-        captureToolbarInsertionSnapshot();
-      });
-
-      insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
           captureToolbarInsertionSnapshot();
@@ -9413,6 +9956,8 @@ export async function initializeEditor() {
           }
           enableHtmlPaste();
           tableMenuAPI?.refresh();
+          editorHistory?.initialize();
+          startHistoryObservers();
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
@@ -9428,11 +9973,13 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+          stopHistoryObservers();
+          setPersistentBoldMode(false);
         }
       }
       
       function execCmd(command, value = null) {
-        document.execCommand(command, false, value);
+        return performEditorAction(command, () => document.execCommand(command, false, value));
       }
 
       function captureIndentTargets() {
@@ -9546,8 +10093,16 @@ export async function initializeEditor() {
 
       editBtn?.addEventListener('click', toggleEditMode);
 
-      document.getElementById('undoBtn')?.addEventListener('click', () => execCmd('undo'));
-      document.getElementById('redoBtn')?.addEventListener('click', () => execCmd('redo'));
+      document.getElementById('undoBtn')?.addEventListener('click', () => {
+        if (!editorHistory?.undo()) {
+          document.execCommand('undo', false, null);
+        }
+      });
+      document.getElementById('redoBtn')?.addEventListener('click', () => {
+        if (!editorHistory?.redo()) {
+          document.execCommand('redo', false, null);
+        }
+      });
       
       document.getElementById('fontSizeSelect')?.addEventListener('change', function() {
         if (this.value) {
@@ -9556,7 +10111,7 @@ export async function initializeEditor() {
         }
       });
       
-      document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
+      boldBtn?.addEventListener('click', () => handleBoldCommand({ allowPersistentMode: true }));
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
@@ -9643,59 +10198,6 @@ export async function initializeEditor() {
         } catch (e) {
           alert('Error al copiar: ' + e.message);
         }
-      });
-
-      /* === INSERTAR TABLA === */
-      document.getElementById('insertTableBtn')?.addEventListener('click', () => {
-        showModal(`
-          <div class="modal-header">
-            <h3>Insertar Tabla</h3>
-            <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('show')">&times;</button>
-          </div>
-          <div class="modal-body">
-            <label>Filas: <input type="number" id="tableRows" class="modal-input" value="3" min="1" max="20">
-</label>
-            <label>Columnas: <input type="number" id="tableCols" class="modal-input" value="3" min="1" max="10"></label>
-          </div>
-          <div class="modal-footer">
-            <button class="modal-btn" onclick="document.getElementById('modalOverlay').classList.remove('show')">Cancelar</button>
-            <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
-          </div>
-        `);
-        setTimeout(() => {
-          document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-            const rows = parseInt(document.getElementById('tableRows').value) || 3;
-            const cols = parseInt(document.getElementById('tableCols').value) || 3;
-
-            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-            for (let i = 0; i < cols; i++) {
-              tableHTML += `<th>Encabezado ${i + 1}</th>`;
-            }
-            tableHTML += '</tr></thead><tbody>';
-
-            for (let i = 0; i < rows; i++) {
-              tableHTML += '<tr>';
-              for (let j = 0; j < cols; j++) {
-                tableHTML += '<td>Celda</td>';
-              }
-              tableHTML += '</tr>';
-            }
-            tableHTML += '</tbody></table></div>';
-
-            if (!primeToolbarInsertionSelection()) {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-              return;
-            }
-
-            const insertedNode = insertHtmlAtSelection(tableHTML);
-            if (insertedNode) {
-              hideModal();
-              clearToolbarInsertionSnapshot();
-            } else {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-            }
-          });
-        }, 100);
       });
 
       /* === BUSCAR Y REEMPLAZAR === */
@@ -9865,7 +10367,7 @@ ${inlineStyles}
       switch(e.key.toLowerCase()) {
         case 'b':
           e.preventDefault();
-          execCmd('bold');
+          handleBoldCommand({ allowPersistentMode: false });
           break;
         case 'i':
           e.preventDefault();
@@ -9876,17 +10378,22 @@ ${inlineStyles}
           execCmd('underline');
           break;
         case 'z':
+          e.preventDefault();
           if (e.shiftKey) {
-            e.preventDefault();
-            execCmd('redo');
+            if (!editorHistory?.redo()) {
+              document.execCommand('redo', false, null);
+            }
           } else {
-            e.preventDefault();
-            execCmd('undo');
+            if (!editorHistory?.undo()) {
+              document.execCommand('undo', false, null);
+            }
           }
           break;
         case 'y':
           e.preventDefault();
-          execCmd('redo');
+          if (!editorHistory?.redo()) {
+            document.execCommand('redo', false, null);
+          }
           break;
         case 'c':
           if (e.shiftKey) {
@@ -10849,5 +11356,7 @@ ${inlineStyles}
     buildSectionsPanel();
     applyZoom(currentZoom);
   }
+
+  editorHistory?.initialize();
 
 }
