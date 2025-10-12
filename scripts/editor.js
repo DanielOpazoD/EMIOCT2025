@@ -39,6 +39,8 @@ export async function initializeEditor() {
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let historyController = null;
+      let boldBrushMode = false;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -310,6 +312,11 @@ export async function initializeEditor() {
       const loadHtmlBtn = document.getElementById('loadHtmlBtn');
       const loadHtmlInput = document.getElementById('loadHtmlInput');
       const editToolbar = document.getElementById('editToolbar');
+      const undoBtn = document.getElementById('undoBtn');
+      const redoBtn = document.getElementById('redoBtn');
+      const boldBtn = document.getElementById('boldBtn');
+      const fontFamilySelect = document.getElementById('fontFamilySelect');
+      const fontSizeSelect = document.getElementById('fontSizeSelect');
       const statsBtn = document.getElementById('statsBtn');
       const clearAllBtn = document.getElementById('clearAllBtn');
       const exportDataBtn = document.getElementById('exportDataBtn');
@@ -689,7 +696,6 @@ export async function initializeEditor() {
       const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
       const insertHtmlBtn = document.getElementById('insertHtmlBtn');
-      const insertTableBtn = document.getElementById('insertTableBtn');
       const insertCollapseCardBtn = document.getElementById('insertCollapseCardBtn');
       const tableMenu = document.getElementById('tableMenu');
       const tableMenuSize = document.getElementById('tableMenuSize');
@@ -2084,6 +2090,216 @@ export async function initializeEditor() {
         return true;
       }
 
+      function updateHistoryButtons(state = {}) {
+        if (undoBtn) {
+          undoBtn.disabled = !state.canUndo;
+        }
+        if (redoBtn) {
+          redoBtn.disabled = !state.canRedo;
+        }
+      }
+
+      function deepCloneData(data) {
+        if (data === null || data === undefined) {
+          return data;
+        }
+        try {
+          return JSON.parse(JSON.stringify(data));
+        } catch (error) {
+          console.warn('No se pudo clonar el estado del editor:', error);
+          return data;
+        }
+      }
+
+      function createEditorHistoryController(options = {}) {
+        const {
+          captureSnapshot,
+          applySnapshot,
+          onStateChange,
+          maxStack = 100
+        } = options;
+
+        const undoStack = [];
+        const redoStack = [];
+        let currentSnapshot = null;
+        let currentSignature = null;
+        let applying = false;
+        let actionDepth = 0;
+
+        function computeSignature(snapshot) {
+          if (!snapshot) {
+            return '';
+          }
+          try {
+            return JSON.stringify(snapshot);
+          } catch (error) {
+            console.warn('No se pudo generar la firma del estado del editor:', error);
+            return String(Date.now());
+          }
+        }
+
+        function capture() {
+          if (typeof captureSnapshot !== 'function') {
+            return null;
+          }
+          const snapshot = captureSnapshot();
+          return deepCloneData(snapshot);
+        }
+
+        function apply(snapshot) {
+          if (typeof applySnapshot !== 'function') {
+            return false;
+          }
+          applying = true;
+          try {
+            applySnapshot(deepCloneData(snapshot));
+          } finally {
+            applying = false;
+          }
+          return true;
+        }
+
+        function notify() {
+          if (typeof onStateChange === 'function') {
+            onStateChange({
+              canUndo: undoStack.length > 0,
+              canRedo: redoStack.length > 0
+            });
+          }
+        }
+
+        function initializeCurrentSnapshot() {
+          currentSnapshot = capture();
+          currentSignature = computeSignature(currentSnapshot);
+          notify();
+        }
+
+        initializeCurrentSnapshot();
+
+        return {
+          run(label, handler) {
+            if (applying) {
+              return typeof handler === 'function' ? handler() : false;
+            }
+            actionDepth += 1;
+            try {
+              if (actionDepth > 1) {
+                return typeof handler === 'function' ? handler() : false;
+              }
+
+              const before = capture();
+              const beforeSignature = computeSignature(before);
+              const result = typeof handler === 'function' ? handler() : false;
+
+              if (result === false) {
+                currentSnapshot = before;
+                currentSignature = beforeSignature;
+                return result;
+              }
+
+              const after = capture();
+              const afterSignature = computeSignature(after);
+
+              if (beforeSignature === afterSignature) {
+                currentSnapshot = after;
+                currentSignature = afterSignature;
+                return result;
+              }
+
+              undoStack.push({ label, snapshot: before, signature: beforeSignature });
+              if (undoStack.length > maxStack) {
+                undoStack.splice(0, undoStack.length - maxStack);
+              }
+              redoStack.length = 0;
+              currentSnapshot = after;
+              currentSignature = afterSignature;
+              notify();
+              return result;
+            } finally {
+              actionDepth = Math.max(0, actionDepth - 1);
+            }
+          },
+          undo() {
+            if (undoStack.length === 0) {
+              return false;
+            }
+
+            const previous = undoStack.pop();
+            const current = currentSnapshot ?? capture();
+            const currentSig = computeSignature(current);
+
+            if (current) {
+              redoStack.push({ label: previous.label, snapshot: current, signature: currentSig });
+              if (redoStack.length > maxStack) {
+                redoStack.splice(0, redoStack.length - maxStack);
+              }
+            }
+
+            apply(previous.snapshot);
+            currentSnapshot = deepCloneData(previous.snapshot);
+            currentSignature = previous.signature;
+            notify();
+            return true;
+          },
+          redo() {
+            if (redoStack.length === 0) {
+              return false;
+            }
+
+            const next = redoStack.pop();
+            const current = currentSnapshot ?? capture();
+            const currentSig = computeSignature(current);
+
+            if (current) {
+              undoStack.push({ label: next.label, snapshot: current, signature: currentSig });
+              if (undoStack.length > maxStack) {
+                undoStack.splice(0, undoStack.length - maxStack);
+              }
+            }
+
+            apply(next.snapshot);
+            currentSnapshot = deepCloneData(next.snapshot);
+            currentSignature = next.signature;
+            notify();
+            return true;
+          },
+          reset() {
+            undoStack.length = 0;
+            redoStack.length = 0;
+            initializeCurrentSnapshot();
+          },
+          getState() {
+            return {
+              canUndo: undoStack.length > 0,
+              canRedo: redoStack.length > 0
+            };
+          }
+        };
+      }
+
+      function ensureHistoryController() {
+        if (!historyController) {
+          historyController = createEditorHistoryController({
+            captureSnapshot: () => deepCloneData(collectDocumentData()),
+            applySnapshot: (snapshot) => {
+              importSectionsData(snapshot);
+              scheduleIconPickerRebind(120);
+            },
+            onStateChange: updateHistoryButtons,
+            maxStack: 100
+          });
+        }
+        return historyController;
+      }
+
+      function performEditorAction(label, handler) {
+        const controller = ensureHistoryController();
+        if (!controller || typeof handler !== 'function') {
+          return typeof handler === 'function' ? handler() : false;
+        }
+        return controller.run(label, handler);
+      }
+
       function captureIconPickerSelectionSnapshot() {
         let selection = window.getSelection();
 
@@ -2158,36 +2374,54 @@ export async function initializeEditor() {
       }
 
       function insertNodeAtSelection(node) {
-        const selection = resolveSelectionForInsertion();
-        if (!selection || !selection.rangeCount) return null;
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(node);
-        range.setStartAfter(node);
-        range.setEndAfter(node);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return node;
+        if (!node) {
+          return null;
+        }
+
+        return performEditorAction('insert-node', () => {
+          const selection = resolveSelectionForInsertion();
+          if (!selection || !selection.rangeCount) {
+            return null;
+          }
+
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.setEndAfter(node);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return node;
+        });
       }
 
       function insertHtmlAtSelection(html) {
-        const selection = resolveSelectionForInsertion();
-        if (!selection || !selection.rangeCount) return null;
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const fragment = range.createContextualFragment(html);
-        const nodes = Array.from(fragment.childNodes);
-        range.insertNode(fragment);
-        const lastNode = nodes[nodes.length - 1];
-        if (lastNode) {
-          range.setStartAfter(lastNode);
-          range.setEndAfter(lastNode);
+        if (typeof html !== 'string' || !html) {
+          return null;
         }
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return nodes[0] || null;
+
+        return performEditorAction('insert-html', () => {
+          const selection = resolveSelectionForInsertion();
+          if (!selection || !selection.rangeCount) {
+            return null;
+          }
+
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const fragment = range.createContextualFragment(html);
+          const nodes = Array.from(fragment.childNodes);
+          range.insertNode(fragment);
+          const lastNode = nodes[nodes.length - 1];
+          if (lastNode) {
+            range.setStartAfter(lastNode);
+            range.setEndAfter(lastNode);
+          }
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return nodes[0] || null;
+        });
       }
 
       function getRangeContextElement(range) {
@@ -2218,53 +2452,55 @@ export async function initializeEditor() {
           preserveContextStyle = false
         } = options;
 
-        let selection = selectionOverride;
-        if (selection && (!selection.rangeCount || !isSelectionWithinEditable(selection))) {
-          selection = null;
-        }
-
-        if (!selection) {
-          selection = resolveSelectionForInsertion();
-        }
-
-        if (!selection || !selection.rangeCount) {
-          return null;
-        }
-
-        const range = selection.getRangeAt(0);
-        const contextElement = preserveContextStyle ? getRangeContextElement(range) : null;
-        range.deleteContents();
-
-        let insertedNode = null;
-        if (contextElement && preserveContextStyle) {
-          try {
-            const computed = window.getComputedStyle(contextElement);
-            const fontSize = (computed && computed.fontSize) ? computed.fontSize : '';
-            if (fontSize && fontSize !== 'auto') {
-              const span = document.createElement('span');
-              span.textContent = text;
-              span.style.fontSize = fontSize;
-              span.style.lineHeight = 'inherit';
-              span.style.fontFamily = 'inherit';
-              span.style.display = 'inline';
-              insertedNode = span;
-            }
-          } catch (err) {
-            insertedNode = null;
+        return performEditorAction('insert-text', () => {
+          let selection = selectionOverride;
+          if (selection && (!selection.rangeCount || !isSelectionWithinEditable(selection))) {
+            selection = null;
           }
-        }
 
-        if (!insertedNode) {
-          insertedNode = document.createTextNode(text);
-        }
+          if (!selection) {
+            selection = resolveSelectionForInsertion();
+          }
 
-        range.insertNode(insertedNode);
-        range.setStartAfter(insertedNode);
-        range.setEndAfter(insertedNode);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        clearSavedSelection();
-        return insertedNode;
+          if (!selection || !selection.rangeCount) {
+            return null;
+          }
+
+          const range = selection.getRangeAt(0);
+          const contextElement = preserveContextStyle ? getRangeContextElement(range) : null;
+          range.deleteContents();
+
+          let insertedNode = null;
+          if (contextElement && preserveContextStyle) {
+            try {
+              const computed = window.getComputedStyle(contextElement);
+              const fontSize = (computed && computed.fontSize) ? computed.fontSize : '';
+              if (fontSize && fontSize !== 'auto') {
+                const span = document.createElement('span');
+                span.textContent = text;
+                span.style.fontSize = fontSize;
+                span.style.lineHeight = 'inherit';
+                span.style.fontFamily = 'inherit';
+                span.style.display = 'inline';
+                insertedNode = span;
+              }
+            } catch (err) {
+              insertedNode = null;
+            }
+          }
+
+          if (!insertedNode) {
+            insertedNode = document.createTextNode(text);
+          }
+
+          range.insertNode(insertedNode);
+          range.setStartAfter(insertedNode);
+          range.setEndAfter(insertedNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          clearSavedSelection();
+          return insertedNode;
+        });
       }
 
       document.addEventListener('selectionchange', () => {
@@ -2303,45 +2539,262 @@ export async function initializeEditor() {
 
       function adjustFontSizeProportionally(direction) {
         const selection = resolveSelectionForInsertion();
-        if (!selection || selection.rangeCount === 0) {
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
           alert('Selecciona el texto que deseas modificar');
-          return false;
-        }
-
-        const range = selection.getRangeAt(0);
-        if (!range) {
           return false;
         }
 
         const factor = direction === 'decrease' ? (1 / FONT_SCALE_FACTOR) : FONT_SCALE_FACTOR;
 
-        if (selection.isCollapsed) {
-          alert('Selecciona el texto que deseas modificar');
+        return performEditorAction(`font-size-${direction}`, () => {
+          const liveSelection = resolveSelectionForInsertion();
+          if (!liveSelection || liveSelection.rangeCount === 0) {
+            return false;
+          }
+
+          const range = liveSelection.getRangeAt(0);
+          if (!range || range.collapsed) {
+            return false;
+          }
+
+          splitRangeBoundaries(range);
+          const textNodes = collectEditableTextNodesInRange(range);
+          if (!textNodes.length) {
+            return false;
+          }
+
+          const updatedWrappers = new Set();
+          textNodes.forEach((node) => {
+            const wrapper = ensureInlineWrapperForTextNode(node);
+            if (!wrapper || updatedWrappers.has(wrapper)) {
+              return;
+            }
+            const currentSize = getFontSizeFromElement(wrapper);
+            const newSize = clampFontSize(currentSize * factor);
+            wrapper.style.fontSize = `${newSize}px`;
+            wrapper.style.removeProperty('line-height');
+            updatedWrappers.add(wrapper);
+          });
+
+          restoreSelectionFromNodes(textNodes);
+          clearSavedSelection();
+          return true;
+        });
+      }
+
+      function splitRangeBoundaries(range) {
+        if (!range) {
+          return;
+        }
+
+        let startContainer = range.startContainer;
+        let startOffset = range.startOffset;
+        let endContainer = range.endContainer;
+        let endOffset = range.endOffset;
+
+        if (startContainer && startContainer.nodeType === Node.TEXT_NODE) {
+          const textNode = startContainer;
+          const length = textNode.textContent ? textNode.textContent.length : 0;
+          if (startOffset > 0 && startOffset < length) {
+            const newNode = textNode.splitText(startOffset);
+            range.setStart(newNode, 0);
+            startContainer = newNode;
+            if (endContainer === textNode) {
+              endContainer = newNode;
+              endOffset = Math.max(0, endOffset - startOffset);
+            }
+          }
+        }
+
+        if (endContainer && endContainer.nodeType === Node.TEXT_NODE) {
+          const textNode = endContainer;
+          const length = textNode.textContent ? textNode.textContent.length : 0;
+          if (endOffset > 0 && endOffset < length) {
+            textNode.splitText(endOffset);
+          }
+        }
+      }
+
+      function rangeIntersectsNode(range, node) {
+        if (!range || !node) {
           return false;
         }
 
-        const contextElement = getRangeContextElement(range);
-        const currentSize = getFontSizeFromElement(contextElement);
-        const newSize = clampFontSize(currentSize * factor);
-        const wrapper = document.createElement('span');
-        wrapper.style.fontSize = `${newSize}px`;
-        wrapper.style.lineHeight = 'inherit';
-        wrapper.style.display = 'inline';
-
-        try {
-          range.surroundContents(wrapper);
-        } catch (err) {
-          const fragment = range.extractContents();
-          wrapper.appendChild(fragment);
-          range.insertNode(wrapper);
+        if (typeof range.intersectsNode === 'function') {
+          try {
+            return range.intersectsNode(node);
+          } catch (error) {
+            // Fallback to manual calculation
+          }
         }
 
-        const updatedRange = document.createRange();
-        updatedRange.selectNodeContents(wrapper);
+        const nodeRange = document.createRange();
+        try {
+          if (node.nodeType === Node.TEXT_NODE) {
+            nodeRange.selectNodeContents(node);
+          } else {
+            nodeRange.selectNode(node);
+          }
+        } catch (error) {
+          return false;
+        }
+
+        const startComparison = range.compareBoundaryPoints(Range.END_TO_START, nodeRange);
+        const endComparison = range.compareBoundaryPoints(Range.START_TO_END, nodeRange);
+        nodeRange.detach?.();
+        return startComparison > -1 && endComparison < 1;
+      }
+
+      function collectEditableTextNodesInRange(range) {
+        if (!range) {
+          return [];
+        }
+
+        const nodes = [];
+        const root = range.commonAncestorContainer;
+        const baseEditable = resolveEditableAncestor(range.startContainer)
+          || resolveEditableAncestor(range.endContainer);
+        const walker = document.createTreeWalker(
+          root,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              if (!node || !node.textContent) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!rangeIntersectsNode(range, node)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              const editable = resolveEditableAncestor(node);
+              if (!editable || !editable.isContentEditable) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (baseEditable && editable !== baseEditable) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (!node.textContent.trim()) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        while (walker.nextNode()) {
+          nodes.push(walker.currentNode);
+        }
+
+        return nodes;
+      }
+
+      function ensureInlineWrapperForTextNode(node) {
+        if (!node || node.nodeType !== Node.TEXT_NODE) {
+          return null;
+        }
+
+        const parent = node.parentNode;
+        if (!parent) {
+          return null;
+        }
+
+        if (parent instanceof HTMLElement && parent.tagName === 'SPAN' && parent.childNodes.length === 1) {
+          return parent;
+        }
+
+        const span = document.createElement('span');
+        span.style.display = 'inline';
+        parent.insertBefore(span, node);
+        span.appendChild(node);
+        return span;
+      }
+
+      function restoreSelectionFromNodes(nodes) {
+        if (!Array.isArray(nodes) || nodes.length === 0) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection) {
+          return;
+        }
+
+        const startNode = nodes[0];
+        const endNode = nodes[nodes.length - 1];
+        const range = document.createRange();
+        range.setStart(startNode, 0);
+        const endLength = endNode.textContent ? endNode.textContent.length : 0;
+        range.setEnd(endNode, endLength);
         selection.removeAllRanges();
-        selection.addRange(updatedRange);
-        clearSavedSelection();
-        return true;
+        selection.addRange(range);
+      }
+
+      function applyFontFamily(fontFamily) {
+        if (typeof fontFamily !== 'string' || !fontFamily) {
+          return false;
+        }
+
+        const selection = resolveSelectionForInsertion();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          alert('Selecciona el texto al que deseas cambiar la fuente');
+          return false;
+        }
+
+        return performEditorAction('font-family', () => {
+          const liveSelection = resolveSelectionForInsertion();
+          if (!liveSelection || liveSelection.rangeCount === 0) {
+            return false;
+          }
+
+          const range = liveSelection.getRangeAt(0);
+          if (!range || range.collapsed) {
+            return false;
+          }
+
+          splitRangeBoundaries(range);
+          const textNodes = collectEditableTextNodesInRange(range);
+          if (!textNodes.length) {
+            return false;
+          }
+
+          textNodes.forEach((node) => {
+            const wrapper = ensureInlineWrapperForTextNode(node);
+            if (!wrapper) {
+              return;
+            }
+            wrapper.style.fontFamily = fontFamily;
+          });
+
+          restoreSelectionFromNodes(textNodes);
+          clearSavedSelection();
+          return true;
+        });
+      }
+
+      function enableBoldBrushMode() {
+        if (boldBrushMode) {
+          return;
+        }
+        boldBrushMode = true;
+        boldBtn?.classList.add('brush-active');
+        boldBtn?.setAttribute('aria-pressed', 'true');
+      }
+
+      function disableBoldBrushMode() {
+        boldBrushMode = false;
+        boldBtn?.classList.remove('brush-active');
+        boldBtn?.setAttribute('aria-pressed', 'false');
+      }
+
+      function applyBoldBrushToSelection() {
+        if (!boldBrushMode || !isEditMode) {
+          return;
+        }
+        const selection = resolveSelectionForInsertion();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+        execCmd('bold');
+        saveCurrentSelection();
       }
 
       function normalizeColorToHex(color, fallback = '#ffffff') {
@@ -7960,17 +8413,21 @@ export async function initializeEditor() {
           return;
         }
         schedulePersistentHighlight();
+        applyBoldBrushToSelection();
       });
 
       document.addEventListener('keyup', (event) => {
-        if (!isEditMode || !persistentHighlight.active) {
+        if (!isEditMode) {
           return;
         }
         const key = typeof event.key === 'string' ? event.key : '';
         const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'End', 'Home', 'PageUp', 'PageDown'];
         const isSelectAll = key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey);
-        if (keys.includes(key) || isSelectAll) {
+        if (persistentHighlight.active && (keys.includes(key) || isSelectAll)) {
           schedulePersistentHighlight();
+        }
+        if (boldBrushMode && (keys.includes(key) || isSelectAll)) {
+          applyBoldBrushToSelection();
         }
       });
 
@@ -8200,19 +8657,6 @@ export async function initializeEditor() {
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection({ keepWhenEmpty: true });
-          captureToolbarInsertionSnapshot();
-        }
-      });
-
-      insertTableBtn?.addEventListener('pointerdown', (event) => {
-        preventPointerFocusShift(event);
-        saveCurrentSelection({ keepWhenEmpty: true });
-        captureToolbarInsertionSnapshot();
-      });
-
-      insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
           captureToolbarInsertionSnapshot();
@@ -9374,6 +9818,7 @@ export async function initializeEditor() {
           textColorPalette.classList.remove('show');
           hideIconPicker();
           savedSelection = null;
+          disableBoldBrushMode();
         }
       });
 
@@ -9414,6 +9859,7 @@ export async function initializeEditor() {
           enableHtmlPaste();
           tableMenuAPI?.refresh();
         } else {
+          disableBoldBrushMode();
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
           magicPages.forEach(mp => mp.contentEditable = 'false');
@@ -9432,7 +9878,21 @@ export async function initializeEditor() {
       }
       
       function execCmd(command, value = null) {
-        document.execCommand(command, false, value);
+        if (!command) {
+          return false;
+        }
+
+        if (command === 'undo') {
+          const controller = ensureHistoryController();
+          return controller ? controller.undo() : false;
+        }
+
+        if (command === 'redo') {
+          const controller = ensureHistoryController();
+          return controller ? controller.redo() : false;
+        }
+
+        return performEditorAction(command, () => document.execCommand(command, false, value));
       }
 
       function captureIndentTargets() {
@@ -9546,17 +10006,58 @@ export async function initializeEditor() {
 
       editBtn?.addEventListener('click', toggleEditMode);
 
-      document.getElementById('undoBtn')?.addEventListener('click', () => execCmd('undo'));
-      document.getElementById('redoBtn')?.addEventListener('click', () => execCmd('redo'));
+      undoBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        const controller = ensureHistoryController();
+        controller?.undo();
+      });
+
+      redoBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        const controller = ensureHistoryController();
+        controller?.redo();
+      });
       
-      document.getElementById('fontSizeSelect')?.addEventListener('change', function() {
+      fontFamilySelect?.addEventListener('change', (event) => {
+        const value = event.target.value;
+        if (!value) {
+          return;
+        }
+        applyFontFamily(value);
+        event.target.value = '';
+      });
+
+      fontSizeSelect?.addEventListener('change', function () {
         if (this.value) {
           execCmd('fontSize', this.value);
           this.value = '';
         }
       });
-      
-      document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
+      boldBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (!isEditMode) {
+          return;
+        }
+
+        const selection = resolveSelectionForInsertion();
+        const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
+
+        if (boldBrushMode) {
+          disableBoldBrushMode();
+          if (hasSelection) {
+            execCmd('bold');
+          }
+          return;
+        }
+
+        if (hasSelection) {
+          execCmd('bold');
+          return;
+        }
+
+        enableBoldBrushMode();
+      });
+
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
@@ -9567,6 +10068,8 @@ export async function initializeEditor() {
 
       bindIconPickerTrigger();
       scheduleIconPickerRebind();
+      ensureHistoryController();
+      disableBoldBrushMode();
 
       /* === INSERTAR HTML PERSONALIZADO === */
       document.getElementById('insertHtmlBtn')?.addEventListener('click', () => {
@@ -9643,59 +10146,6 @@ export async function initializeEditor() {
         } catch (e) {
           alert('Error al copiar: ' + e.message);
         }
-      });
-
-      /* === INSERTAR TABLA === */
-      document.getElementById('insertTableBtn')?.addEventListener('click', () => {
-        showModal(`
-          <div class="modal-header">
-            <h3>Insertar Tabla</h3>
-            <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('show')">&times;</button>
-          </div>
-          <div class="modal-body">
-            <label>Filas: <input type="number" id="tableRows" class="modal-input" value="3" min="1" max="20">
-</label>
-            <label>Columnas: <input type="number" id="tableCols" class="modal-input" value="3" min="1" max="10"></label>
-          </div>
-          <div class="modal-footer">
-            <button class="modal-btn" onclick="document.getElementById('modalOverlay').classList.remove('show')">Cancelar</button>
-            <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
-          </div>
-        `);
-        setTimeout(() => {
-          document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-            const rows = parseInt(document.getElementById('tableRows').value) || 3;
-            const cols = parseInt(document.getElementById('tableCols').value) || 3;
-
-            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-            for (let i = 0; i < cols; i++) {
-              tableHTML += `<th>Encabezado ${i + 1}</th>`;
-            }
-            tableHTML += '</tr></thead><tbody>';
-
-            for (let i = 0; i < rows; i++) {
-              tableHTML += '<tr>';
-              for (let j = 0; j < cols; j++) {
-                tableHTML += '<td>Celda</td>';
-              }
-              tableHTML += '</tr>';
-            }
-            tableHTML += '</tbody></table></div>';
-
-            if (!primeToolbarInsertionSelection()) {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-              return;
-            }
-
-            const insertedNode = insertHtmlAtSelection(tableHTML);
-            if (insertedNode) {
-              hideModal();
-              clearToolbarInsertionSnapshot();
-            } else {
-              alert('Selecciona un área editable antes de insertar una tabla.');
-            }
-          });
-        }, 100);
       });
 
       /* === BUSCAR Y REEMPLAZAR === */
@@ -9861,12 +10311,13 @@ ${inlineStyles}
   document.addEventListener('keydown', (e) => {
     if (!isEditMode) return;
 
-    if (e.ctrlKey || e.metaKey) {
-      switch(e.key.toLowerCase()) {
-        case 'b':
-          e.preventDefault();
-          execCmd('bold');
-          break;
+        if (e.ctrlKey || e.metaKey) {
+          switch(e.key.toLowerCase()) {
+            case 'b':
+              e.preventDefault();
+              disableBoldBrushMode();
+              execCmd('bold');
+              break;
         case 'i':
           e.preventDefault();
           execCmd('italic');

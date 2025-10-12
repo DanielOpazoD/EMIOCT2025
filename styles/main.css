@@ -644,6 +644,17 @@ body.reading-mode .reading-mode-exit {
   font-size: 1.05rem;
 }
 
+.edit-toolbar #fontFamilySelect {
+  min-width: 150px;
+}
+
+.edit-toolbar button.brush-active {
+  background: #fde68a;
+  border-color: #f59e0b;
+  color: #92400e;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
 .toolbar-separator {
   width: 1px;
   height: 20px;
