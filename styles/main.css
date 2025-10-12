@@ -580,12 +580,12 @@ body.reading-mode .reading-mode-exit {
 /* ===== Barra de herramientas mejorada ===== */
 .edit-toolbar {
   position: fixed;
-  top: calc(var(--topbar-height) + 8px);
+  top: var(--topbar-height);
   left: 0;
   right: 0;
   background: #fff;
   border-bottom: 1px solid #dee2e6;
-  padding: 6px 10px;
+  padding: 4px 10px;
   box-shadow: 0 2px 8px rgba(0,0,0,.12);
   display: none;
   z-index: 3500;
@@ -609,12 +609,12 @@ body.reading-mode .reading-mode-exit {
 }
 
 .edit-toolbar button, .edit-toolbar select {
-  padding: 3px 6px;
+  padding: 2px 6px;
   border: 1px solid #ced4da;
   border-radius: 3px;
   background: #fff;
   cursor: pointer;
-  font-size: 0.952rem;
+  font-size: 1.05rem;
   line-height: 1.2;
 }
 
