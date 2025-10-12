@@ -9,6 +9,95 @@ const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6';
 const DOCUMENT_SHIFT_MIN = -1500;
 const DOCUMENT_SHIFT_MAX = 1500;
 
+const SECTION_COLLECTION_KEYS = [
+  'sections',
+  'secciones',
+  'items',
+  'lista',
+  'list',
+  'data',
+  'values',
+  'collection',
+  'entries'
+];
+
+const TOPIC_COLLECTION_KEYS = [
+  'temas',
+  'topics',
+  'items',
+  'lista',
+  'list',
+  'data',
+  'values',
+  'collection',
+  'entries'
+];
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function filterObjectEntries(collection) {
+  return collection
+    .filter((item) => item !== null && item !== undefined && isPlainObject(item));
+}
+
+function toArrayFromCollection(source, candidateKeys) {
+  if (!source) {
+    return [];
+  }
+
+  if (Array.isArray(source)) {
+    return source;
+  }
+
+  if (source instanceof Map) {
+    return Array.from(source.values());
+  }
+
+  if (!isPlainObject(source)) {
+    return [];
+  }
+
+  for (const key of candidateKeys) {
+    if (Array.isArray(source[key])) {
+      return source[key];
+    }
+    if (isPlainObject(source[key])) {
+      const nested = toArrayFromCollection(source[key], candidateKeys);
+      if (nested.length > 0) {
+        return nested;
+      }
+    }
+  }
+
+  if (Array.isArray(source.items)) {
+    return source.items;
+  }
+
+  if (Array.isArray(source.list)) {
+    return source.list;
+  }
+
+  if (Array.isArray(source.data)) {
+    return source.data;
+  }
+
+  if (Array.isArray(source.values)) {
+    return source.values;
+  }
+
+  const numericKeys = Object.keys(source).filter((key) => /^\d+$/.test(key));
+  if (numericKeys.length > 0) {
+    return numericKeys
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => source[key])
+      .filter((item) => item !== undefined && item !== null);
+  }
+
+  return Object.values(source).filter((item) => item !== undefined && item !== null);
+}
+
 export class SectionsModule extends BaseModule {
   constructor(editor) {
     super(editor);
@@ -152,7 +241,7 @@ export class SectionsModule extends BaseModule {
   normalizeImportPayload(payload) {
     if (Array.isArray(payload)) {
       return {
-        sections: payload,
+        sections: filterObjectEntries(payload),
         specialty: '',
         documentShift: null
       };
@@ -169,14 +258,15 @@ export class SectionsModule extends BaseModule {
 
     let resolvedSections = [];
     for (const candidate of sectionCandidates) {
-      if (Array.isArray(candidate)) {
-        resolvedSections = candidate;
+      const normalized = filterObjectEntries(toArrayFromCollection(candidate, SECTION_COLLECTION_KEYS));
+      if (normalized.length > 0) {
+        resolvedSections = normalized;
         break;
       }
-      if (candidate && Array.isArray(candidate.sections)) {
-        resolvedSections = candidate.sections;
-        break;
-      }
+    }
+
+    if (resolvedSections.length === 0 && isPlainObject(payload)) {
+      resolvedSections = filterObjectEntries(toArrayFromCollection(payload, SECTION_COLLECTION_KEYS));
     }
 
     const specialtyCandidates = [
@@ -213,11 +303,7 @@ export class SectionsModule extends BaseModule {
       : !!sectionData?.colapsado;
     const theme = sectionData?.theme ? String(sectionData.theme).trim() : DEFAULT_SECTION_THEME;
 
-    const topicsSource = Array.isArray(sectionData?.temas)
-      ? sectionData.temas
-      : Array.isArray(sectionData?.topics)
-        ? sectionData.topics
-        : [];
+    const topicsSource = this.resolveTopicsCollection(sectionData);
 
     const normalizedTopics = topicsSource.map((topicData, topicIndex) => this.normalizeTopic(topicData, {
       sectionId: id,
@@ -252,7 +338,9 @@ export class SectionsModule extends BaseModule {
       ? topicData.html
       : typeof topicData?.contenido === 'string'
         ? topicData.contenido
-        : '';
+        : typeof topicData?.body === 'string'
+          ? topicData.body
+          : '';
 
     return {
       id,
@@ -262,6 +350,33 @@ export class SectionsModule extends BaseModule {
       sectionId: context.sectionId,
       sectionName: sectionName
     };
+  }
+
+  resolveTopicsCollection(sectionData) {
+    if (!sectionData) {
+      return [];
+    }
+
+    const directCandidates = [
+      sectionData.temas,
+      sectionData.topics,
+      sectionData.temas?.items,
+      sectionData.topics?.items
+    ];
+
+    for (const candidate of directCandidates) {
+      const normalized = filterObjectEntries(toArrayFromCollection(candidate, TOPIC_COLLECTION_KEYS));
+      if (normalized.length > 0) {
+        return normalized;
+      }
+    }
+
+    const fallback = filterObjectEntries(toArrayFromCollection(sectionData, TOPIC_COLLECTION_KEYS));
+    if (fallback.length > 0) {
+      return fallback;
+    }
+
+    return [];
   }
 
   renderPages() {

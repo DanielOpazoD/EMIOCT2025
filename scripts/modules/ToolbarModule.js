@@ -9,6 +9,12 @@ export class ToolbarModule extends BaseModule {
   setup() {
     if (!this.toolbarElement) return;
 
+    this.subscribeToState('editMode', ({ value }) => {
+      this.reflectEditMode(value);
+    });
+
+    this.reflectEditMode(this.state.get('editMode'));
+
     const undoBtn = document.getElementById('undoBtn');
     if (undoBtn) {
       this.addDomListener(undoBtn, 'click', () => this.editor.state.undo());
@@ -34,5 +40,15 @@ export class ToolbarModule extends BaseModule {
         this.state.set('zoom', Math.max(current - 0.1, 0.5));
       });
     }
+  }
+
+  reflectEditMode(isEditing) {
+    if (!this.toolbarElement) {
+      return;
+    }
+
+    const active = !!isEditing;
+    this.toolbarElement.classList.toggle('show', active);
+    this.toolbarElement.setAttribute('aria-hidden', active ? 'false' : 'true');
   }
 }
