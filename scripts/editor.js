@@ -745,6 +745,57 @@ export async function initializeEditor() {
       let iconPickerSelectionSnapshot = null;
       let iconPickerGlobalHandlersBound = false;
 
+      const supportsPointerEvents = typeof window !== 'undefined' && typeof window.PointerEvent !== 'undefined';
+      const supportsTouchInteractions = typeof window !== 'undefined'
+        && (('ontouchstart' in window)
+          || (typeof navigator !== 'undefined'
+            && (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0)));
+      const PRE_INTERACTION_EVENT_TYPES = supportsPointerEvents
+        ? ['pointerdown']
+        : supportsTouchInteractions
+          ? ['touchstart', 'mousedown']
+          : ['mousedown'];
+      const TOUCH_PRE_INTERACTION_OPTIONS = { passive: true };
+
+      function addPreInteractionListeners(element, callback) {
+        if (!element || typeof callback !== 'function') {
+          return () => {};
+        }
+
+        let lastTouchTime = 0;
+
+        const handler = (event) => {
+          if (event.type === 'touchstart') {
+            lastTouchTime = Date.now();
+          } else if (event.type === 'mousedown') {
+            if (event.button !== 0) {
+              return;
+            }
+            if (lastTouchTime && Date.now() - lastTouchTime < 350) {
+              return;
+            }
+          } else if (event.type === 'pointerdown') {
+            if (event.pointerType === 'mouse' && event.button !== 0) {
+              return;
+            }
+          }
+
+          callback(event);
+        };
+
+        PRE_INTERACTION_EVENT_TYPES.forEach(type => {
+          const options = type === 'touchstart' ? TOUCH_PRE_INTERACTION_OPTIONS : undefined;
+          element.addEventListener(type, handler, options);
+        });
+
+        return () => {
+          PRE_INTERACTION_EVENT_TYPES.forEach(type => {
+            const options = type === 'touchstart' ? TOUCH_PRE_INTERACTION_OPTIONS : undefined;
+            element.removeEventListener(type, handler, options);
+          });
+        };
+      }
+
       function stopIconPickerPropagation(event) {
         event.stopPropagation();
       }
@@ -1073,16 +1124,13 @@ export async function initializeEditor() {
         trigger.setAttribute('aria-haspopup', 'menu');
         trigger.setAttribute('aria-expanded', 'false');
 
-        const pointerHandler = () => {
-          saveCurrentSelection();
-          captureIconPickerSelectionSnapshot();
-        };
-
         const clickHandler = (event) => {
           event.preventDefault();
           event.stopPropagation();
-          saveCurrentSelection();
-          captureIconPickerSelectionSnapshot();
+          if (!event.detail) {
+            saveCurrentSelection();
+            captureIconPickerSelectionSnapshot();
+          }
           const picker = ensureIconPicker();
           if (!picker) {
             return;
@@ -1099,14 +1147,17 @@ export async function initializeEditor() {
           }
         };
 
-        trigger.addEventListener('pointerdown', pointerHandler);
+        const detachPreInteraction = addPreInteractionListeners(trigger, () => {
+          saveCurrentSelection();
+          captureIconPickerSelectionSnapshot();
+        });
         trigger.addEventListener('click', clickHandler);
         trigger.addEventListener('keydown', keyHandler);
         trigger.dataset.iconPickerBound = 'true';
 
         iconPickerTrigger = trigger;
         iconPickerTriggerCleanup = () => {
-          trigger.removeEventListener('pointerdown', pointerHandler);
+          detachPreInteraction();
           trigger.removeEventListener('click', clickHandler);
           trigger.removeEventListener('keydown', keyHandler);
           trigger.removeAttribute('aria-expanded');
@@ -8090,7 +8141,7 @@ export async function initializeEditor() {
       });
 
       /* === PLANTILLAS === */
-      insertTemplateBtn?.addEventListener('pointerdown', () => {
+      addPreInteractionListeners(insertTemplateBtn, () => {
         saveCurrentSelection();
       });
 
@@ -8100,7 +8151,7 @@ export async function initializeEditor() {
         }
       });
 
-      insertHtmlBtn?.addEventListener('pointerdown', () => {
+      addPreInteractionListeners(insertHtmlBtn, () => {
         saveCurrentSelection();
       });
 
@@ -8110,7 +8161,7 @@ export async function initializeEditor() {
         }
       });
 
-      insertTableBtn?.addEventListener('pointerdown', () => {
+      addPreInteractionListeners(insertTableBtn, () => {
         saveCurrentSelection();
       });
 
@@ -8120,7 +8171,7 @@ export async function initializeEditor() {
         }
       });
 
-      insertCollapseCardBtn?.addEventListener('pointerdown', () => {
+      addPreInteractionListeners(insertCollapseCardBtn, () => {
         saveCurrentSelection();
       });
 
