@@ -1,4 +1,4 @@
-import { generateUniqueId } from '../utils/id.js';
+import { generateUniqueId } from '../../utils/id.js';
 import {
   NoteRegistry,
   NOTE_TYPES,
