@@ -790,6 +790,27 @@ export async function initializeEditor() {
         }, waitTime);
       }
 
+      function preventPointerFocusShift(event) {
+        if (!event) {
+          return;
+        }
+
+        const pointerType = typeof event.pointerType === 'string'
+          ? event.pointerType.toLowerCase()
+          : '';
+
+        const isMouseLike = pointerType === ''
+          || pointerType === 'mouse'
+          || pointerType === 'pen';
+
+        if (isMouseLike) {
+          const button = typeof event.button === 'number' ? event.button : 0;
+          if (button === 0) {
+            event.preventDefault();
+          }
+        }
+      }
+
       function buildIconPicker() {
         const existing = document.getElementById('iconPicker');
         const picker = existing || document.createElement('div');
@@ -1073,15 +1094,16 @@ export async function initializeEditor() {
         trigger.setAttribute('aria-haspopup', 'menu');
         trigger.setAttribute('aria-expanded', 'false');
 
-        const pointerHandler = () => {
-          saveCurrentSelection();
+        const pointerHandler = (event) => {
+          preventPointerFocusShift(event);
+          saveCurrentSelection({ keepWhenEmpty: true });
           captureIconPickerSelectionSnapshot();
         };
 
         const clickHandler = (event) => {
           event.preventDefault();
           event.stopPropagation();
-          saveCurrentSelection();
+          saveCurrentSelection({ keepWhenEmpty: true });
           captureIconPickerSelectionSnapshot();
           const picker = ensureIconPicker();
           if (!picker) {
@@ -1093,7 +1115,7 @@ export async function initializeEditor() {
         const keyHandler = (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            saveCurrentSelection();
+            saveCurrentSelection({ keepWhenEmpty: true });
             captureIconPickerSelectionSnapshot();
             toggleIconPicker(trigger);
           }
@@ -1969,11 +1991,22 @@ export async function initializeEditor() {
         }
       }
 
-      function saveCurrentSelection() {
+      function saveCurrentSelection(options = {}) {
+        const { keepWhenEmpty = false } = options;
         const selection = window.getSelection();
+
+        if (!isSelectionWithinEditable(selection)) {
+          if (!keepWhenEmpty) {
+            clearSavedSelection();
+          }
+          return false;
+        }
+
         const snapshot = createSelectionSnapshot(selection);
         if (!snapshot) {
-          clearSavedSelection();
+          if (!keepWhenEmpty) {
+            clearSavedSelection();
+          }
           return false;
         }
 
@@ -8090,43 +8123,47 @@ export async function initializeEditor() {
       });
 
       /* === PLANTILLAS === */
-      insertTemplateBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+      insertTemplateBtn?.addEventListener('pointerdown', (event) => {
+        preventPointerFocusShift(event);
+        saveCurrentSelection({ keepWhenEmpty: true });
       });
 
       insertTemplateBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          saveCurrentSelection({ keepWhenEmpty: true });
         }
       });
 
-      insertHtmlBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+      insertHtmlBtn?.addEventListener('pointerdown', (event) => {
+        preventPointerFocusShift(event);
+        saveCurrentSelection({ keepWhenEmpty: true });
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          saveCurrentSelection({ keepWhenEmpty: true });
         }
       });
 
-      insertTableBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+      insertTableBtn?.addEventListener('pointerdown', (event) => {
+        preventPointerFocusShift(event);
+        saveCurrentSelection({ keepWhenEmpty: true });
       });
 
       insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          saveCurrentSelection({ keepWhenEmpty: true });
         }
       });
 
-      insertCollapseCardBtn?.addEventListener('pointerdown', () => {
-        saveCurrentSelection();
+      insertCollapseCardBtn?.addEventListener('pointerdown', (event) => {
+        preventPointerFocusShift(event);
+        saveCurrentSelection({ keepWhenEmpty: true });
       });
 
       insertCollapseCardBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
-          saveCurrentSelection();
+          saveCurrentSelection({ keepWhenEmpty: true });
         }
       });
 
