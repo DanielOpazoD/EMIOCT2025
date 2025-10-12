@@ -683,8 +683,10 @@ export async function initializeEditor() {
       const shiftRightBtn = document.getElementById('shiftRightBtn');
       const highlightPalette = document.getElementById('highlightPalette');
       const textColorPalette = document.getElementById('textColorPalette');
+      const boldBtn = document.getElementById('boldBtn');
       const highlightBtn = document.getElementById('highlightBtn');
       const textColorBtn = document.getElementById('textColorBtn');
+      const fontFamilySelect = document.getElementById('fontFamilySelect');
       const fontSizeDecreaseBtn = document.getElementById('fontSizeDecreaseBtn');
       const fontSizeIncreaseBtn = document.getElementById('fontSizeIncreaseBtn');
       const insertTemplateBtn = document.getElementById('insertTemplateBtn');
@@ -734,6 +736,9 @@ export async function initializeEditor() {
       let persistentHighlightTimer = null;
       let persistentHighlightResumeTimer = null;
       let suppressPersistentHighlight = false;
+
+      let persistentBoldActive = false;
+      let persistentBoldTimer = null;
 
       let copiedFormat = null;
 
@@ -2323,10 +2328,77 @@ export async function initializeEditor() {
         const contextElement = getRangeContextElement(range);
         const currentSize = getFontSizeFromElement(contextElement);
         const newSize = clampFontSize(currentSize * factor);
+
+        const fragment = range.extractContents();
+        const textWrappers = [];
+        const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null);
+
+        while (walker.nextNode()) {
+          const textNode = walker.currentNode;
+          if (!textNode || !textNode.textContent || !textNode.textContent.trim()) {
+            continue;
+          }
+          const span = document.createElement('span');
+          span.style.fontSize = `${newSize}px`;
+          span.style.lineHeight = 'inherit';
+          span.style.display = 'inline';
+          const parent = textNode.parentNode;
+          if (parent) {
+            parent.insertBefore(span, textNode);
+            span.appendChild(textNode);
+            textWrappers.push(span);
+          }
+        }
+
+        range.insertNode(fragment);
+
+        if (textWrappers.length === 0) {
+          const restoredRange = document.createRange();
+          restoredRange.setStart(range.startContainer, range.startOffset);
+          restoredRange.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(restoredRange);
+          clearSavedSelection();
+          return false;
+        }
+
+        const firstWrapper = textWrappers[0];
+        const lastWrapper = textWrappers[textWrappers.length - 1];
+        const updatedRange = document.createRange();
+        updatedRange.setStartBefore(firstWrapper);
+        updatedRange.setEndAfter(lastWrapper);
+        selection.removeAllRanges();
+        selection.addRange(updatedRange);
+        clearSavedSelection();
+        return true;
+      }
+
+      function applyFontFamilyToSelection(fontFamily) {
+        const selection = resolveSelectionForInsertion();
+        if (!selection || selection.rangeCount === 0) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!range || range.collapsed) {
+          alert('Selecciona el texto que deseas modificar');
+          return false;
+        }
+
+        if (!fontFamily || fontFamily === 'inherit') {
+          const cleared = clearFontFamilyFromRange(range);
+          if (cleared) {
+            const updatedRange = range.cloneRange();
+            selection.removeAllRanges();
+            selection.addRange(updatedRange);
+          }
+          clearSavedSelection();
+          return cleared;
+        }
+
         const wrapper = document.createElement('span');
-        wrapper.style.fontSize = `${newSize}px`;
-        wrapper.style.lineHeight = 'inherit';
-        wrapper.style.display = 'inline';
+        wrapper.style.fontFamily = fontFamily;
 
         try {
           range.surroundContents(wrapper);
@@ -7444,6 +7516,40 @@ export async function initializeEditor() {
         parent.removeChild(element);
       }
 
+      function sanitizeFontFamilyFragment(fragment) {
+        if (!fragment) {
+          return;
+        }
+
+        const toUnwrap = [];
+        const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_ELEMENT, null);
+        while (walker.nextNode()) {
+          const el = walker.currentNode;
+          if (!(el instanceof HTMLElement)) {
+            continue;
+          }
+
+          if (el.style && el.style.fontFamily) {
+            el.style.removeProperty('font-family');
+            if (el.style.length === 0) {
+              el.removeAttribute('style');
+            }
+          }
+
+          if (el.tagName === 'FONT' && el.hasAttribute('face')) {
+            el.removeAttribute('face');
+          }
+
+          if (el.tagName === 'SPAN' && el.attributes.length === 0) {
+            toUnwrap.push(el);
+          } else if (el.tagName === 'FONT' && el.attributes.length === 0) {
+            toUnwrap.push(el);
+          }
+        }
+
+        toUnwrap.forEach(node => unwrapElementPreservingContent(node));
+      }
+
       function sanitizeHighlightFragment(fragment) {
         if (!fragment) {
           return;
@@ -7567,6 +7673,30 @@ export async function initializeEditor() {
         return Array.from(wrappers);
       }
 
+      function clearFontFamilyFromRange(range) {
+        if (!range || range.collapsed) {
+          return false;
+        }
+
+        const workingRange = range.cloneRange();
+        const fragment = workingRange.extractContents();
+        if (!fragment || fragment.childNodes.length === 0) {
+          return false;
+        }
+
+        sanitizeFontFamilyFragment(fragment);
+
+        const nodes = Array.from(fragment.childNodes);
+        workingRange.insertNode(fragment);
+
+        if (nodes.length > 0) {
+          range.setStartBefore(nodes[0]);
+          range.setEndAfter(nodes[nodes.length - 1]);
+        }
+
+        return true;
+      }
+
       function clearHighlightFromRange(range) {
         if (!range || range.collapsed) {
           return false;
@@ -7662,6 +7792,109 @@ export async function initializeEditor() {
         persistentHighlightTimer = setTimeout(() => {
           persistentHighlightTimer = null;
           applyPersistentHighlightIfNeeded();
+        }, 35);
+      }
+
+      function mergeAdjacentStrong(wrapper) {
+        if (!(wrapper instanceof HTMLElement) || !wrapper.isConnected) {
+          return;
+        }
+
+        const mergeSibling = (sibling, insertAtEnd) => {
+          if (!sibling || sibling.nodeType !== Node.ELEMENT_NODE) {
+            return;
+          }
+          if (sibling.tagName !== 'STRONG') {
+            return;
+          }
+          while (sibling.firstChild) {
+            if (insertAtEnd) {
+              wrapper.appendChild(sibling.firstChild);
+            } else {
+              wrapper.insertBefore(sibling.firstChild, wrapper.firstChild);
+            }
+          }
+          sibling.remove();
+        };
+
+        mergeSibling(wrapper.previousSibling, false);
+        mergeSibling(wrapper.nextSibling, true);
+      }
+
+      function applyBoldBrushToRange(range) {
+        if (!range || range.collapsed) {
+          return false;
+        }
+
+        const wrapper = document.createElement('strong');
+
+        try {
+          range.surroundContents(wrapper);
+        } catch (err) {
+          const fragment = range.extractContents();
+          wrapper.appendChild(fragment);
+          range.insertNode(wrapper);
+        }
+
+        mergeAdjacentStrong(wrapper);
+
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          const collapseRange = document.createRange();
+          collapseRange.setStartAfter(wrapper);
+          collapseRange.collapse(true);
+          selection.addRange(collapseRange);
+        }
+
+        return true;
+      }
+
+      function activatePersistentBold() {
+        persistentBoldActive = true;
+        if (boldBtn) {
+          boldBtn.classList.add('active');
+        }
+      }
+
+      function deactivatePersistentBold() {
+        persistentBoldActive = false;
+        if (persistentBoldTimer) {
+          clearTimeout(persistentBoldTimer);
+          persistentBoldTimer = null;
+        }
+        if (boldBtn) {
+          boldBtn.classList.remove('active');
+        }
+      }
+
+      function applyPersistentBoldIfNeeded() {
+        if (!persistentBoldActive || !isEditMode) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+        const range = selection.getRangeAt(0);
+        if (!isRangeWithinEditable(range)) {
+          return;
+        }
+
+        applyBoldBrushToRange(range);
+        clearSavedSelection();
+      }
+
+      function schedulePersistentBold() {
+        if (!persistentBoldActive) {
+          return;
+        }
+        if (persistentBoldTimer) {
+          clearTimeout(persistentBoldTimer);
+        }
+        persistentBoldTimer = setTimeout(() => {
+          persistentBoldTimer = null;
+          applyPersistentBoldIfNeeded();
         }, 35);
       }
 
@@ -7825,6 +8058,10 @@ export async function initializeEditor() {
           return cleared;
         }
 
+        if (isHighlight && !isClearHighlightColor(color)) {
+          clearHighlightFromRange(range);
+        }
+
         const selection = window.getSelection();
         const storedRanges = [];
         for (let i = 0; i < (selection ? selection.rangeCount : 0); i++) {
@@ -7960,17 +8197,22 @@ export async function initializeEditor() {
           return;
         }
         schedulePersistentHighlight();
+        schedulePersistentBold();
       });
 
       document.addEventListener('keyup', (event) => {
-        if (!isEditMode || !persistentHighlight.active) {
+        if (!isEditMode) {
           return;
         }
         const key = typeof event.key === 'string' ? event.key : '';
         const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'End', 'Home', 'PageUp', 'PageDown'];
         const isSelectAll = key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey);
-        if (keys.includes(key) || isSelectAll) {
+        const shouldTrigger = keys.includes(key) || isSelectAll;
+        if (persistentHighlight.active && shouldTrigger) {
           schedulePersistentHighlight();
+        }
+        if (persistentBoldActive && (shouldTrigger || key === 'Shift')) {
+          schedulePersistentBold();
         }
       });
 
@@ -9428,6 +9670,7 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+          deactivatePersistentBold();
         }
       }
       
@@ -9555,8 +9798,35 @@ export async function initializeEditor() {
           this.value = '';
         }
       });
-      
-      document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
+
+      fontFamilySelect?.addEventListener('change', (event) => {
+        const value = event.target.value;
+        if (!value) {
+          return;
+        }
+        applyFontFamilyToSelection(value);
+        event.target.value = '';
+      });
+
+      boldBtn?.addEventListener('click', () => {
+        const selection = window.getSelection();
+        const hasSelection = selection
+          && selection.rangeCount > 0
+          && !selection.isCollapsed
+          && isSelectionWithinEditable(selection);
+
+        if (hasSelection) {
+          execCmd('bold');
+          return;
+        }
+
+        if (persistentBoldActive) {
+          deactivatePersistentBold();
+        } else {
+          activatePersistentBold();
+        }
+      });
+
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
