@@ -4027,6 +4027,50 @@ body.notes-hidden #floatingNotesLayer {
     margin: 10mm;
   }
 }
+
+/* ===== Espaciado mejorado con toolbar activa ===== */
+body.edit-toolbar-active {
+  padding-top: calc(var(--topbar-height) + 8px);
+}
+
+body.edit-toolbar-active .page {
+  margin-top: 3.2rem;
+}
+
+body.edit-toolbar-active .page:first-of-type {
+  margin-top: 5.33rem;
+}
+
+body.edit-toolbar-active .magic-view .magic-page {
+  margin-top: 3.2rem;
+}
+
+body.edit-toolbar-active .topic-panel,
+body.edit-toolbar-active .notes-view-panel {
+  top: calc(var(--topbar-height) + 8px);
+  height: calc(100vh - var(--topbar-height) - 8px);
+}
+
+body.edit-toolbar-active .floating-notes-layer {
+  top: calc(var(--topbar-height) + 8px);
+  height: calc(100vh - var(--topbar-height) - 8px);
+}
+
+body.reading-mode .page {
+  margin-top: 2.4rem;
+}
+
+body.reading-mode .page:first-of-type {
+  margin-top: 3.8rem;
+}
+
+body {
+  transition: padding-top 0.3s ease;
+}
+
+.page {
+  transition: margin-top 0.3s ease;
+}
 </style>
 <style>
 ${document.querySelector('style').textContent}

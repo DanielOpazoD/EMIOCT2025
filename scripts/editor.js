@@ -9413,6 +9413,8 @@ export async function initializeEditor() {
           }
           enableHtmlPaste();
           tableMenuAPI?.refresh();
+
+          document.body.classList.add('edit-toolbar-active');
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
@@ -9428,6 +9430,8 @@ export async function initializeEditor() {
           hideImageToolbar();
           tableMenuAPI?.cancelResize();
           tableMenuAPI?.hide();
+
+          document.body.classList.remove('edit-toolbar-active');
         }
       }
       
