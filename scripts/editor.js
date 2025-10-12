@@ -35,6 +35,7 @@ export async function initializeEditor() {
       let activeMagicPage = null;
       let allSectionsExpanded = true;
       let savedSelection = null;
+      let pendingToolbarInsertionSnapshot = null;
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
@@ -1917,6 +1918,52 @@ export async function initializeEditor() {
 
       function clearSavedSelection() {
         savedSelection = null;
+        pendingToolbarInsertionSnapshot = null;
+      }
+
+      function clearToolbarInsertionSnapshot() {
+        pendingToolbarInsertionSnapshot = null;
+      }
+
+      function captureToolbarInsertionSnapshot() {
+        const selection = window.getSelection();
+        let snapshot = null;
+
+        if (isSelectionWithinEditable(selection)) {
+          snapshot = createSelectionSnapshot(selection);
+        } else if (savedSelection) {
+          snapshot = cloneSelectionSnapshot(savedSelection);
+        }
+
+        pendingToolbarInsertionSnapshot = snapshot ? cloneSelectionSnapshot(snapshot) : null;
+
+        if (pendingToolbarInsertionSnapshot) {
+          savedSelection = cloneSelectionSnapshot(pendingToolbarInsertionSnapshot);
+          return true;
+        }
+
+        return false;
+      }
+
+      function primeToolbarInsertionSelection() {
+        if (pendingToolbarInsertionSnapshot) {
+          const snapshot = cloneSelectionSnapshot(pendingToolbarInsertionSnapshot);
+          if (snapshot && restoreSelectionSnapshot(snapshot, { updateSnapshot: true })) {
+            savedSelection = cloneSelectionSnapshot(snapshot);
+            pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(snapshot);
+            return true;
+          }
+          pendingToolbarInsertionSnapshot = null;
+        }
+
+        if (restoreSelection()) {
+          if (savedSelection) {
+            pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(savedSelection);
+          }
+          return true;
+        }
+
+        return false;
       }
 
       function createSelectionSnapshot(selection) {
@@ -4071,6 +4118,7 @@ export async function initializeEditor() {
       function hideModal() {
         modalOverlay.classList.remove('show');
         modalContent.innerHTML = '';
+        clearToolbarInsertionSnapshot();
       }
 
       modalOverlay.addEventListener('click', (e) => {
@@ -8135,44 +8183,52 @@ export async function initializeEditor() {
       insertTemplateBtn?.addEventListener('pointerdown', (event) => {
         preventPointerFocusShift(event);
         saveCurrentSelection({ keepWhenEmpty: true });
+        captureToolbarInsertionSnapshot();
       });
 
       insertTemplateBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
+          captureToolbarInsertionSnapshot();
         }
       });
 
       insertHtmlBtn?.addEventListener('pointerdown', (event) => {
         preventPointerFocusShift(event);
         saveCurrentSelection({ keepWhenEmpty: true });
+        captureToolbarInsertionSnapshot();
       });
 
       insertHtmlBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
+          captureToolbarInsertionSnapshot();
         }
       });
 
       insertTableBtn?.addEventListener('pointerdown', (event) => {
         preventPointerFocusShift(event);
         saveCurrentSelection({ keepWhenEmpty: true });
+        captureToolbarInsertionSnapshot();
       });
 
       insertTableBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
+          captureToolbarInsertionSnapshot();
         }
       });
 
       insertCollapseCardBtn?.addEventListener('pointerdown', (event) => {
         preventPointerFocusShift(event);
         saveCurrentSelection({ keepWhenEmpty: true });
+        captureToolbarInsertionSnapshot();
       });
 
       insertCollapseCardBtn?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           saveCurrentSelection({ keepWhenEmpty: true });
+          captureToolbarInsertionSnapshot();
         }
       });
 
@@ -8276,6 +8332,10 @@ export async function initializeEditor() {
           card.addEventListener('click', () => {
             const block = createTemplateBlock(template);
             if (!block) return;
+            if (!primeToolbarInsertionSelection()) {
+              alert('Selecciona un área editable antes de insertar una plantilla.');
+              return;
+            }
             const insertedBlock = insertNodeAtSelection(block);
             if (!insertedBlock) {
               alert('Selecciona un área editable antes de insertar una plantilla.');
@@ -8285,12 +8345,17 @@ export async function initializeEditor() {
             showTemplateToolbar(insertedBlock);
             insertedBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             hideModal();
+            clearToolbarInsertionSnapshot();
           });
           grid?.appendChild(card);
         });
       });
 
       insertCollapseCardBtn?.addEventListener('click', () => {
+        if (!primeToolbarInsertionSelection()) {
+          alert('Selecciona un área editable antes de insertar la tarjeta.');
+          return;
+        }
         const card = createCollapseCardElement();
         initializeCollapseCards(card);
         const insertedCard = insertNodeAtSelection(card);
@@ -8308,6 +8373,7 @@ export async function initializeEditor() {
           selection.addRange(range);
         }
         insertedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        clearToolbarInsertionSnapshot();
       });
 
       /* === PANEL LATERAL === */
@@ -9523,9 +9589,14 @@ export async function initializeEditor() {
           document.getElementById('insertCustomHtmlBtn')?.addEventListener('click', () => {
             const htmlCode = document.getElementById('customHtmlInput').value;
             if (htmlCode.trim()) {
+              if (!primeToolbarInsertionSelection()) {
+                alert('Selecciona un área editable antes de insertar HTML.');
+                return;
+              }
               const insertedNode = insertHtmlAtSelection(htmlCode);
               if (insertedNode) {
                 hideModal();
+                clearToolbarInsertionSnapshot();
               } else {
                 alert('Selecciona un área editable antes de insertar HTML.');
               }
@@ -9591,81 +9662,87 @@ export async function initializeEditor() {
             <button class="modal-btn primary" id="insertTableConfirm">Insertar</button>
           </div>
         `);
-    setTimeout(() => {
-      document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
-        const rows = parseInt(document.getElementById('tableRows').value) || 3;
-        const cols = parseInt(document.getElementById('tableCols').value) || 3;
-        
-        let tableHTML = '<div class="table-wrap"><table><thead><tr>';
-        for (let i = 0; i < cols; i++) {
-          tableHTML += `<th>Encabezado ${i + 1}</th>`;
-        }
-        tableHTML += '</tr></thead><tbody>';
-        
-        for (let i = 0; i < rows; i++) {
-          tableHTML += '<tr>';
-          for (let j = 0; j < cols; j++) {
-            tableHTML += '<td>Celda</td>';
-          }
-          tableHTML += '</tr>';
-        }
-        tableHTML += '</tbody></table></div>';
+        setTimeout(() => {
+          document.getElementById('insertTableConfirm')?.addEventListener('click', () => {
+            const rows = parseInt(document.getElementById('tableRows').value) || 3;
+            const cols = parseInt(document.getElementById('tableCols').value) || 3;
 
-        const insertedNode = insertHtmlAtSelection(tableHTML);
-        if (insertedNode) {
-          hideModal();
-        } else {
-          alert('Selecciona un área editable antes de insertar una tabla.');
-        }
-      });
-    }, 100);
-  });
+            let tableHTML = '<div class="table-wrap"><table><thead><tr>';
+            for (let i = 0; i < cols; i++) {
+              tableHTML += `<th>Encabezado ${i + 1}</th>`;
+            }
+            tableHTML += '</tr></thead><tbody>';
 
-  /* === BUSCAR Y REEMPLAZAR === */
-  document.getElementById('findReplaceBtn')?.addEventListener('click', () => {
-    showModal(`
-      <div class="modal-header">
-        <h3>Buscar y Reemplazar</h3>
-        <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('show')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <label>Buscar: <input type="text" id="findText" class="modal-input" placeholder="Texto a buscar"></label>
-        <label>Reemplazar con: <input type="text" id="replaceText" class="modal-input" placeholder="Texto de reemplazo"></label>
-        <p id="findReplaceStatus" style="margin-top: 10px; color: #6c757d;"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="modal-btn" onclick="document.getElementById('modalOverlay').classList.remove('show')">Cerrar</button>
-        <button class="modal-btn primary" id="replaceAllBtn">Reemplazar Todo</button>
-      </div>
-    `);
+            for (let i = 0; i < rows; i++) {
+              tableHTML += '<tr>';
+              for (let j = 0; j < cols; j++) {
+                tableHTML += '<td>Celda</td>';
+              }
+              tableHTML += '</tr>';
+            }
+            tableHTML += '</tbody></table></div>';
 
-    setTimeout(() => {
-      document.getElementById('replaceAllBtn')?.addEventListener('click', () => {
-        const findText = document.getElementById('findText').value;
-        const replaceText = document.getElementById('replaceText').value;
-        const status = document.getElementById('findReplaceStatus');
-        
-        if (!findText) {
-          status.textContent = 'Por favor ingresa el texto a buscar';
-          return;
-        }
+            if (!primeToolbarInsertionSelection()) {
+              alert('Selecciona un área editable antes de insertar una tabla.');
+              return;
+            }
 
-        let count = 0;
-        const currentPage = getCurrentPage() || getCurrentMagicPage();
-        if (currentPage) {
-          const html = currentPage.innerHTML;
-          const regex = new RegExp(findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-          const newHtml = html.replace(regex, (match) => {
-            count++;
-            return replaceText;
+            const insertedNode = insertHtmlAtSelection(tableHTML);
+            if (insertedNode) {
+              hideModal();
+              clearToolbarInsertionSnapshot();
+            } else {
+              alert('Selecciona un área editable antes de insertar una tabla.');
+            }
           });
-          currentPage.innerHTML = newHtml;
-        }
-
-        status.textContent = `Se reemplazaron ${count} coincidencia(s)`;
+        }, 100);
       });
-    }, 100);
-  });
+
+      /* === BUSCAR Y REEMPLAZAR === */
+      document.getElementById('findReplaceBtn')?.addEventListener('click', () => {
+        showModal(`
+          <div class="modal-header">
+            <h3>Buscar y Reemplazar</h3>
+            <button class="modal-close" onclick="document.getElementById('modalOverlay').classList.remove('show')">&times;</button>
+          </div>
+          <div class="modal-body">
+            <label>Buscar: <input type="text" id="findText" class="modal-input" placeholder="Texto a buscar"></label>
+            <label>Reemplazar con: <input type="text" id="replaceText" class="modal-input" placeholder="Texto de reemplazo"></label>
+            <p id="findReplaceStatus" style="margin-top: 10px; color: #6c757d;"></p>
+          </div>
+          <div class="modal-footer">
+            <button class="modal-btn" onclick="document.getElementById('modalOverlay').classList.remove('show')">Cerrar</button>
+            <button class="modal-btn primary" id="replaceAllBtn">Reemplazar Todo</button>
+          </div>
+        `);
+
+          setTimeout(() => {
+            document.getElementById('replaceAllBtn')?.addEventListener('click', () => {
+              const findText = document.getElementById('findText').value;
+              const replaceText = document.getElementById('replaceText').value;
+              const status = document.getElementById('findReplaceStatus');
+
+              if (!findText) {
+                status.textContent = 'Por favor ingresa el texto a buscar';
+                return;
+              }
+
+              let count = 0;
+              const currentPage = getCurrentPage() || getCurrentMagicPage();
+              if (currentPage) {
+                const html = currentPage.innerHTML;
+                const regex = new RegExp(findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                const newHtml = html.replace(regex, () => {
+                  count++;
+                  return replaceText;
+                });
+                currentPage.innerHTML = newHtml;
+              }
+
+              status.textContent = `Se reemplazaron ${count} coincidencia(s)`;
+            });
+          }, 100);
+        });
 
   /* === EXPORTAR TEMA === */
   async function exportSingleTopic(page) {
