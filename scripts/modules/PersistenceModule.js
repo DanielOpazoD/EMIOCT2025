@@ -17,6 +17,15 @@ export class PersistenceModule extends BaseModule {
       if (!raw) return;
 
       const data = JSON.parse(raw);
+      const sectionsModule = this.editor.modules?.sections;
+
+      if (data.sections && sectionsModule?.importData) {
+        sectionsModule.importData(data.sections);
+      } else if (sectionsModule && typeof data.specialty === 'string') {
+        sectionsModule.specialty = data.specialty;
+        sectionsModule.updateSpecialtyTitle?.();
+      }
+
       if (data.state) {
         Object.entries(data.state).forEach(([path, value]) => {
           this.state.set(path, value, { addToHistory: false, silent: true });
@@ -37,12 +46,18 @@ export class PersistenceModule extends BaseModule {
       const storage = this.getStorage();
       if (!storage) return;
 
+      const sectionsData = this.editor.modules?.sections?.exportData?.();
+
       const payload = {
         state: {
           'zoom': this.state.get('zoom'),
+          'documentShift': this.state.get('documentShift'),
           'notes.hidden': this.state.get('notes.hidden')
         },
-        notes: this.editor.modules?.notes?.exportData()
+        notes: this.editor.modules?.notes?.exportData(),
+        sections: sectionsData,
+        specialty: sectionsData?.specialty ?? undefined,
+        documentShift: sectionsData?.documentShift ?? this.state.get('documentShift')
       };
 
       storage.setItem(STORAGE_KEY, JSON.stringify(payload));

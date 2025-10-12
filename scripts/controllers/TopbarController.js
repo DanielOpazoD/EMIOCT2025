@@ -336,8 +336,16 @@ export class TopbarController {
       const text = await file.text();
       const payload = JSON.parse(text);
 
+      if (payload.sections && this.editor.modules?.sections?.importData) {
+        this.editor.modules.sections.importData(payload);
+      }
+
       if (payload.notes && this.editor.modules?.notes) {
         this.editor.modules.notes.importData(payload.notes);
+      }
+
+      if (typeof payload.notesHidden === 'boolean') {
+        this.state.set('notes.hidden', payload.notesHidden, { addToHistory: false });
       }
 
       if (payload.state && typeof payload.state === 'object') {
