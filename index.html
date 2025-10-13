@@ -141,9 +141,17 @@
       <div class="toolbar-separator"></div>
 
       <div class="toolbar-group">
+        <span class="toolbar-label">ESPACIADO</span>
+        <button id="spacingToolBtn" title="Ajustar espaciado">↕️</button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
         <span class="toolbar-label">NOTAS</span>
         <button id="addFloatingNoteBtn" title="Nota flotante">🗒️</button>
         <button id="toggleNotesBtn" title="Mostrar/Ocultar notas">👁️</button>
+        <button id="toggleMainContentBtn" title="Ocultar contenido principal">🗂️</button>
       </div>
 
       <div class="toolbar-separator"></div>
@@ -167,6 +175,47 @@
   <!-- Paletas de color -->
   <div class="color-palette" id="highlightPalette"></div>
   <div class="color-palette" id="textColorPalette"></div>
+
+  <div class="spacing-tool" id="spacingTool" aria-hidden="true">
+    <div class="spacing-tool-header">
+      <span>Control de espaciado</span>
+      <button type="button" id="spacingToolClose" aria-label="Cerrar panel">×</button>
+    </div>
+    <div class="spacing-tool-body">
+      <div class="spacing-tool-row">
+        <label for="spacingMarginTop">Margen superior (px)</label>
+        <div class="spacing-tool-control">
+          <input type="range" id="spacingMarginTop" min="0" max="160" step="1" value="0" />
+          <span class="spacing-tool-value" id="spacingMarginTopValue">0 px</span>
+        </div>
+      </div>
+      <div class="spacing-tool-row">
+        <label for="spacingMarginBottom">Margen inferior (px)</label>
+        <div class="spacing-tool-control">
+          <input type="range" id="spacingMarginBottom" min="0" max="160" step="1" value="0" />
+          <span class="spacing-tool-value" id="spacingMarginBottomValue">0 px</span>
+        </div>
+      </div>
+      <div class="spacing-tool-row">
+        <label for="spacingBlockGap">Espacio entre bloques (px)</label>
+        <div class="spacing-tool-control">
+          <input type="range" id="spacingBlockGap" min="0" max="160" step="1" value="0" />
+          <span class="spacing-tool-value" id="spacingBlockGapValue">0 px</span>
+        </div>
+      </div>
+      <div class="spacing-tool-row">
+        <label for="spacingLineHeight">Interlineado</label>
+        <div class="spacing-tool-control">
+          <input type="range" id="spacingLineHeight" min="0.8" max="3" step="0.05" value="1.4" />
+          <span class="spacing-tool-value" id="spacingLineHeightValue">1.40</span>
+        </div>
+      </div>
+    </div>
+    <div class="spacing-tool-footer">
+      <button type="button" id="spacingToolReset">Restablecer</button>
+      <button type="button" id="spacingToolDone">Cerrar</button>
+    </div>
+  </div>
 
   <!-- Panel de herramientas de imagen -->
   <div class="image-toolbar" id="imageToolbar">
