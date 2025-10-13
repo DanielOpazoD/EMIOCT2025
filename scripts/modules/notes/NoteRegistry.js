@@ -159,9 +159,6 @@ export function createEnhancedNote(options = {}) {
     type,
     category,
     style: (options.style && String(options.style)) || DEFAULT_NOTE_STYLE,
-    borderColor: (typeof options.borderColor === 'string' && options.borderColor.trim())
-      ? options.borderColor.trim()
-      : null,
     title,
     titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
@@ -190,6 +187,7 @@ export function createEnhancedNote(options = {}) {
     currentPageIndex: 0,
     behindMainContent: !!options.behindMainContent,
     compactHeader: !!options.compactHeader,
+    hoverAnimationEnabled: options.hoverAnimationEnabled !== false,
     customIcon: normalizeCustomIcon(options.customIcon)
   };
 
@@ -316,6 +314,8 @@ export class NoteRegistry {
           key === 'relativeTop'
         ) {
           merged[key] = Number.isFinite(overrides[key]) ? Number(overrides[key]) : merged[key];
+        } else if (key === 'hoverAnimationEnabled') {
+          merged.hoverAnimationEnabled = overrides.hoverAnimationEnabled !== false;
         } else if (overrides[key] !== undefined) {
           merged[key] = overrides[key];
         }

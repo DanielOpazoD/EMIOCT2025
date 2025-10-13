@@ -55,21 +55,25 @@ export async function initializeEditor() {
       const IMAGE_RESIZE_STEP = 0.1;
 
       const NOTE_STYLE_PRESETS = [
-        { id: 'blank', name: 'Blanca', shortName: 'Blanca', className: 'floating-note-style-blank' },
-        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
-        { id: 'sky', name: 'Cielo', shortName: 'Cielo', className: 'floating-note-style-sky' },
-        { id: 'mint', name: 'Menta', shortName: 'Menta', className: 'floating-note-style-mint' },
-        { id: 'rose', name: 'Pétalo', shortName: 'Pétalo', className: 'floating-note-style-rose' },
-        { id: 'lilac', name: 'Lavanda', shortName: 'Lavanda', className: 'floating-note-style-lilac' },
-        { id: 'slate', name: 'Pizarra', shortName: 'Pizarra', className: 'floating-note-style-slate' },
-        { id: 'citrus', name: 'Cítrica', shortName: 'Cítrica', className: 'floating-note-style-citrus' },
-        { id: 'midnight', name: 'Nocturna', shortName: 'Nocturna', className: 'floating-note-style-midnight' },
-        { id: 'dawn', name: 'Aurora', shortName: 'Aurora', className: 'floating-note-style-dawn' },
-        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' },
-        { id: 'sand', name: 'Arena', shortName: 'Arena', className: 'floating-note-style-sand' },
-        { id: 'peach', name: 'Durazno', shortName: 'Durazno', className: 'floating-note-style-peach' },
-        { id: 'ice', name: 'Hielo', shortName: 'Hielo', className: 'floating-note-style-ice' },
-        { id: 'sage', name: 'Salvia', shortName: 'Salvia', className: 'floating-note-style-sage' }
+        { id: 'blank', name: 'Blanca', className: 'floating-note-style-blank' },
+        { id: 'default', name: 'Clásica', className: 'floating-note-style-default' },
+        { id: 'sky', name: 'Cielo', className: 'floating-note-style-sky' },
+        { id: 'mint', name: 'Menta', className: 'floating-note-style-mint' },
+        { id: 'rose', name: 'Pétalo', className: 'floating-note-style-rose' },
+        { id: 'lilac', name: 'Lavanda', className: 'floating-note-style-lilac' },
+        { id: 'slate', name: 'Pizarra', className: 'floating-note-style-slate' },
+        { id: 'citrus', name: 'Cítrica', className: 'floating-note-style-citrus' },
+        { id: 'midnight', name: 'Nocturna', className: 'floating-note-style-midnight' },
+        { id: 'dawn', name: 'Aurora', className: 'floating-note-style-dawn' },
+        { id: 'forest', name: 'Bosque', className: 'floating-note-style-forest' },
+        { id: 'sand', name: 'Arena', className: 'floating-note-style-sand' },
+        { id: 'peach', name: 'Durazno', className: 'floating-note-style-peach' },
+        { id: 'ice', name: 'Hielo', className: 'floating-note-style-ice' },
+        { id: 'sage', name: 'Salvia', className: 'floating-note-style-sage' },
+        { id: 'cloud', name: 'Nube', className: 'floating-note-style-cloud' },
+        { id: 'dew', name: 'Rocío', className: 'floating-note-style-dew' },
+        { id: 'porcelain', name: 'Porcelana', className: 'floating-note-style-porcelain' },
+        { id: 'blush', name: 'Rubor suave', className: 'floating-note-style-blush' }
       ];
 
       const NOTE_ICON_SYMBOLS = [
@@ -78,10 +82,6 @@ export async function initializeEditor() {
         '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
         '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
         '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
-      ];
-
-      const NOTE_BORDER_COLORS = [
-        '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
       const ICON_FEATURE_ENABLED = true;
@@ -4975,10 +4975,7 @@ export async function initializeEditor() {
         note.dataset.style = preset?.id || 'default';
         const noteId = note.dataset.noteId;
         if (noteId) {
-          const updated = updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
-          applyFloatingNoteBorderColor(note, updated?.borderColor || null, { persist: false });
-        } else {
-          applyFloatingNoteBorderColor(note, note.dataset.borderColor || null, { persist: false });
+          updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
         }
         const menu = note.querySelector('.floating-note-style-menu');
         if (menu) {
@@ -4987,22 +4984,6 @@ export async function initializeEditor() {
           if (noteData) {
             syncNoteOptionsMenu(menu, noteData);
           }
-        }
-      }
-
-      function applyFloatingNoteBorderColor(note, color, { persist = true } = {}) {
-        if (!note) return;
-        const noteId = note.dataset.noteId;
-        const normalized = typeof color === 'string' ? color.trim() : '';
-        if (normalized) {
-          note.style.borderColor = normalized;
-          note.dataset.borderColor = normalized;
-        } else {
-          note.style.borderColor = '';
-          delete note.dataset.borderColor;
-        }
-        if (persist && noteId) {
-          updateNoteData(noteId, { borderColor: normalized || null }, { silent: true });
         }
       }
 
@@ -5088,6 +5069,24 @@ export async function initializeEditor() {
         return shouldBeBehind;
       }
 
+      function applyNoteHoverAnimationState(note, enabled, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldEnable = enabled !== false;
+        note.classList.toggle('floating-note-hover-static', !shouldEnable);
+        if (shouldEnable) {
+          delete note.dataset.hoverAnimation;
+        } else {
+          note.dataset.hoverAnimation = 'disabled';
+        }
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { hoverAnimationEnabled: shouldEnable }, { silent: true });
+          }
+        }
+        return shouldEnable;
+      }
+
       function setNoteCustomIcon(note, symbol) {
         if (!note) return null;
         const finalSymbol = normalizeCustomIconValue(symbol);
@@ -5128,6 +5127,14 @@ export async function initializeEditor() {
         if (!nextState) {
           bringNoteToFront(note);
         }
+        return nextState;
+      }
+
+      function toggleNoteHoverAnimation(note) {
+        if (!note) return false;
+        const isCurrentlyAnimated = !note.classList.contains('floating-note-hover-static');
+        const nextState = !isCurrentlyAnimated;
+        applyNoteHoverAnimationState(note, nextState);
         return nextState;
       }
 
@@ -5714,9 +5721,8 @@ export async function initializeEditor() {
         const updatedAt = data.updatedAt || metaSource.updatedAt || null;
         const linkedTo = data.linkedTo || metaSource.linkedTo || null;
         const anchorId = data.anchorId || metaSource.anchorId || null;
-        const incomingBorderColor = typeof data.borderColor === 'string' ? data.borderColor.trim() : '';
-        const metaBorderColor = typeof metaSource.borderColor === 'string' ? metaSource.borderColor.trim() : '';
-        const borderColor = incomingBorderColor || metaBorderColor || null;
+        const hoverPreference = (data.hoverAnimationEnabled ?? metaSource.hoverAnimationEnabled);
+        const resolvedHoverAnimation = hoverPreference === undefined ? true : !!hoverPreference;
         const parsedLeft = Number.parseFloat(data.left ?? metaSource.left);
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
@@ -5764,7 +5770,6 @@ export async function initializeEditor() {
           sectionId,
           linkedTo,
           anchorId,
-          borderColor,
           reviewed,
           reviewCount,
           lastReviewed,
@@ -5783,12 +5788,13 @@ export async function initializeEditor() {
           currentPageIndex: incomingPageIndex,
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
+          hoverAnimationEnabled: resolvedHoverAnimation,
           customIcon: resolvedCustomIcon
         });
         notesRegistry.set(noteId, noteData);
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
         if (resolvedCustomIcon) {
           note.dataset.customIcon = resolvedCustomIcon;
         } else {
@@ -6251,11 +6257,7 @@ export async function initializeEditor() {
             preview.classList.add(preset.className);
           }
 
-          const label = document.createElement('span');
-          label.className = 'note-style-label';
-          label.textContent = preset.shortName || preset.name;
-
-          optionBtn.append(preview, label);
+          optionBtn.append(preview);
           optionBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             applyFloatingNoteStyle(note, preset.id);
@@ -6284,50 +6286,6 @@ export async function initializeEditor() {
 
         quickWrapper.appendChild(styleSection);
         menu.appendChild(quickWrapper);
-
-        menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
-
-        const borderSection = document.createElement('div');
-        borderSection.className = 'note-menu-section note-border-section';
-        const borderTitle = document.createElement('div');
-        borderTitle.className = 'note-menu-title';
-        borderTitle.textContent = '⬒';
-        borderSection.appendChild(borderTitle);
-
-        const borderSwatches = document.createElement('div');
-        borderSwatches.className = 'note-border-swatches';
-        NOTE_BORDER_COLORS.forEach(color => {
-          const swatchBtn = document.createElement('button');
-          swatchBtn.type = 'button';
-          swatchBtn.dataset.borderColor = color;
-          swatchBtn.className = 'note-border-swatch';
-          swatchBtn.title = `Borde ${color}`;
-          swatchBtn.setAttribute('aria-label', `Aplicar borde ${color}`);
-          swatchBtn.style.setProperty('--swatch-color', color);
-          swatchBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            applyFloatingNoteBorderColor(note, color);
-            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-            closeFloatingNoteStyleMenu(menu);
-          });
-          borderSwatches.appendChild(swatchBtn);
-        });
-        borderSection.appendChild(borderSwatches);
-
-        const borderResetBtn = document.createElement('button');
-        borderResetBtn.type = 'button';
-        borderResetBtn.dataset.action = 'reset-border';
-        borderResetBtn.className = 'note-border-reset';
-        borderResetBtn.textContent = 'Sin borde';
-        borderResetBtn.setAttribute('aria-label', 'Quitar borde personalizado');
-        borderResetBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          applyFloatingNoteBorderColor(note, null);
-          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-          closeFloatingNoteStyleMenu(menu);
-        });
-        borderSection.appendChild(borderResetBtn);
-        menu.appendChild(borderSection);
 
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
 
@@ -6386,7 +6344,18 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, behindBtn);
+        const hoverAnimationBtn = document.createElement('button');
+        hoverAnimationBtn.type = 'button';
+        hoverAnimationBtn.dataset.action = 'toggle-hover-animation';
+        hoverAnimationBtn.textContent = '✨ Animación activada';
+        hoverAnimationBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteHoverAnimation(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
+        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, behindBtn, hoverAnimationBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6421,15 +6390,6 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
-        menu.querySelectorAll('button[data-border-color]').forEach(button => {
-          const isActive = (noteData.borderColor || null) === (button.dataset.borderColor || null);
-          button.classList.toggle('active', isActive);
-          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        });
-        const borderResetBtn = menu.querySelector('button[data-action="reset-border"]');
-        if (borderResetBtn) {
-          borderResetBtn.disabled = !noteData.borderColor;
-        }
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
@@ -6447,6 +6407,13 @@ export async function initializeEditor() {
           behindBtn.textContent = isBehind ? '📄 Traer al frente' : '🗂️ Usar espacio oculto';
           behindBtn.setAttribute('aria-pressed', isBehind ? 'true' : 'false');
           behindBtn.classList.toggle('active', isBehind);
+        }
+        const hoverBtn = menu.querySelector('button[data-action="toggle-hover-animation"]');
+        if (hoverBtn) {
+          const isHoverEnabled = noteData.hoverAnimationEnabled !== false;
+          hoverBtn.textContent = isHoverEnabled ? '✨ Animación activada' : '✨ Animación desactivada';
+          hoverBtn.setAttribute('aria-pressed', isHoverEnabled ? 'true' : 'false');
+          hoverBtn.classList.toggle('active', isHoverEnabled);
         }
       }
 
@@ -6723,7 +6690,6 @@ export async function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -6746,6 +6712,7 @@ export async function initializeEditor() {
         }
 
         applyNoteBehindState(note, !!noteData.behindMainContent, { persist: false });
+        applyNoteHoverAnimationState(note, noteData.hoverAnimationEnabled !== false, { persist: false });
 
         const ui = note._ui || {};
         const categoryInfo = getNoteCategoryInfo(noteData.category);
@@ -6865,14 +6832,14 @@ export async function initializeEditor() {
               type: noteData.type,
               anchorId: noteData.anchorId,
               linkedTo: noteData.linkedTo,
-              borderColor: noteData.borderColor,
               pages: Array.isArray(noteData.pages) ? noteData.pages : undefined,
               currentPageIndex: Number.isInteger(noteData.currentPageIndex) ? noteData.currentPageIndex : undefined,
               pageOffsetLeft: noteData.pageOffsetLeft,
               pageOffsetTop: noteData.pageOffsetTop,
               relativeLeft: noteData.relativeLeft,
               relativeTop: noteData.relativeTop,
-              behindMainContent: noteData.behindMainContent
+              behindMainContent: noteData.behindMainContent,
+              hoverAnimationEnabled: noteData.hoverAnimationEnabled
             });
           });
         }
@@ -10978,7 +10945,6 @@ ${inlineStyles}
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
-          noteExport.borderColor = noteData.borderColor || null;
           noteExport.topicId = noteData.topicId || null;
           noteExport.sectionId = noteData.sectionId || null;
           noteExport.type = noteData.type || NOTE_TYPES.FLOATING;
@@ -10987,6 +10953,7 @@ ${inlineStyles}
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
           noteExport.compactHeader = !!noteData.compactHeader;
+          noteExport.hoverAnimationEnabled = noteData.hoverAnimationEnabled !== false;
           noteExport.customIcon = noteData.customIcon || null;
           if (Array.isArray(noteData.pages)) {
             noteExport.pages = noteData.pages.map(page => ({
