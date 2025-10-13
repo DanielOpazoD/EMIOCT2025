@@ -159,9 +159,6 @@ export function createEnhancedNote(options = {}) {
     type,
     category,
     style: (options.style && String(options.style)) || DEFAULT_NOTE_STYLE,
-    borderColor: (typeof options.borderColor === 'string' && options.borderColor.trim())
-      ? options.borderColor.trim()
-      : null,
     title,
     titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
@@ -190,7 +187,10 @@ export function createEnhancedNote(options = {}) {
     currentPageIndex: 0,
     behindMainContent: !!options.behindMainContent,
     compactHeader: !!options.compactHeader,
-    customIcon: normalizeCustomIcon(options.customIcon)
+    customIcon: normalizeCustomIcon(options.customIcon),
+    hoverAnimation: (typeof options.hoverAnimation === 'string')
+      ? options.hoverAnimation !== 'false'
+      : options.hoverAnimation !== false
   };
 
   return applyPageStateToNote(base, {
@@ -280,6 +280,12 @@ export class NoteRegistry {
           merged.compactHeader = !!overrides.compactHeader;
         } else if (key === 'customIcon') {
           merged.customIcon = normalizeCustomIcon(overrides.customIcon);
+        } else if (key === 'hoverAnimation') {
+          if (typeof overrides.hoverAnimation === 'string') {
+            merged.hoverAnimation = overrides.hoverAnimation !== 'false';
+          } else {
+            merged.hoverAnimation = overrides.hoverAnimation !== false;
+          }
         } else if (key === 'titleHtml') {
           if (typeof overrides.titleHtml === 'string') {
             const sanitizedHtml = sanitizeNoteTitleHtml(overrides.titleHtml);

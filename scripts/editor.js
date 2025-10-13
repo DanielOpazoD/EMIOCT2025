@@ -55,21 +55,24 @@ export async function initializeEditor() {
       const IMAGE_RESIZE_STEP = 0.1;
 
       const NOTE_STYLE_PRESETS = [
-        { id: 'blank', name: 'Blanca', shortName: 'Blanca', className: 'floating-note-style-blank' },
-        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
-        { id: 'sky', name: 'Cielo', shortName: 'Cielo', className: 'floating-note-style-sky' },
-        { id: 'mint', name: 'Menta', shortName: 'Menta', className: 'floating-note-style-mint' },
-        { id: 'rose', name: 'Pétalo', shortName: 'Pétalo', className: 'floating-note-style-rose' },
-        { id: 'lilac', name: 'Lavanda', shortName: 'Lavanda', className: 'floating-note-style-lilac' },
-        { id: 'slate', name: 'Pizarra', shortName: 'Pizarra', className: 'floating-note-style-slate' },
-        { id: 'citrus', name: 'Cítrica', shortName: 'Cítrica', className: 'floating-note-style-citrus' },
-        { id: 'midnight', name: 'Nocturna', shortName: 'Nocturna', className: 'floating-note-style-midnight' },
-        { id: 'dawn', name: 'Aurora', shortName: 'Aurora', className: 'floating-note-style-dawn' },
-        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' },
-        { id: 'sand', name: 'Arena', shortName: 'Arena', className: 'floating-note-style-sand' },
-        { id: 'peach', name: 'Durazno', shortName: 'Durazno', className: 'floating-note-style-peach' },
-        { id: 'ice', name: 'Hielo', shortName: 'Hielo', className: 'floating-note-style-ice' },
-        { id: 'sage', name: 'Salvia', shortName: 'Salvia', className: 'floating-note-style-sage' }
+        { id: 'blank', name: 'Blanca', className: 'floating-note-style-blank', titleColor: '#1f2937' },
+        { id: 'default', name: 'Clásica', className: 'floating-note-style-default', titleColor: '#9a6b16' },
+        { id: 'sky', name: 'Cielo', className: 'floating-note-style-sky', titleColor: '#1f3f78' },
+        { id: 'mint', name: 'Menta', className: 'floating-note-style-mint', titleColor: '#1f5c3b' },
+        { id: 'rose', name: 'Pétalo', className: 'floating-note-style-rose', titleColor: '#8c3c59' },
+        { id: 'lilac', name: 'Lavanda', className: 'floating-note-style-lilac', titleColor: '#503c82' },
+        { id: 'slate', name: 'Pizarra', className: 'floating-note-style-slate', titleColor: '#2f3947' },
+        { id: 'citrus', name: 'Cítrica', className: 'floating-note-style-citrus', titleColor: '#b46914' },
+        { id: 'midnight', name: 'Nocturna', className: 'floating-note-style-midnight', titleColor: '#f8fafc' },
+        { id: 'dawn', name: 'Aurora', className: 'floating-note-style-dawn', titleColor: '#9b3057' },
+        { id: 'forest', name: 'Bosque', className: 'floating-note-style-forest', titleColor: '#166534' },
+        { id: 'sand', name: 'Arena', className: 'floating-note-style-sand', titleColor: '#6b4f2a' },
+        { id: 'peach', name: 'Durazno', className: 'floating-note-style-peach', titleColor: '#8a4521' },
+        { id: 'ice', name: 'Hielo', className: 'floating-note-style-ice', titleColor: '#0f4d63' },
+        { id: 'sage', name: 'Salvia', className: 'floating-note-style-sage', titleColor: '#2f5139' },
+        { id: 'cotton', name: 'Algodón', className: 'floating-note-style-cotton', titleColor: '#31425f' },
+        { id: 'honeydew', name: 'Miel suave', className: 'floating-note-style-honeydew', titleColor: '#365422' },
+        { id: 'morning', name: 'Amanecer', className: 'floating-note-style-morning', titleColor: '#995835' }
       ];
 
       const NOTE_ICON_SYMBOLS = [
@@ -78,10 +81,6 @@ export async function initializeEditor() {
         '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
         '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
         '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
-      ];
-
-      const NOTE_BORDER_COLORS = [
-        '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
       const ICON_FEATURE_ENABLED = true;
@@ -4975,10 +4974,7 @@ export async function initializeEditor() {
         note.dataset.style = preset?.id || 'default';
         const noteId = note.dataset.noteId;
         if (noteId) {
-          const updated = updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
-          applyFloatingNoteBorderColor(note, updated?.borderColor || null, { persist: false });
-        } else {
-          applyFloatingNoteBorderColor(note, note.dataset.borderColor || null, { persist: false });
+          updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
         }
         const menu = note.querySelector('.floating-note-style-menu');
         if (menu) {
@@ -4987,22 +4983,6 @@ export async function initializeEditor() {
           if (noteData) {
             syncNoteOptionsMenu(menu, noteData);
           }
-        }
-      }
-
-      function applyFloatingNoteBorderColor(note, color, { persist = true } = {}) {
-        if (!note) return;
-        const noteId = note.dataset.noteId;
-        const normalized = typeof color === 'string' ? color.trim() : '';
-        if (normalized) {
-          note.style.borderColor = normalized;
-          note.dataset.borderColor = normalized;
-        } else {
-          note.style.borderColor = '';
-          delete note.dataset.borderColor;
-        }
-        if (persist && noteId) {
-          updateNoteData(noteId, { borderColor: normalized || null }, { silent: true });
         }
       }
 
@@ -5128,6 +5108,13 @@ export async function initializeEditor() {
         if (!nextState) {
           bringNoteToFront(note);
         }
+        return nextState;
+      }
+
+      function toggleNoteHoverAnimation(note) {
+        if (!note) return false;
+        const nextState = !note.classList.contains('floating-note-hover-animated');
+        applyNoteHoverAnimationState(note, nextState);
         return nextState;
       }
 
@@ -5714,9 +5701,16 @@ export async function initializeEditor() {
         const updatedAt = data.updatedAt || metaSource.updatedAt || null;
         const linkedTo = data.linkedTo || metaSource.linkedTo || null;
         const anchorId = data.anchorId || metaSource.anchorId || null;
-        const incomingBorderColor = typeof data.borderColor === 'string' ? data.borderColor.trim() : '';
-        const metaBorderColor = typeof metaSource.borderColor === 'string' ? metaSource.borderColor.trim() : '';
-        const borderColor = incomingBorderColor || metaBorderColor || null;
+        const resolvedHoverAnimation = (() => {
+          const incoming = data.hoverAnimation ?? metaSource.hoverAnimation ?? data.meta?.hoverAnimation;
+          if (typeof incoming === 'string') {
+            return incoming !== 'false';
+          }
+          if (typeof incoming === 'boolean') {
+            return incoming;
+          }
+          return true;
+        })();
         const parsedLeft = Number.parseFloat(data.left ?? metaSource.left);
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
@@ -5764,7 +5758,6 @@ export async function initializeEditor() {
           sectionId,
           linkedTo,
           anchorId,
-          borderColor,
           reviewed,
           reviewCount,
           lastReviewed,
@@ -5783,12 +5776,13 @@ export async function initializeEditor() {
           currentPageIndex: incomingPageIndex,
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
-          customIcon: resolvedCustomIcon
+          customIcon: resolvedCustomIcon,
+          hoverAnimation: resolvedHoverAnimation
         });
         notesRegistry.set(noteId, noteData);
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
         if (resolvedCustomIcon) {
           note.dataset.customIcon = resolvedCustomIcon;
         } else {
@@ -6242,7 +6236,7 @@ export async function initializeEditor() {
           optionBtn.type = 'button';
           optionBtn.dataset.styleId = preset.id;
           optionBtn.className = 'note-style-btn';
-          optionBtn.title = preset.name;
+          optionBtn.title = `${preset.name} (título ${preset.titleColor || 'predeterminado'})`;
           optionBtn.setAttribute('aria-label', preset.name);
 
           const preview = document.createElement('span');
@@ -6250,12 +6244,11 @@ export async function initializeEditor() {
           if (preset.className) {
             preview.classList.add(preset.className);
           }
+          if (preset.titleColor) {
+            preview.style.setProperty('--note-style-preview-title', preset.titleColor);
+          }
 
-          const label = document.createElement('span');
-          label.className = 'note-style-label';
-          label.textContent = preset.shortName || preset.name;
-
-          optionBtn.append(preview, label);
+          optionBtn.append(preview);
           optionBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             applyFloatingNoteStyle(note, preset.id);
@@ -6284,50 +6277,6 @@ export async function initializeEditor() {
 
         quickWrapper.appendChild(styleSection);
         menu.appendChild(quickWrapper);
-
-        menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
-
-        const borderSection = document.createElement('div');
-        borderSection.className = 'note-menu-section note-border-section';
-        const borderTitle = document.createElement('div');
-        borderTitle.className = 'note-menu-title';
-        borderTitle.textContent = '⬒';
-        borderSection.appendChild(borderTitle);
-
-        const borderSwatches = document.createElement('div');
-        borderSwatches.className = 'note-border-swatches';
-        NOTE_BORDER_COLORS.forEach(color => {
-          const swatchBtn = document.createElement('button');
-          swatchBtn.type = 'button';
-          swatchBtn.dataset.borderColor = color;
-          swatchBtn.className = 'note-border-swatch';
-          swatchBtn.title = `Borde ${color}`;
-          swatchBtn.setAttribute('aria-label', `Aplicar borde ${color}`);
-          swatchBtn.style.setProperty('--swatch-color', color);
-          swatchBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            applyFloatingNoteBorderColor(note, color);
-            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-            closeFloatingNoteStyleMenu(menu);
-          });
-          borderSwatches.appendChild(swatchBtn);
-        });
-        borderSection.appendChild(borderSwatches);
-
-        const borderResetBtn = document.createElement('button');
-        borderResetBtn.type = 'button';
-        borderResetBtn.dataset.action = 'reset-border';
-        borderResetBtn.className = 'note-border-reset';
-        borderResetBtn.textContent = 'Sin borde';
-        borderResetBtn.setAttribute('aria-label', 'Quitar borde personalizado');
-        borderResetBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          applyFloatingNoteBorderColor(note, null);
-          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-          closeFloatingNoteStyleMenu(menu);
-        });
-        borderSection.appendChild(borderResetBtn);
-        menu.appendChild(borderSection);
 
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
 
@@ -6374,6 +6323,17 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
+        const hoverAnimationBtn = document.createElement('button');
+        hoverAnimationBtn.type = 'button';
+        hoverAnimationBtn.dataset.action = 'toggle-hover-animation';
+        hoverAnimationBtn.textContent = '🌀 Animación hover';
+        hoverAnimationBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteHoverAnimation(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const behindBtn = document.createElement('button');
         behindBtn.type = 'button';
         behindBtn.dataset.action = 'toggle-behind';
@@ -6386,7 +6346,7 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, hoverAnimationBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6421,15 +6381,6 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
-        menu.querySelectorAll('button[data-border-color]').forEach(button => {
-          const isActive = (noteData.borderColor || null) === (button.dataset.borderColor || null);
-          button.classList.toggle('active', isActive);
-          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        });
-        const borderResetBtn = menu.querySelector('button[data-action="reset-border"]');
-        if (borderResetBtn) {
-          borderResetBtn.disabled = !noteData.borderColor;
-        }
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
@@ -6447,6 +6398,13 @@ export async function initializeEditor() {
           behindBtn.textContent = isBehind ? '📄 Traer al frente' : '🗂️ Usar espacio oculto';
           behindBtn.setAttribute('aria-pressed', isBehind ? 'true' : 'false');
           behindBtn.classList.toggle('active', isBehind);
+        }
+        const hoverBtn = menu.querySelector('button[data-action="toggle-hover-animation"]');
+        if (hoverBtn) {
+          const hoverEnabled = noteData.hoverAnimation !== false;
+          hoverBtn.textContent = hoverEnabled ? '🌀 Animación activa' : '🛑 Animación desactivada';
+          hoverBtn.setAttribute('aria-pressed', hoverEnabled ? 'true' : 'false');
+          hoverBtn.classList.toggle('active', hoverEnabled);
         }
       }
 
@@ -6723,7 +6681,6 @@ export async function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -6745,6 +6702,7 @@ export async function initializeEditor() {
           delete note.dataset.relativeTop;
         }
 
+        applyNoteHoverAnimationState(note, noteData.hoverAnimation !== false, { persist: false });
         applyNoteBehindState(note, !!noteData.behindMainContent, { persist: false });
 
         const ui = note._ui || {};
@@ -6812,6 +6770,20 @@ export async function initializeEditor() {
         applyFloatingNoteTopicVisibility(note);
       }
 
+      function applyNoteHoverAnimationState(note, enabled, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldEnable = enabled !== false;
+        note.classList.toggle('floating-note-hover-animated', shouldEnable);
+        note.dataset.hoverAnimation = shouldEnable ? 'true' : 'false';
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { hoverAnimation: shouldEnable }, { silent: true });
+          }
+        }
+        return shouldEnable;
+      }
+
       function formatDateTime(isoString) {
         if (!isoString) return '';
         const date = new Date(isoString);
@@ -6865,14 +6837,14 @@ export async function initializeEditor() {
               type: noteData.type,
               anchorId: noteData.anchorId,
               linkedTo: noteData.linkedTo,
-              borderColor: noteData.borderColor,
               pages: Array.isArray(noteData.pages) ? noteData.pages : undefined,
               currentPageIndex: Number.isInteger(noteData.currentPageIndex) ? noteData.currentPageIndex : undefined,
               pageOffsetLeft: noteData.pageOffsetLeft,
               pageOffsetTop: noteData.pageOffsetTop,
               relativeLeft: noteData.relativeLeft,
               relativeTop: noteData.relativeTop,
-              behindMainContent: noteData.behindMainContent
+              behindMainContent: noteData.behindMainContent,
+              hoverAnimation: noteData.hoverAnimation
             });
           });
         }
@@ -10978,7 +10950,6 @@ ${inlineStyles}
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
-          noteExport.borderColor = noteData.borderColor || null;
           noteExport.topicId = noteData.topicId || null;
           noteExport.sectionId = noteData.sectionId || null;
           noteExport.type = noteData.type || NOTE_TYPES.FLOATING;
@@ -11014,6 +10985,7 @@ ${inlineStyles}
             noteExport.relativeTop = noteData.relativeTop;
           }
           noteExport.behindMainContent = !!noteData.behindMainContent;
+          noteExport.hoverAnimation = noteData.hoverAnimation !== false;
           noteExport.meta = { ...noteData, element: undefined };
           delete noteExport.meta.element;
         }
