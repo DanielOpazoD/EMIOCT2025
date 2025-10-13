@@ -3347,22 +3347,34 @@ body.reading-mode .floating-notes-layer {
 }
 
 .floating-note {
+  --floating-note-bg: #ffffff;
+  --floating-note-border-color: rgba(15, 23, 42, 0.12);
+  --floating-note-text-color: #1f2937;
+  --floating-note-title-color: var(--floating-note-text-color);
   position: absolute;
   width: 240px;
   min-width: 160px;
   min-height: 140px;
   border-radius: 10px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border: 1px solid var(--floating-note-border-color);
+  background: var(--floating-note-bg);
+  color: var(--floating-note-text-color);
   display: flex;
   flex-direction: column;
   gap: 6px;
   pointer-events: auto;
   backdrop-filter: saturate(120%);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
   resize: both;
   overflow: auto;
   font-size: 14px;
+}
+
+.floating-note-hover-animated:hover,
+.floating-note-hover-animated:focus-within {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
 }
 
 /* ===== Panel de notas por tema ===== */
@@ -3540,6 +3552,12 @@ body.reading-mode .floating-notes-layer {
   font-size: 14px;
 }
 
+.floating-note .note-category,
+.floating-note .note-category .note-label,
+.floating-note .note-category .note-icon {
+  color: var(--floating-note-title-color);
+}
+
 .floating-note-header:active {
   cursor: grabbing;
 }
@@ -3577,7 +3595,7 @@ body.reading-mode .floating-notes-layer {
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 10px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
-  min-width: 212px;
+  min-width: 184px;
   max-width: 300px;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
@@ -3700,76 +3718,40 @@ body.reading-mode .floating-notes-layer {
 }
 
 .note-style-btn {
-  flex-direction: row;
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+  border-radius: 10px;
+  justify-content: center;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 5px 7px;
-  font-size: 0.74em;
-  border-radius: 7px;
-  min-width: 0;
+  gap: 0;
 }
 
 .note-style-preview {
   display: block;
-  width: 32px;
-  height: 20px;
-  border-radius: 5px;
-  border: 2px solid transparent;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border: 2px solid var(--floating-note-border-color, rgba(15, 23, 42, 0.12));
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
-  flex-shrink: 0;
+  background: var(--floating-note-bg, #ffffff);
+  position: relative;
 }
 
-.note-style-label {
-  font-size: 0.68em;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #475569;
-  text-align: left;
+.note-style-preview::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--note-style-preview-title, var(--floating-note-title-color, rgba(15, 23, 42, 0.6)));
 }
 
-.note-style-btn.active .note-style-label {
-  color: #0f172a;
-}
-
-.note-border-section {
-  gap: 6px;
-}
-
-.note-border-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.note-border-swatch {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  background: #ffffff;
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 1px rgba(15, 23, 42, 0.2);
-}
-
-.note-border-swatch:hover,
-.note-border-swatch:focus {
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 1px rgba(15, 23, 42, 0.45);
-}
-
-.note-border-swatch.active {
-  border-color: #0f172a;
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 2px rgba(15, 23, 42, 0.35);
-}
-
-.note-border-reset {
-  align-self: flex-start;
-  font-size: 0.72em;
-  padding: 3px 6px;
+.note-style-btn.active .note-style-preview {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  border-color: rgba(15, 23, 42, 0.35);
 }
 
 .note-menu-inline-actions {
@@ -4073,93 +4055,129 @@ body.pages-hidden .floating-note-behind:focus-within {
 }
 
 .floating-note-style-default {
-  background: #fffbe6;
-  border-color: #f2d479;
-  color: #5c4b1f;
+  --floating-note-bg: #fffbe6;
+  --floating-note-border-color: #f3da8a;
+  --floating-note-text-color: #5c4b1f;
+  --floating-note-title-color: #b8861d;
 }
 
 .floating-note-style-blank {
-  background: #ffffff;
-  border-color: #d1d5db;
-  color: #1f2937;
+  --floating-note-bg: #ffffff;
+  --floating-note-border-color: #e2e8f0;
+  --floating-note-text-color: #1f2937;
+  --floating-note-title-color: #1f2937;
 }
 
 .floating-note-style-sky {
-  background: #e8f4ff;
-  border-color: #a8d8ff;
-  color: #1b437f;
+  --floating-note-bg: #f2f8ff;
+  --floating-note-border-color: #c9e4ff;
+  --floating-note-text-color: #23457a;
+  --floating-note-title-color: #1f3f78;
 }
 
 .floating-note-style-mint {
-  background: #e6fff3;
-  border-color: #9be7c4;
-  color: #1f5c3b;
+  --floating-note-bg: #eefdf3;
+  --floating-note-border-color: #c8f0da;
+  --floating-note-text-color: #1f5c3b;
+  --floating-note-title-color: #1c4f34;
 }
 
 .floating-note-style-rose {
-  background: #ffe8f3;
-  border-color: #f3b4cf;
-  color: #703049;
+  --floating-note-bg: #ffeef6;
+  --floating-note-border-color: #f8c8dc;
+  --floating-note-text-color: #803d59;
+  --floating-note-title-color: #8c3c59;
 }
 
 .floating-note-style-lilac {
-  background: #f1e9ff;
-  border-color: #cbb7f8;
-  color: #463271;
+  --floating-note-bg: #f4efff;
+  --floating-note-border-color: #d6c8fb;
+  --floating-note-text-color: #4c3d75;
+  --floating-note-title-color: #5a3f86;
 }
 
 .floating-note-style-slate {
-  background: #eef1f5;
-  border-color: #c5ccd6;
-  color: #2f3947;
+  --floating-note-bg: #f2f4f7;
+  --floating-note-border-color: #d3dae3;
+  --floating-note-text-color: #2f3947;
+  --floating-note-title-color: #27303c;
 }
 
 .floating-note-style-citrus {
-  background: #fff3d4;
-  border-color: #f59e0b;
-  color: #92400e;
+  --floating-note-bg: #fff6df;
+  --floating-note-border-color: #f9d39b;
+  --floating-note-text-color: #8f4f12;
+  --floating-note-title-color: #b46914;
 }
 
 .floating-note-style-midnight {
-  background: #1f2937;
-  border-color: #38bdf8;
-  color: #f8fafc;
+  --floating-note-bg: #1f2937;
+  --floating-note-border-color: #60a5fa;
+  --floating-note-text-color: #f8fafc;
+  --floating-note-title-color: #fefce8;
 }
 
 .floating-note-style-dawn {
-  background: #fdf2f8;
-  border-color: #f9a8d4;
-  color: #7c2d4e;
+  --floating-note-bg: #fff0f6;
+  --floating-note-border-color: #f6c3dc;
+  --floating-note-text-color: #823a54;
+  --floating-note-title-color: #9b3057;
 }
 
 .floating-note-style-forest {
-  background: #ecfdf5;
-  border-color: #34d399;
-  color: #14532d;
+  --floating-note-bg: #edfdf5;
+  --floating-note-border-color: #bbf7d0;
+  --floating-note-text-color: #14532d;
+  --floating-note-title-color: #166534;
 }
 
 .floating-note-style-sand {
-  background: #f9f4e6;
-  border-color: #e2c9a5;
-  color: #5f4c2a;
+  --floating-note-bg: #f7f1e5;
+  --floating-note-border-color: #ead8ba;
+  --floating-note-text-color: #5f4c2a;
+  --floating-note-title-color: #6b4f2a;
 }
 
 .floating-note-style-peach {
-  background: #ffece2;
-  border-color: #f9c3a5;
-  color: #7a3f1c;
+  --floating-note-bg: #fff2eb;
+  --floating-note-border-color: #fbd2bb;
+  --floating-note-text-color: #7a3f1c;
+  --floating-note-title-color: #8a4521;
 }
 
 .floating-note-style-ice {
-  background: #edf9ff;
-  border-color: #bae6fd;
-  color: #155e75;
+  --floating-note-bg: #eef8ff;
+  --floating-note-border-color: #c9e9ff;
+  --floating-note-text-color: #155e75;
+  --floating-note-title-color: #0f4d63;
 }
 
 .floating-note-style-sage {
-  background: #eef8ef;
-  border-color: #c7e9cc;
-  color: #285034;
+  --floating-note-bg: #f0f7f1;
+  --floating-note-border-color: #d0e9d3;
+  --floating-note-text-color: #2f5139;
+  --floating-note-title-color: #2f5139;
+}
+
+.floating-note-style-cotton {
+  --floating-note-bg: #f8faff;
+  --floating-note-border-color: #dce6ff;
+  --floating-note-text-color: #31425f;
+  --floating-note-title-color: #31425f;
+}
+
+.floating-note-style-honeydew {
+  --floating-note-bg: #f7fff2;
+  --floating-note-border-color: #dff5c7;
+  --floating-note-text-color: #365422;
+  --floating-note-title-color: #365422;
+}
+
+.floating-note-style-morning {
+  --floating-note-bg: #fff6f0;
+  --floating-note-border-color: #ffd8c2;
+  --floating-note-text-color: #7b4a33;
+  --floating-note-title-color: #995835;
 }
 
 body.notes-hidden #floatingNotesLayer {
