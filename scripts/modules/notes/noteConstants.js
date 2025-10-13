@@ -19,3 +19,4 @@ export const NOTE_PRIORITY_SEQUENCE = ['normal', 'high', 'low'];
 export const DEFAULT_NOTE_PRIORITY = 'normal';
 export const DEFAULT_NOTE_CATEGORY = 'PERSONAL';
 export const DEFAULT_NOTE_TYPE = NOTE_TYPES.FLOATING;
+export const DEFAULT_NOTE_STYLE = 'blank';
