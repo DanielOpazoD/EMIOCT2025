@@ -65,7 +65,11 @@ export async function initializeEditor() {
         { id: 'citrus', name: 'Cítrica', shortName: 'Cítrica', className: 'floating-note-style-citrus' },
         { id: 'midnight', name: 'Nocturna', shortName: 'Nocturna', className: 'floating-note-style-midnight' },
         { id: 'dawn', name: 'Aurora', shortName: 'Aurora', className: 'floating-note-style-dawn' },
-        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' }
+        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' },
+        { id: 'sand', name: 'Arena', shortName: 'Arena', className: 'floating-note-style-sand' },
+        { id: 'peach', name: 'Durazno', shortName: 'Durazno', className: 'floating-note-style-peach' },
+        { id: 'ice', name: 'Hielo', shortName: 'Hielo', className: 'floating-note-style-ice' },
+        { id: 'sage', name: 'Salvia', shortName: 'Salvia', className: 'floating-note-style-sage' }
       ];
 
       const NOTE_ICON_SYMBOLS = [
@@ -5002,14 +5006,78 @@ export async function initializeEditor() {
         }
       }
 
+      function sanitizeFloatingNotePasteHtml(rawHtml) {
+        if (typeof rawHtml !== 'string' || !rawHtml.trim()) {
+          return '';
+        }
+
+        const container = document.createElement('div');
+        container.innerHTML = rawHtml;
+
+        const nodes = container.querySelectorAll('*');
+        nodes.forEach(node => {
+          if (!(node instanceof HTMLElement)) {
+            return;
+          }
+          if (node.hasAttribute('bgcolor')) {
+            node.removeAttribute('bgcolor');
+          }
+          if (node.style) {
+            node.style.removeProperty('background');
+            node.style.removeProperty('background-color');
+            node.style.removeProperty('background-image');
+            node.style.removeProperty('-webkit-text-fill-color');
+            if (!node.getAttribute('style')?.trim()) {
+              node.removeAttribute('style');
+            }
+          }
+        });
+
+        return container.innerHTML;
+      }
+
+      function normalizeCustomIconValue(value) {
+        if (typeof value !== 'string') {
+          return null;
+        }
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return null;
+        }
+        const glyphs = Array.from(trimmed);
+        return glyphs.slice(0, 2).join('');
+      }
+
+      function applyNoteHeaderCompactState(note, compact, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldCompact = !!compact;
+        note.classList.toggle('floating-note-compact-header', shouldCompact);
+        if (shouldCompact) {
+          note.dataset.compactHeader = 'true';
+        } else {
+          delete note.dataset.compactHeader;
+        }
+
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { compactHeader: shouldCompact }, { silent: true });
+          }
+        }
+
+        return shouldCompact;
+      }
+
       function applyNoteBehindState(note, behind, { persist = true } = {}) {
         if (!note) return false;
         const shouldBeBehind = !!behind;
         note.classList.toggle('floating-note-behind', shouldBeBehind);
         if (shouldBeBehind) {
           note.dataset.behindMainContent = 'true';
+          note.setAttribute('aria-hidden', 'true');
         } else {
           delete note.dataset.behindMainContent;
+          note.removeAttribute('aria-hidden');
         }
         if (persist) {
           const noteId = note.dataset.noteId;
@@ -5018,6 +5086,39 @@ export async function initializeEditor() {
           }
         }
         return shouldBeBehind;
+      }
+
+      function setNoteCustomIcon(note, symbol) {
+        if (!note) return null;
+        const finalSymbol = normalizeCustomIconValue(symbol);
+        const noteId = note.dataset.noteId;
+        if (!noteId) {
+          if (finalSymbol) {
+            note.dataset.customIcon = finalSymbol;
+          } else {
+            delete note.dataset.customIcon;
+          }
+          const ui = note._ui || {};
+          if (ui.categoryIcon) {
+            const categoryInfo = getNoteCategoryInfo(note.dataset.category);
+            ui.categoryIcon.textContent = finalSymbol || categoryInfo.icon;
+          }
+          return null;
+        }
+
+        const updated = updateNoteData(noteId, { customIcon: finalSymbol }, { silent: true })
+          || notesRegistry.get(noteId);
+        if (updated) {
+          syncNoteElementMeta(note, updated);
+        }
+        return updated;
+      }
+
+      function toggleNoteHeaderCompact(note) {
+        if (!note) return false;
+        const nextState = !note.classList.contains('floating-note-compact-header');
+        applyNoteHeaderCompactState(note, nextState);
+        return nextState;
       }
 
       function toggleNoteBehindMain(note) {
@@ -5540,6 +5641,19 @@ export async function initializeEditor() {
 
         applyFloatingNoteStyle(note, resolvedStyleId);
 
+        const resolvedCompactHeader = (() => {
+          if (data.compactHeader !== undefined) {
+            return !!data.compactHeader;
+          }
+          if (metaSource.compactHeader !== undefined) {
+            return !!metaSource.compactHeader;
+          }
+          if (typeof data.meta?.compactHeader !== 'undefined') {
+            return !!data.meta.compactHeader;
+          }
+          return false;
+        })();
+
         const resolvedBehindState = (() => {
           const source = data.behindMainContent !== undefined
             ? data.behindMainContent
@@ -5549,6 +5663,10 @@ export async function initializeEditor() {
           }
           return !!source;
         })();
+
+        const resolvedCustomIcon = normalizeCustomIconValue(
+          data.customIcon ?? metaSource.customIcon ?? data.meta?.customIcon
+        );
 
         const htmlContent = typeof data.html === 'string'
           ? data.html
@@ -5663,11 +5781,19 @@ export async function initializeEditor() {
           element: note,
           pages: incomingPages,
           currentPageIndex: incomingPageIndex,
-          behindMainContent: resolvedBehindState
+          behindMainContent: resolvedBehindState,
+          compactHeader: resolvedCompactHeader,
+          customIcon: resolvedCustomIcon
         });
         notesRegistry.set(noteId, noteData);
         applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
+        applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        if (resolvedCustomIcon) {
+          note.dataset.customIcon = resolvedCustomIcon;
+        } else {
+          delete note.dataset.customIcon;
+        }
 
         const header = document.createElement('div');
         header.className = 'note-header floating-note-header';
@@ -5791,6 +5917,23 @@ export async function initializeEditor() {
           syncNoteElementMeta(note, updated);
         });
 
+        body.addEventListener('paste', (event) => {
+          const clipboard = event.clipboardData;
+          if (!clipboard) {
+            return;
+          }
+          event.preventDefault();
+          const rawHtml = clipboard.getData('text/html');
+          const fallbackText = clipboard.getData('text/plain');
+          let toInsert = rawHtml ? sanitizeFloatingNotePasteHtml(rawHtml) : '';
+          if (!toInsert && fallbackText) {
+            toInsert = escapeHtml(fallbackText).replace(/\r?\n/g, '<br>');
+          }
+          if (toInsert) {
+            document.execCommand('insertHTML', false, toInsert);
+          }
+        });
+
         const footer = document.createElement('div');
         footer.className = 'note-footer';
 
@@ -5813,7 +5956,11 @@ export async function initializeEditor() {
           prevPageBtn,
           nextPageBtn,
           addPageBtn,
-          removePageBtn
+          removePageBtn,
+          navigation,
+          actions,
+          menuBtn,
+          header
         };
 
         priorityBtn.addEventListener('click', (event) => {
@@ -6041,6 +6188,46 @@ export async function initializeEditor() {
         categorySection.appendChild(categoryGrid);
         quickWrapper.appendChild(categorySection);
 
+        const iconSection = document.createElement('div');
+        iconSection.className = 'note-menu-section note-menu-icons';
+        const iconTitle = document.createElement('div');
+        iconTitle.className = 'note-menu-title';
+        iconTitle.textContent = '🔖';
+        iconSection.appendChild(iconTitle);
+
+        const iconResetBtn = document.createElement('button');
+        iconResetBtn.type = 'button';
+        iconResetBtn.className = 'note-icon-reset';
+        iconResetBtn.dataset.iconSymbol = '';
+        iconResetBtn.textContent = 'Icono predeterminado';
+        iconResetBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setNoteCustomIcon(note, null);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+        iconSection.appendChild(iconResetBtn);
+
+        const iconGrid = document.createElement('div');
+        iconGrid.className = 'note-icon-grid';
+        NOTE_ICON_SYMBOLS.forEach(symbol => {
+          const iconBtn = document.createElement('button');
+          iconBtn.type = 'button';
+          iconBtn.dataset.iconSymbol = symbol;
+          iconBtn.className = 'note-icon-option';
+          iconBtn.textContent = symbol;
+          iconBtn.title = `Usar icono ${symbol}`;
+          iconBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setNoteCustomIcon(note, symbol);
+            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+            closeFloatingNoteStyleMenu(menu);
+          });
+          iconGrid.appendChild(iconBtn);
+        });
+        iconSection.appendChild(iconGrid);
+        quickWrapper.appendChild(iconSection);
+
         const styleSection = document.createElement('div');
         styleSection.className = 'note-menu-section note-menu-styles';
         const styleTitle = document.createElement('div');
@@ -6154,6 +6341,18 @@ export async function initializeEditor() {
         const inlineActions = document.createElement('div');
         inlineActions.className = 'note-menu-inline-actions';
 
+        const compactHeaderBtn = document.createElement('button');
+        compactHeaderBtn.type = 'button';
+        compactHeaderBtn.dataset.action = 'toggle-compact-header';
+        compactHeaderBtn.classList.add('note-compact-toggle');
+        compactHeaderBtn.textContent = '🧩 Encabezado compacto';
+        compactHeaderBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteHeaderCompact(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const tagsBtn = document.createElement('button');
         tagsBtn.type = 'button';
         tagsBtn.textContent = '🏷️ Etiquetas';
@@ -6187,7 +6386,7 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6213,6 +6412,15 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
+        const currentIcon = typeof noteData.customIcon === 'string' && noteData.customIcon.length
+          ? noteData.customIcon
+          : '';
+        menu.querySelectorAll('button[data-icon-symbol]').forEach(button => {
+          const symbol = button.dataset.iconSymbol || '';
+          const isActive = symbol === currentIcon;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
         menu.querySelectorAll('button[data-border-color]').forEach(button => {
           const isActive = (noteData.borderColor || null) === (button.dataset.borderColor || null);
           button.classList.toggle('active', isActive);
@@ -6225,6 +6433,13 @@ export async function initializeEditor() {
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
+        }
+        const compactBtn = menu.querySelector('button[data-action="toggle-compact-header"]');
+        if (compactBtn) {
+          const isCompact = !!noteData.compactHeader;
+          compactBtn.textContent = isCompact ? '🧩 Encabezado completo' : '🧩 Encabezado compacto';
+          compactBtn.setAttribute('aria-pressed', isCompact ? 'true' : 'false');
+          compactBtn.classList.toggle('active', isCompact);
         }
         const behindBtn = menu.querySelector('button[data-action="toggle-behind"]');
         if (behindBtn) {
@@ -6535,7 +6750,15 @@ export async function initializeEditor() {
         const ui = note._ui || {};
         const categoryInfo = getNoteCategoryInfo(noteData.category);
         if (ui.categoryIcon) {
-          ui.categoryIcon.textContent = categoryInfo.icon;
+          const iconSymbol = typeof noteData.customIcon === 'string' && noteData.customIcon.length
+            ? noteData.customIcon
+            : categoryInfo.icon;
+          ui.categoryIcon.textContent = iconSymbol;
+        }
+        if (noteData.customIcon) {
+          note.dataset.customIcon = noteData.customIcon;
+        } else {
+          delete note.dataset.customIcon;
         }
         if (ui.categoryLabel) {
           const displayTitle = getNoteDisplayTitle(noteData.title, '');
@@ -6584,6 +6807,7 @@ export async function initializeEditor() {
           syncNoteOptionsMenu(ui.optionsMenu, noteData);
         }
 
+        applyNoteHeaderCompactState(note, !!noteData.compactHeader, { persist: false });
         updateFloatingNotePageUI(note, noteData);
         applyFloatingNoteTopicVisibility(note);
       }
@@ -10762,6 +10986,8 @@ ${inlineStyles}
           noteExport.linkedTo = noteData.linkedTo || null;
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
+          noteExport.compactHeader = !!noteData.compactHeader;
+          noteExport.customIcon = noteData.customIcon || null;
           if (Array.isArray(noteData.pages)) {
             noteExport.pages = noteData.pages.map(page => ({
               id: page.id,

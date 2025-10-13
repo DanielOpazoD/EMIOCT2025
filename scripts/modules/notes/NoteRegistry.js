@@ -102,6 +102,17 @@ function applyPageStateToNote(note, overrides = {}) {
   };
 }
 
+function normalizeCustomIcon(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return Array.from(trimmed).slice(0, 2).join('');
+}
+
 export function createEnhancedNote(options = {}) {
   const nowIso = new Date().toISOString();
   const id = (options.id && String(options.id).trim()) || generateUniqueId('note');
@@ -177,7 +188,9 @@ export function createEnhancedNote(options = {}) {
     element: options.element || null,
     pages: [],
     currentPageIndex: 0,
-    behindMainContent: !!options.behindMainContent
+    behindMainContent: !!options.behindMainContent,
+    compactHeader: !!options.compactHeader,
+    customIcon: normalizeCustomIcon(options.customIcon)
   };
 
   return applyPageStateToNote(base, {
@@ -263,6 +276,10 @@ export class NoteRegistry {
           merged.reviewCount = Number.isFinite(overrides.reviewCount)
             ? Number(overrides.reviewCount)
             : merged.reviewCount;
+        } else if (key === 'compactHeader') {
+          merged.compactHeader = !!overrides.compactHeader;
+        } else if (key === 'customIcon') {
+          merged.customIcon = normalizeCustomIcon(overrides.customIcon);
         } else if (key === 'titleHtml') {
           if (typeof overrides.titleHtml === 'string') {
             const sanitizedHtml = sanitizeNoteTitleHtml(overrides.titleHtml);
