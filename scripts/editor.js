@@ -39,6 +39,13 @@ export async function initializeEditor() {
       let tableMenuAPI = null;
       let cachedToolbarHeight = 0;
       let iconPickerRebindTimer = null;
+      let boldInfiniteMode = false;
+      let boldInfiniteApplying = false;
+      let spacingPanelOpen = false;
+      let spacingPanelTarget = null;
+      let spacingPanelGroupTarget = null;
+      let spacingPanelPositionFrame = null;
+      let pagesHidden = false;
       const cropState = {
         image: null,
         isSelecting: false,
@@ -713,6 +720,26 @@ export async function initializeEditor() {
       const toggleHorizontalBorders = document.getElementById('toggleHorizontalBorders');
       const tableBorderResetBtn = document.querySelector('[data-border-reset]');
       const tableResizeOverlay = document.getElementById('tableResizeOverlay');
+      const spacingToolBtn = document.getElementById('spacingToolBtn');
+      const spacingToolPanel = document.getElementById('spacingToolPanel');
+      const spacingMarginTopRange = document.getElementById('spacingMarginTopRange');
+      const spacingMarginTopValue = document.getElementById('spacingMarginTopValue');
+      const spacingMarginBottomRange = document.getElementById('spacingMarginBottomRange');
+      const spacingMarginBottomValue = document.getElementById('spacingMarginBottomValue');
+      const spacingBlockGapRange = document.getElementById('spacingBlockGapRange');
+      const spacingBlockGapValue = document.getElementById('spacingBlockGapValue');
+      const spacingLineHeightRange = document.getElementById('spacingLineHeightRange');
+      const spacingLineHeightValue = document.getElementById('spacingLineHeightValue');
+      const spacingToolTargetLabel = document.getElementById('spacingToolTargetLabel');
+      const spacingToolGroupLabel = document.getElementById('spacingToolGroupLabel');
+      const spacingToolEmptyMessage = document.getElementById('spacingToolEmptyMessage');
+      const spacingToolControls = document.getElementById('spacingToolControls');
+      const spacingToolCloseBtn = document.getElementById('spacingToolCloseBtn');
+      const spacingToolDismissBtn = document.getElementById('spacingToolDismissBtn');
+      const spacingToolResetBtn = document.getElementById('spacingToolResetBtn');
+      const togglePagesVisibilityBtn = document.getElementById('togglePagesVisibilityBtn');
+      const pageVisibilityPlaceholder = document.getElementById('pageVisibilityPlaceholder');
+      const boldBtn = document.getElementById('boldBtn');
 
       const highlightColors = [
         '#ffffff', '#fff1f2', '#ffe4e6', '#ffdce5', '#ffd6e0', '#ffe5d3', '#ffe8c7', '#fef3c7', '#fef9c3',
@@ -738,6 +765,378 @@ export async function initializeEditor() {
       let copiedFormat = null;
 
       const tableResizers = new WeakMap();
+      const boldBtnDefaultTitle = boldBtn?.getAttribute('title') || 'Negrita (Ctrl+B)';
+
+      function setBoldInfiniteMode(enabled) {
+        boldInfiniteMode = Boolean(enabled);
+        if (boldBtn) {
+          boldBtn.classList.toggle('active', boldInfiniteMode);
+          if (boldInfiniteMode) {
+            boldBtn.dataset.mode = 'infinite';
+            boldBtn.setAttribute('title', 'Negrita infinita activa (haz clic para salir)');
+          } else {
+            delete boldBtn.dataset.mode;
+            boldBtn.setAttribute('title', boldBtnDefaultTitle);
+          }
+          boldBtn.setAttribute('aria-pressed', boldInfiniteMode ? 'true' : 'false');
+        }
+        if (!boldInfiniteMode) {
+          boldInfiniteApplying = false;
+        }
+      }
+
+      function handleBoldButtonClick(event) {
+        if (event) {
+          event.preventDefault();
+        }
+        if (!isEditMode) {
+          execCmd('bold');
+          return;
+        }
+        const selection = window.getSelection();
+        const hasSelection = Boolean(selection && selection.rangeCount && !selection.getRangeAt(0).collapsed && isSelectionWithinEditable(selection));
+        if (!hasSelection) {
+          setBoldInfiniteMode(!boldInfiniteMode);
+          return;
+        }
+        execCmd('bold');
+      }
+
+      function resolveSpacingTargetElement(selection = window.getSelection()) {
+        if (!selection || selection.rangeCount === 0) {
+          return spacingPanelTarget && document.body.contains(spacingPanelTarget)
+            ? spacingPanelTarget
+            : null;
+        }
+
+        const range = selection.getRangeAt(0);
+        let node = range.startContainer;
+
+        if (!(node instanceof HTMLElement)) {
+          node = node.parentElement;
+        }
+
+        while (node && node instanceof HTMLElement) {
+          if (node === document.body) {
+            break;
+          }
+          if (!node.isContentEditable) {
+            node = node.parentElement;
+            continue;
+          }
+          if (node === spacingToolPanel || spacingToolPanel?.contains(node)) {
+            node = node.parentElement;
+            continue;
+          }
+          const display = window.getComputedStyle(node).display;
+          if (
+            display !== 'inline' &&
+            display !== 'inline-block' &&
+            display !== 'contents'
+          ) {
+            if (node.classList.contains('page') && node !== spacingPanelTarget) {
+              const innerEditable = node.querySelector('[contenteditable="true"]');
+              if (!innerEditable) {
+                node = node.parentElement;
+                continue;
+              }
+            }
+            return node;
+          }
+          if (node.tagName === 'TD' || node.tagName === 'TH' || node.tagName === 'TR') {
+            return node;
+          }
+          node = node.parentElement;
+        }
+
+        return null;
+      }
+
+      function resolveSpacingGroupElement(element) {
+        if (!(element instanceof HTMLElement)) {
+          return null;
+        }
+
+        let current = element.parentElement;
+        while (current && current instanceof HTMLElement && current !== document.body) {
+          if (!current.isContentEditable) {
+            current = current.parentElement;
+            continue;
+          }
+          const children = Array.from(current.children).filter((child) => child instanceof HTMLElement);
+          if (children.length >= 2) {
+            return current;
+          }
+          current = current.parentElement;
+        }
+
+        return null;
+      }
+
+      function formatSpacingElementLabel(element) {
+        if (!(element instanceof HTMLElement)) {
+          return '';
+        }
+        const tag = element.tagName ? element.tagName.toLowerCase() : 'elemento';
+        const idPart = element.id ? `#${element.id}` : '';
+        const classes = Array.from(element.classList || []).filter(cls => cls && cls !== 'page');
+        const classPart = classes.length ? `.${classes.slice(0, 2).join('.')}${classes.length > 2 ? '…' : ''}` : '';
+        return `${tag}${idPart}${classPart}`;
+      }
+
+      function setSpacingPanelTarget(target) {
+        if (target && !document.body.contains(target)) {
+          target = null;
+        }
+        spacingPanelTarget = target;
+        spacingPanelGroupTarget = resolveSpacingGroupElement(target);
+        updateSpacingPanelValues();
+      }
+
+      function updateSpacingPanelValues() {
+        if (!spacingToolPanel) {
+          return;
+        }
+
+        if (!spacingPanelTarget || !document.body.contains(spacingPanelTarget)) {
+          spacingToolPanel.dataset.state = 'idle';
+          spacingPanelTarget = null;
+          spacingPanelGroupTarget = null;
+          spacingToolControls?.setAttribute('aria-hidden', 'true');
+          spacingToolEmptyMessage?.setAttribute('aria-hidden', 'false');
+          if (spacingMarginTopRange) spacingMarginTopRange.value = '0';
+          if (spacingMarginBottomRange) spacingMarginBottomRange.value = '0';
+          if (spacingBlockGapRange) spacingBlockGapRange.value = '0';
+          if (spacingLineHeightRange) spacingLineHeightRange.value = '1.4';
+          if (spacingMarginTopValue) spacingMarginTopValue.textContent = '0 px';
+          if (spacingMarginBottomValue) spacingMarginBottomValue.textContent = '0 px';
+          if (spacingBlockGapValue) spacingBlockGapValue.textContent = '0 px';
+          if (spacingLineHeightValue) spacingLineHeightValue.textContent = '1.40×';
+          if (spacingToolTargetLabel) spacingToolTargetLabel.textContent = 'Selecciona un bloque editable';
+          if (spacingToolGroupLabel) spacingToolGroupLabel.textContent = 'Selecciona un contenedor con múltiples elementos para ajustar su espacio.';
+          if (spacingBlockGapRange) spacingBlockGapRange.disabled = true;
+          return;
+        }
+
+        spacingToolPanel.dataset.state = 'ready';
+        spacingToolControls?.setAttribute('aria-hidden', 'false');
+        spacingToolEmptyMessage?.setAttribute('aria-hidden', 'true');
+        if (spacingToolTargetLabel) {
+          spacingToolTargetLabel.textContent = `Bloque: ${formatSpacingElementLabel(spacingPanelTarget)}`;
+        }
+
+        const computed = window.getComputedStyle(spacingPanelTarget);
+        const minLine = spacingLineHeightRange ? parseFloat(spacingLineHeightRange.min) : 0.8;
+        const maxLine = spacingLineHeightRange ? parseFloat(spacingLineHeightRange.max) : 3;
+
+        const readPx = (prop) => {
+          const inline = spacingPanelTarget.style[prop];
+          if (inline) {
+            const parsedInline = Number.parseFloat(inline);
+            if (Number.isFinite(parsedInline)) {
+              return parsedInline;
+            }
+          }
+          const computedValue = computed[prop];
+          const parsedComputed = Number.parseFloat(computedValue);
+          return Number.isFinite(parsedComputed) ? parsedComputed : 0;
+        };
+
+        const marginTop = readPx('marginTop');
+        const marginBottom = readPx('marginBottom');
+
+        if (spacingMarginTopRange) {
+          const clamped = Math.max(Number.parseFloat(spacingMarginTopRange.min), Math.min(Number.parseFloat(spacingMarginTopRange.max), marginTop));
+          spacingMarginTopRange.value = String(Math.round(clamped));
+          if (spacingMarginTopValue) spacingMarginTopValue.textContent = `${Math.round(clamped)} px`;
+        }
+        if (spacingMarginBottomRange) {
+          const clamped = Math.max(Number.parseFloat(spacingMarginBottomRange.min), Math.min(Number.parseFloat(spacingMarginBottomRange.max), marginBottom));
+          spacingMarginBottomRange.value = String(Math.round(clamped));
+          if (spacingMarginBottomValue) spacingMarginBottomValue.textContent = `${Math.round(clamped)} px`;
+        }
+
+        let lineHeight = Number.parseFloat(spacingPanelTarget.style.lineHeight);
+        if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+          const computedLine = computed.lineHeight;
+          const parsedComputed = Number.parseFloat(computedLine);
+          if (Number.isFinite(parsedComputed)) {
+            lineHeight = parsedComputed;
+          } else {
+            lineHeight = 1.4;
+          }
+        }
+        lineHeight = Math.max(minLine, Math.min(maxLine, lineHeight));
+        if (spacingLineHeightRange) {
+          spacingLineHeightRange.value = lineHeight.toFixed(2);
+        }
+        if (spacingLineHeightValue) {
+          spacingLineHeightValue.textContent = `${lineHeight.toFixed(2)}×`;
+        }
+
+        let blockGapValue = 0;
+        if (spacingPanelGroupTarget instanceof HTMLElement) {
+          const inline = spacingPanelGroupTarget.style.getPropertyValue('--block-gap');
+          if (inline) {
+            const parsed = Number.parseFloat(inline);
+            if (Number.isFinite(parsed)) {
+              blockGapValue = parsed;
+            }
+          } else if (spacingPanelGroupTarget.dataset.blockGap) {
+            const parsed = Number.parseFloat(spacingPanelGroupTarget.dataset.blockGap);
+            if (Number.isFinite(parsed)) {
+              blockGapValue = parsed;
+            }
+          }
+        }
+
+        if (spacingBlockGapRange) {
+          spacingBlockGapRange.disabled = !(spacingPanelGroupTarget instanceof HTMLElement);
+          const clamped = Math.max(Number.parseFloat(spacingBlockGapRange.min), Math.min(Number.parseFloat(spacingBlockGapRange.max), blockGapValue));
+          spacingBlockGapRange.value = String(Math.round(clamped));
+          if (spacingBlockGapValue) spacingBlockGapValue.textContent = `${Math.round(clamped)} px`;
+        }
+        if (spacingToolGroupLabel) {
+          spacingToolGroupLabel.textContent = spacingPanelGroupTarget instanceof HTMLElement
+            ? `Espacio entre bloques aplicado a ${formatSpacingElementLabel(spacingPanelGroupTarget)}`
+            : 'No se detectó un contenedor adecuado para espaciar sus elementos.';
+        }
+      }
+
+      function positionSpacingPanel() {
+        if (!spacingPanelOpen || !spacingToolPanel || !spacingToolBtn) {
+          return;
+        }
+        const triggerRect = spacingToolBtn.getBoundingClientRect();
+        const panelRect = spacingToolPanel.getBoundingClientRect();
+        const margin = 16;
+        let left = triggerRect.left + window.scrollX;
+        let top = triggerRect.bottom + window.scrollY + 8;
+        if (left + panelRect.width > window.scrollX + window.innerWidth - margin) {
+          left = window.scrollX + window.innerWidth - panelRect.width - margin;
+        }
+        if (left < window.scrollX + margin) {
+          left = window.scrollX + margin;
+        }
+        if (top + panelRect.height > window.scrollY + window.innerHeight - margin) {
+          top = Math.max(window.scrollY + margin, triggerRect.top + window.scrollY - panelRect.height - 8);
+        }
+        spacingToolPanel.style.left = `${left}px`;
+        spacingToolPanel.style.top = `${top}px`;
+      }
+
+      function openSpacingPanel() {
+        if (!spacingToolPanel || spacingPanelOpen) {
+          return;
+        }
+        spacingPanelOpen = true;
+        spacingToolPanel.dataset.open = 'true';
+        spacingToolPanel.setAttribute('aria-hidden', 'false');
+        spacingToolPanel.dataset.state = spacingPanelTarget ? 'ready' : 'idle';
+        spacingToolPanel.style.display = 'flex';
+        if (spacingToolBtn) {
+          spacingToolBtn.classList.add('active');
+          spacingToolBtn.setAttribute('aria-expanded', 'true');
+        }
+        setSpacingPanelTarget(resolveSpacingTargetElement());
+        spacingPanelPositionFrame = requestAnimationFrame(() => {
+          positionSpacingPanel();
+        });
+      }
+
+      function closeSpacingPanel() {
+        if (!spacingToolPanel || !spacingPanelOpen) {
+          return;
+        }
+        spacingPanelOpen = false;
+        spacingToolPanel.dataset.open = 'false';
+        spacingToolPanel.setAttribute('aria-hidden', 'true');
+        spacingToolPanel.style.display = 'none';
+        if (spacingToolBtn) {
+          spacingToolBtn.classList.remove('active');
+          spacingToolBtn.setAttribute('aria-expanded', 'false');
+        }
+        if (spacingPanelPositionFrame) {
+          cancelAnimationFrame(spacingPanelPositionFrame);
+          spacingPanelPositionFrame = null;
+        }
+      }
+
+      function toggleSpacingPanel() {
+        if (spacingPanelOpen) {
+          closeSpacingPanel();
+        } else {
+          openSpacingPanel();
+        }
+      }
+
+      function applySpacingChange(type, value) {
+        if (!spacingPanelTarget || !(spacingPanelTarget instanceof HTMLElement)) {
+          return;
+        }
+        if (type === 'marginTop' && spacingMarginTopValue) {
+          spacingPanelTarget.style.marginTop = `${Math.round(value)}px`;
+          spacingMarginTopValue.textContent = `${Math.round(value)} px`;
+        } else if (type === 'marginBottom' && spacingMarginBottomValue) {
+          spacingPanelTarget.style.marginBottom = `${Math.round(value)}px`;
+          spacingMarginBottomValue.textContent = `${Math.round(value)} px`;
+        } else if (type === 'lineHeight' && spacingLineHeightValue) {
+          const min = spacingLineHeightRange ? parseFloat(spacingLineHeightRange.min) : 0.8;
+          const max = spacingLineHeightRange ? parseFloat(spacingLineHeightRange.max) : 3;
+          const normalized = Math.max(min, Math.min(max, value));
+          spacingPanelTarget.style.lineHeight = normalized.toFixed(2);
+          spacingLineHeightValue.textContent = `${normalized.toFixed(2)}×`;
+        } else if (type === 'blockGap' && spacingBlockGapValue) {
+          if (!(spacingPanelGroupTarget instanceof HTMLElement)) {
+            return;
+          }
+          if (value <= 0) {
+            spacingPanelGroupTarget.style.removeProperty('--block-gap');
+            delete spacingPanelGroupTarget.dataset.blockGap;
+            spacingBlockGapValue.textContent = '0 px';
+          } else {
+            const rounded = Math.round(value);
+            spacingPanelGroupTarget.style.setProperty('--block-gap', `${rounded}px`);
+            spacingPanelGroupTarget.dataset.blockGap = String(rounded);
+            spacingBlockGapValue.textContent = `${rounded} px`;
+          }
+        }
+      }
+
+      function resetSpacingStyles() {
+        if (spacingPanelTarget instanceof HTMLElement) {
+          spacingPanelTarget.style.marginTop = '';
+          spacingPanelTarget.style.marginBottom = '';
+          spacingPanelTarget.style.lineHeight = '';
+        }
+        if (spacingPanelGroupTarget instanceof HTMLElement) {
+          spacingPanelGroupTarget.style.removeProperty('--block-gap');
+          delete spacingPanelGroupTarget.dataset.blockGap;
+        }
+        updateSpacingPanelValues();
+      }
+
+      function setPagesHidden(hidden) {
+        pagesHidden = Boolean(hidden);
+        document.body.classList.toggle('pages-hidden', pagesHidden);
+        if (pageVisibilityPlaceholder) {
+          pageVisibilityPlaceholder.hidden = !pagesHidden;
+          pageVisibilityPlaceholder.setAttribute('aria-hidden', pagesHidden ? 'false' : 'true');
+        }
+        if (togglePagesVisibilityBtn) {
+          togglePagesVisibilityBtn.classList.toggle('active', pagesHidden);
+          togglePagesVisibilityBtn.setAttribute('aria-pressed', pagesHidden ? 'true' : 'false');
+          togglePagesVisibilityBtn.setAttribute('title', pagesHidden ? 'Mostrar páginas del tema' : 'Ocultar páginas del tema');
+          const iconSpan = togglePagesVisibilityBtn.querySelector('span:first-child');
+          const labelSpan = togglePagesVisibilityBtn.querySelector('.topbar-btn-label');
+          if (iconSpan) {
+            iconSpan.textContent = pagesHidden ? '👁️' : '🙈';
+          }
+          if (labelSpan) {
+            labelSpan.textContent = pagesHidden ? 'Mostrar temas' : 'Ocultar temas';
+          }
+        }
+      }
 
       let iconPicker = null;
       let iconPickerAnchor = null;
@@ -4068,6 +4467,7 @@ export async function initializeEditor() {
           if (tableMenu.contains(event.target)) return;
           const table = event.target.closest('table');
           if (!table) {
+            cancelResizeMode();
             if (!tableMenu.contains(event.target)) {
               hideMenu();
             }
@@ -4075,6 +4475,8 @@ export async function initializeEditor() {
           }
           const cell = event.target.closest('td,th') || table.querySelector('td,th');
           if (!cell) return;
+          currentResizer = makeTableResizable(table);
+          currentResizer?.activate();
           showMenu(table, cell);
         });
 
@@ -4088,6 +4490,7 @@ export async function initializeEditor() {
           if (!element) return;
           const table = element.closest('table');
           if (!table) {
+            cancelResizeMode();
             if (tableMenu.classList.contains('show')) {
               hideMenu();
             }
@@ -9418,6 +9821,8 @@ export async function initializeEditor() {
           const magicPages = document.querySelectorAll('.magic-page');
           magicPages.forEach(mp => mp.contentEditable = 'false');
           setFloatingNotesEditable(false);
+          closeSpacingPanel();
+          setBoldInfiniteMode(false);
           editToolbar.classList.remove('show');
           editBtn.classList.remove('active');
           editBtn.textContent = '✏️';
@@ -9556,7 +9961,8 @@ export async function initializeEditor() {
         }
       });
       
-      document.getElementById('boldBtn')?.addEventListener('click', () => execCmd('bold'));
+      boldBtn?.addEventListener('click', handleBoldButtonClick);
+      setBoldInfiniteMode(false);
       document.getElementById('italicBtn')?.addEventListener('click', () => execCmd('italic'));
       document.getElementById('underlineBtn')?.addEventListener('click', () => execCmd('underline'));
       document.getElementById('removeFormatBtn')?.addEventListener('click', () => execCmd('removeFormat'));
@@ -9564,6 +9970,147 @@ export async function initializeEditor() {
       document.getElementById('insertOlBtn')?.addEventListener('click', () => execCmd('insertOrderedList'));
       document.getElementById('indentBtn')?.addEventListener('click', () => handleIndentCommand('indent'));
       document.getElementById('outdentBtn')?.addEventListener('click', () => handleIndentCommand('outdent'));
+
+      spacingToolBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (!isEditMode) {
+          return;
+        }
+        toggleSpacingPanel();
+      });
+
+      spacingToolCloseBtn?.addEventListener('click', () => closeSpacingPanel());
+      spacingToolDismissBtn?.addEventListener('click', () => closeSpacingPanel());
+      spacingToolResetBtn?.addEventListener('click', () => resetSpacingStyles());
+
+      spacingMarginTopRange?.addEventListener('input', () => {
+        const value = Number.parseFloat(spacingMarginTopRange.value);
+        if (Number.isFinite(value)) {
+          applySpacingChange('marginTop', value);
+        }
+      });
+
+      spacingMarginBottomRange?.addEventListener('input', () => {
+        const value = Number.parseFloat(spacingMarginBottomRange.value);
+        if (Number.isFinite(value)) {
+          applySpacingChange('marginBottom', value);
+        }
+      });
+
+      spacingBlockGapRange?.addEventListener('input', () => {
+        const value = Number.parseFloat(spacingBlockGapRange.value);
+        if (Number.isFinite(value)) {
+          applySpacingChange('blockGap', value);
+        }
+      });
+
+      spacingLineHeightRange?.addEventListener('input', () => {
+        const value = Number.parseFloat(spacingLineHeightRange.value);
+        if (Number.isFinite(value)) {
+          applySpacingChange('lineHeight', value);
+        }
+      });
+
+      togglePagesVisibilityBtn?.addEventListener('click', () => {
+        setPagesHidden(!pagesHidden);
+      });
+      setPagesHidden(false);
+
+      document.addEventListener('pointerdown', (event) => {
+        if (!isEditMode || event.button !== 0) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const table = target.closest('table');
+        if (!table || !table.closest('[contenteditable="true"]')) {
+          return;
+        }
+        const controller = makeTableResizable(table);
+        controller?.activate();
+      });
+
+      document.addEventListener('mousedown', (event) => {
+        if (!spacingPanelOpen) {
+          return;
+        }
+        if (spacingToolPanel?.contains(event.target) || spacingToolBtn?.contains(event.target)) {
+          return;
+        }
+        closeSpacingPanel();
+      });
+
+      window.addEventListener('resize', () => {
+        if (!spacingPanelOpen) {
+          return;
+        }
+        if (spacingPanelPositionFrame) {
+          cancelAnimationFrame(spacingPanelPositionFrame);
+        }
+        spacingPanelPositionFrame = requestAnimationFrame(() => positionSpacingPanel());
+      });
+
+      window.addEventListener('scroll', () => {
+        if (!spacingPanelOpen) {
+          return;
+        }
+        if (spacingPanelPositionFrame) {
+          cancelAnimationFrame(spacingPanelPositionFrame);
+        }
+        spacingPanelPositionFrame = requestAnimationFrame(() => positionSpacingPanel());
+      }, true);
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && spacingPanelOpen) {
+          closeSpacingPanel();
+        }
+      });
+
+      document.addEventListener('selectionchange', () => {
+        const selection = window.getSelection();
+
+        if (spacingPanelOpen && isEditMode) {
+          const active = document.activeElement;
+          if (!(spacingToolPanel?.contains(active) || spacingToolBtn?.contains(active))) {
+            if (selection && selection.rangeCount && isSelectionWithinEditable(selection)) {
+              const target = resolveSpacingTargetElement(selection);
+              if (target && target !== spacingPanelTarget) {
+                setSpacingPanelTarget(target);
+              }
+            }
+          }
+        }
+
+        if (!isEditMode || !boldInfiniteMode || boldInfiniteApplying) {
+          return;
+        }
+
+        if (!selection || selection.rangeCount === 0) {
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (range.collapsed) {
+          return;
+        }
+
+        if (!isSelectionWithinEditable(selection)) {
+          return;
+        }
+
+        const activeElement = document.activeElement;
+        if (spacingToolPanel?.contains(activeElement) || spacingToolBtn?.contains(activeElement)) {
+          return;
+        }
+
+        boldInfiniteApplying = true;
+        execCmd('bold');
+        setTimeout(() => {
+          boldInfiniteApplying = false;
+        }, 0);
+      });
 
       bindIconPickerTrigger();
       scheduleIconPickerRebind();
@@ -9865,7 +10412,13 @@ ${inlineStyles}
       switch(e.key.toLowerCase()) {
         case 'b':
           e.preventDefault();
-          execCmd('bold');
+          const selection = window.getSelection();
+          const hasSelection = Boolean(selection && selection.rangeCount && !selection.getRangeAt(0).collapsed && isSelectionWithinEditable(selection));
+          if (!hasSelection) {
+            setBoldInfiniteMode(!boldInfiniteMode);
+          } else {
+            execCmd('bold');
+          }
           break;
         case 'i':
           e.preventDefault();

@@ -26,6 +26,7 @@
           <button class="topbar-btn" type="button" id="shiftLeftBtn" title="Mover contenido hacia la izquierda">⬅️</button>
           <button class="topbar-btn" type="button" id="shiftRightBtn" title="Mover contenido hacia la derecha">➡️</button>
         </div>
+        <button class="topbar-btn" type="button" id="togglePagesVisibilityBtn" aria-pressed="false" title="Ocultar páginas del tema"><span>🙈</span> <span class="topbar-btn-label">Ocultar temas</span></button>
         <button class="topbar-btn" type="button" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
         <button class="topbar-btn" type="button" id="notesViewBtn" title="Vista de notas"><span>📝</span> <span class="topbar-btn-label">Notas</span></button>
         <button class="topbar-btn" type="button" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
@@ -121,6 +122,13 @@
       <div class="toolbar-separator"></div>
 
       <div class="toolbar-group">
+        <span class="toolbar-label">ESPACIOS</span>
+        <button id="spacingToolBtn" title="Ajustar espaciados" aria-haspopup="true" aria-expanded="false">↕️</button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
         <button id="insertTableBtn" title="Tabla">📊</button>
         <button id="insertUlBtn" title="Lista">•</button>
         <button id="insertOlBtn" title="Numerada">1.</button>
@@ -167,6 +175,56 @@
   <!-- Paletas de color -->
   <div class="color-palette" id="highlightPalette"></div>
   <div class="color-palette" id="textColorPalette"></div>
+
+  <div class="spacing-tool-panel" id="spacingToolPanel" role="dialog" aria-modal="false" aria-hidden="true">
+    <div class="spacing-tool-header">
+      <div class="spacing-tool-title">
+        <strong>Espaciados</strong>
+        <span id="spacingToolTargetLabel" class="spacing-tool-subtitle">Selecciona un bloque editable</span>
+      </div>
+      <button type="button" id="spacingToolCloseBtn" class="spacing-tool-close" aria-label="Cerrar panel">×</button>
+    </div>
+    <div class="spacing-tool-body">
+      <div class="spacing-tool-empty" id="spacingToolEmptyMessage">Selecciona un bloque editable para ajustar sus espacios.</div>
+      <div class="spacing-tool-controls" id="spacingToolControls">
+        <div class="spacing-tool-row">
+          <label for="spacingMarginTopRange">Margen superior (px)</label>
+          <div class="spacing-tool-range">
+            <input type="range" id="spacingMarginTopRange" min="-60" max="160" step="1">
+            <span id="spacingMarginTopValue">0 px</span>
+          </div>
+        </div>
+        <div class="spacing-tool-row">
+          <label for="spacingMarginBottomRange">Margen inferior (px)</label>
+          <div class="spacing-tool-range">
+            <input type="range" id="spacingMarginBottomRange" min="-60" max="160" step="1">
+            <span id="spacingMarginBottomValue">0 px</span>
+          </div>
+        </div>
+        <div class="spacing-tool-row">
+          <label for="spacingBlockGapRange">Espacio entre bloques (px)</label>
+          <div class="spacing-tool-range">
+            <input type="range" id="spacingBlockGapRange" min="0" max="120" step="1">
+            <span id="spacingBlockGapValue">0 px</span>
+          </div>
+        </div>
+        <div class="spacing-tool-row">
+          <label for="spacingLineHeightRange">Interlineado</label>
+          <div class="spacing-tool-range">
+            <input type="range" id="spacingLineHeightRange" min="0.8" max="3" step="0.05">
+            <span id="spacingLineHeightValue">1.20×</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="spacing-tool-footer">
+      <div class="spacing-tool-group-info" id="spacingToolGroupLabel"></div>
+      <div class="spacing-tool-actions">
+        <button type="button" id="spacingToolResetBtn">Restablecer</button>
+        <button type="button" id="spacingToolDismissBtn" class="primary">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Panel de herramientas de imagen -->
   <div class="image-toolbar" id="imageToolbar">
@@ -541,6 +599,14 @@
   
   <aside id="magic-view" class="magic-view">
   </aside>
+
+  <div id="pageVisibilityPlaceholder" class="page-visibility-placeholder" aria-hidden="true" hidden>
+    <div class="page-visibility-placeholder-message">
+      Espacio libre para organizar notas flotantes.
+      <br>
+      Pulsa <strong>Mostrar temas</strong> para volver a ver el contenido principal.
+    </div>
+  </div>
 
   <div id="floatingNotesLayer" class="floating-notes-layer"></div>
 
