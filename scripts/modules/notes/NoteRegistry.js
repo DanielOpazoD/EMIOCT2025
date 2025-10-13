@@ -5,7 +5,8 @@ import {
   NOTE_PRIORITY_SEQUENCE,
   DEFAULT_NOTE_PRIORITY,
   DEFAULT_NOTE_CATEGORY,
-  DEFAULT_NOTE_TYPE
+  DEFAULT_NOTE_TYPE,
+  DEFAULT_NOTE_STYLE
 } from './noteConstants.js';
 import {
   normalizePriority,
@@ -146,7 +147,7 @@ export function createEnhancedNote(options = {}) {
     id,
     type,
     category,
-    style: (options.style && String(options.style)) || 'default',
+    style: (options.style && String(options.style)) || DEFAULT_NOTE_STYLE,
     borderColor: (typeof options.borderColor === 'string' && options.borderColor.trim())
       ? options.borderColor.trim()
       : null,
@@ -175,7 +176,8 @@ export function createEnhancedNote(options = {}) {
     anchorId: options.anchorId || null,
     element: options.element || null,
     pages: [],
-    currentPageIndex: 0
+    currentPageIndex: 0,
+    behindMainContent: !!options.behindMainContent
   };
 
   return applyPageStateToNote(base, {
@@ -364,5 +366,6 @@ export {
   NOTE_PRIORITY_SEQUENCE,
   DEFAULT_NOTE_PRIORITY,
   DEFAULT_NOTE_CATEGORY,
-  DEFAULT_NOTE_TYPE
+  DEFAULT_NOTE_TYPE,
+  DEFAULT_NOTE_STYLE
 };

@@ -6,7 +6,8 @@ import {
   NOTE_PRIORITY_SEQUENCE,
   DEFAULT_NOTE_PRIORITY,
   DEFAULT_NOTE_CATEGORY,
-  DEFAULT_NOTE_TYPE
+  DEFAULT_NOTE_TYPE,
+  DEFAULT_NOTE_STYLE
 } from './modules/notes/NoteRegistry.js';
 import {
   sanitizeTags,
@@ -54,8 +55,8 @@ export async function initializeEditor() {
       const IMAGE_RESIZE_STEP = 0.1;
 
       const NOTE_STYLE_PRESETS = [
-        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
         { id: 'blank', name: 'Blanca', shortName: 'Blanca', className: 'floating-note-style-blank' },
+        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
         { id: 'sky', name: 'Cielo', shortName: 'Cielo', className: 'floating-note-style-sky' },
         { id: 'mint', name: 'Menta', shortName: 'Menta', className: 'floating-note-style-mint' },
         { id: 'rose', name: 'Pétalo', shortName: 'Pétalo', className: 'floating-note-style-rose' },
@@ -4949,7 +4950,11 @@ export async function initializeEditor() {
 
       /* === NOTAS FLOTANTES === */
       function getFloatingNoteStyle(styleId) {
-        return NOTE_STYLE_PRESETS.find(preset => preset.id === styleId) || NOTE_STYLE_PRESETS[0];
+        const preset = NOTE_STYLE_PRESETS.find(preset => preset.id === styleId);
+        if (preset) {
+          return preset;
+        }
+        return NOTE_STYLE_PRESETS.find(preset => preset.id === DEFAULT_NOTE_STYLE) || NOTE_STYLE_PRESETS[0];
       }
 
       function applyFloatingNoteStyle(note, styleId) {
@@ -4995,6 +5000,34 @@ export async function initializeEditor() {
         if (persist && noteId) {
           updateNoteData(noteId, { borderColor: normalized || null }, { silent: true });
         }
+      }
+
+      function applyNoteBehindState(note, behind, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldBeBehind = !!behind;
+        note.classList.toggle('floating-note-behind', shouldBeBehind);
+        if (shouldBeBehind) {
+          note.dataset.behindMainContent = 'true';
+        } else {
+          delete note.dataset.behindMainContent;
+        }
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { behindMainContent: shouldBeBehind }, { silent: true });
+          }
+        }
+        return shouldBeBehind;
+      }
+
+      function toggleNoteBehindMain(note) {
+        if (!note) return false;
+        const nextState = !note.classList.contains('floating-note-behind');
+        applyNoteBehindState(note, nextState);
+        if (!nextState) {
+          bringNoteToFront(note);
+        }
+        return nextState;
       }
 
       function resolveNoteTopicId(note) {
@@ -5502,10 +5535,20 @@ export async function initializeEditor() {
           if (incoming && getFloatingNoteStyle(String(incoming).trim())) {
             return String(incoming).trim();
           }
-          return 'default';
+          return DEFAULT_NOTE_STYLE;
         })();
 
         applyFloatingNoteStyle(note, resolvedStyleId);
+
+        const resolvedBehindState = (() => {
+          const source = data.behindMainContent !== undefined
+            ? data.behindMainContent
+            : metaSource.behindMainContent;
+          if (typeof source === 'string') {
+            return source === 'true';
+          }
+          return !!source;
+        })();
 
         const htmlContent = typeof data.html === 'string'
           ? data.html
@@ -5619,10 +5662,12 @@ export async function initializeEditor() {
           relativeTop: Number.isFinite(resolvedRelativeTop) ? resolvedRelativeTop : null,
           element: note,
           pages: incomingPages,
-          currentPageIndex: incomingPageIndex
+          currentPageIndex: incomingPageIndex,
+          behindMainContent: resolvedBehindState
         });
         notesRegistry.set(noteId, noteData);
         applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
+        applyNoteBehindState(note, resolvedBehindState, { persist: false });
 
         const header = document.createElement('div');
         header.className = 'note-header floating-note-header';
@@ -6130,7 +6175,19 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(tagsBtn, reviewBtn);
+        const behindBtn = document.createElement('button');
+        behindBtn.type = 'button';
+        behindBtn.dataset.action = 'toggle-behind';
+        behindBtn.classList.add('note-behind-toggle');
+        behindBtn.textContent = '🗂️ Usar espacio oculto';
+        behindBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteBehindMain(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
+        inlineActions.append(tagsBtn, reviewBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6150,7 +6207,7 @@ export async function initializeEditor() {
 
       function syncNoteOptionsMenu(menu, noteData) {
         if (!menu || !noteData) return;
-        syncFloatingNoteStyleMenu(menu, noteData.style || 'default');
+        syncFloatingNoteStyleMenu(menu, noteData.style || DEFAULT_NOTE_STYLE);
         menu.querySelectorAll('button[data-category-id]').forEach(button => {
           const isActive = button.dataset.categoryId === noteData.category;
           button.classList.toggle('active', isActive);
@@ -6168,6 +6225,13 @@ export async function initializeEditor() {
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
+        }
+        const behindBtn = menu.querySelector('button[data-action="toggle-behind"]');
+        if (behindBtn) {
+          const isBehind = !!noteData.behindMainContent;
+          behindBtn.textContent = isBehind ? '📄 Traer al frente' : '🗂️ Usar espacio oculto';
+          behindBtn.setAttribute('aria-pressed', isBehind ? 'true' : 'false');
+          behindBtn.classList.toggle('active', isBehind);
         }
       }
 
@@ -6466,6 +6530,8 @@ export async function initializeEditor() {
           delete note.dataset.relativeTop;
         }
 
+        applyNoteBehindState(note, !!noteData.behindMainContent, { persist: false });
+
         const ui = note._ui || {};
         const categoryInfo = getNoteCategoryInfo(noteData.category);
         if (ui.categoryIcon) {
@@ -6581,7 +6647,8 @@ export async function initializeEditor() {
               pageOffsetLeft: noteData.pageOffsetLeft,
               pageOffsetTop: noteData.pageOffsetTop,
               relativeLeft: noteData.relativeLeft,
-              relativeTop: noteData.relativeTop
+              relativeTop: noteData.relativeTop,
+              behindMainContent: noteData.behindMainContent
             });
           });
         }
@@ -10720,8 +10787,12 @@ ${inlineStyles}
           if (Number.isFinite(noteData.relativeTop)) {
             noteExport.relativeTop = noteData.relativeTop;
           }
+          noteExport.behindMainContent = !!noteData.behindMainContent;
           noteExport.meta = { ...noteData, element: undefined };
           delete noteExport.meta.element;
+        }
+        if (noteExport.behindMainContent === undefined) {
+          noteExport.behindMainContent = note.classList.contains('floating-note-behind');
         }
         exportedNotes.push(noteExport);
       });
