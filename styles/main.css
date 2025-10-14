@@ -3367,6 +3367,83 @@ body.reading-mode .floating-notes-layer {
   --note-category-indicator: var(--floating-note-title-color, currentColor);
 }
 
+.floating-note-resize-handle {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 10px;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.floating-note-resize-handle::after {
+  content: '';
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  background: rgba(15, 23, 42, 0.16);
+}
+
+.floating-note-resize-handle.handle-left {
+  left: -5px;
+}
+
+.floating-note-resize-handle.handle-right {
+  right: -5px;
+}
+
+.floating-note-resize-handle.handle-corner {
+  top: -6px;
+  left: -6px;
+  width: 18px;
+  height: 18px;
+  bottom: auto;
+  right: auto;
+  cursor: nwse-resize;
+  border-radius: 6px;
+  z-index: 2;
+}
+
+.floating-note-resize-handle.handle-corner::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.floating-note:hover .floating-note-resize-handle,
+.floating-note:focus-within .floating-note-resize-handle,
+.floating-note.resizing .floating-note-resize-handle {
+  opacity: 1;
+}
+
+.floating-note-resize-handle:hover::after,
+.floating-note-resize-handle:focus::after,
+.floating-note-resize-handle:active::after {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.floating-note.resizing {
+  user-select: none;
+}
+
+.floating-note.resizing-horizontal {
+  cursor: ew-resize;
+}
+
+.floating-note.resizing-corner {
+  cursor: nwse-resize;
+}
+
+.floating-note.resizing-vertical {
+  cursor: ns-resize;
+}
+
 .floating-note-hover-animated:not(.dragging):hover,
 .floating-note-hover-animated:not(.dragging):focus-within {
   transform: translateY(-4px);
@@ -3542,7 +3619,7 @@ body.reading-mode .floating-notes-layer {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 4px 8px 2px;
   cursor: grab;
   user-select: none;
   font-size: 14px;
@@ -3795,6 +3872,12 @@ body.reading-mode .floating-notes-layer {
   padding: 4px 0;
 }
 
+.note-menu-secondary {
+  width: 100%;
+  justify-content: center;
+  font-weight: 600;
+}
+
 .floating-note-style-menu .floating-note-reset-size {
   margin-top: 4px;
   font-weight: 600;
@@ -3808,7 +3891,7 @@ body.reading-mode .floating-notes-layer {
   line-height: 1.35;
   outline: none;
   border-radius: 6px;
-  padding: 4px;
+  padding: 2px 6px 6px;
   cursor: text;
   user-select: text;
   min-height: 80px;
@@ -3862,6 +3945,76 @@ body.pages-hidden .floating-note-behind:focus-within {
 
 .floating-note-compact-header .note-actions {
   gap: 2px;
+}
+
+.floating-note-ultra-compact {
+  gap: 0;
+  padding-top: 8px;
+}
+
+.floating-note-ultra-compact .note-category,
+.floating-note-ultra-compact .note-navigation,
+.floating-note-ultra-compact .note-actions .note-priority,
+.floating-note-ultra-compact .note-footer {
+  display: none !important;
+}
+
+.floating-note-ultra-compact .floating-note-header {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  left: auto;
+  padding: 0;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  gap: 0;
+  z-index: 2;
+}
+
+.floating-note-ultra-compact .note-actions {
+  gap: 0;
+}
+
+.floating-note-ultra-compact .note-menu {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0;
+  position: relative;
+  border-radius: 999px;
+}
+
+.floating-note-ultra-compact .note-menu::after {
+  content: '';
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.65;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+.floating-note-ultra-compact .note-menu:hover::after,
+.floating-note-ultra-compact .note-menu:focus-visible::after {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45);
+}
+
+.floating-note-ultra-compact .note-menu:active::after {
+  opacity: 0.9;
+}
+
+.floating-note-ultra-compact .floating-note-body {
+  padding: 6px 8px 8px;
 }
 
 .floating-note.enhanced-note {
@@ -4229,7 +4382,7 @@ body.notes-hidden #floatingNotesLayer {
   word-wrap: break-word
 }
 
-.mini-table th {
+.mini-table th { 
   background: #e9ecef;
   color: #212529;
   font-weight: 600
@@ -4242,6 +4395,36 @@ body.notes-hidden #floatingNotesLayer {
 
 .tight-list li {
   margin: 0
+}
+
+body.printing-floating-notes * {
+  visibility: hidden !important;
+}
+
+body.printing-floating-notes,
+body.printing-floating-notes .floating-notes-print-area,
+body.printing-floating-notes .floating-notes-print-area * {
+  visibility: visible !important;
+}
+
+body.printing-floating-notes .page,
+body.printing-floating-notes .magic-page {
+  display: none !important;
+  page-break-after: auto !important;
+}
+
+.floating-notes-print-area {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.floating-notes-print-area .floating-note {
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
 }
 
 /* ===== Impresión SIN RESTRICCIONES ===== */
@@ -4267,6 +4450,19 @@ body.notes-hidden #floatingNotesLayer {
     display: none !important;
   }
 
+  body.printing-floating-notes .floating-notes-print-area {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  body.printing-floating-notes .floating-notes-print-area .floating-note {
+    position: absolute;
+  }
+
   .page, .magic-page {
     box-shadow: none;
     page-break-after: always;
@@ -4286,10 +4482,6 @@ body.notes-hidden #floatingNotesLayer {
   }
 
   @page {
-    size: auto;
     margin: 10mm;
   }
 }
-</style>
-<style>
-${document.querySelector('style').textContent}
