@@ -84,6 +84,8 @@ export async function initializeEditor() {
         '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
       ];
 
+      const SUPER_NOTE_DEFAULT_TAB_COLOR = '#334155';
+
       const ICON_FEATURE_ENABLED = true;
       const IMAGE_VIEWER_DEFAULT_CONTEXT_KEY = 'global';
       const IMAGE_VIEWER_STORAGE_KEY = 'emi2025-image-viewer';
@@ -469,6 +471,12 @@ export async function initializeEditor() {
       function removeNoteData(noteId) {
         if (!noteId) return;
         notesRegistry.remove(noteId);
+      }
+
+      function isFloatingFamilyNote(note) {
+        if (!note) return false;
+        const type = note.type || NOTE_TYPES.FLOATING;
+        return type === NOTE_TYPES.FLOATING || type === NOTE_TYPES.SUPER;
       }
 
       function scheduleNotesViewRefresh() {
@@ -1334,7 +1342,7 @@ export async function initializeEditor() {
       function collectTopicNoteCounts() {
         const counts = new Map();
         notesRegistry.forEach(note => {
-          if (!note || note.type !== NOTE_TYPES.FLOATING) return;
+          if (!isFloatingFamilyNote(note)) return;
           const topicId = note.topicId ? String(note.topicId).trim() : '';
           if (!topicId) return;
           counts.set(topicId, (counts.get(topicId) || 0) + 1);
@@ -1346,7 +1354,7 @@ export async function initializeEditor() {
         if (!topicId) return [];
         const notes = [];
         notesRegistry.forEach(note => {
-          if (!note || note.type !== NOTE_TYPES.FLOATING) return;
+          if (!isFloatingFamilyNote(note)) return;
           const noteTopic = note.topicId ? String(note.topicId).trim() : '';
           if (noteTopic === topicId) {
             notes.push(note);
@@ -6367,6 +6375,391 @@ export async function initializeEditor() {
         return container.innerHTML;
       }
 
+      function cloneSuperTabs(tabs = []) {
+        return Array.isArray(tabs)
+          ? tabs.map(tab => ({
+              ...tab,
+              pages: Array.isArray(tab.pages)
+                ? tab.pages.map(page => ({ ...page }))
+                : []
+            }))
+          : [];
+      }
+
+      function updateSuperNoteBody(note, noteData) {
+        const body = note.querySelector('.floating-note-body');
+        if (!body) {
+          return;
+        }
+        const html = noteData?.html || '';
+        if (body.innerHTML !== html) {
+          body.innerHTML = html;
+          markFloatingNoteImagesInitialized(body);
+        }
+      }
+
+      function renderSuperNoteUI(note, noteData) {
+        if (!note) return;
+        const ui = note._ui || {};
+        const isSuper = noteData?.superNote === true;
+        if (!isSuper) {
+          note.classList.remove('super-note');
+          delete note.dataset.superNote;
+          delete note.dataset.colorTargetTab;
+          if (ui.tabBar?.parentNode) {
+            ui.tabBar.remove();
+            ui.tabBar = null;
+          }
+          if (ui.tabAddButton?.parentNode) {
+            ui.tabAddButton.remove();
+            ui.tabAddButton = null;
+          }
+          if (ui.tabColorInput?.parentNode) {
+            ui.tabColorInput.remove();
+            ui.tabColorInput = null;
+          }
+          if (ui.categoryWrap) {
+            ui.categoryWrap.classList.remove('super-note-hidden-title');
+            ui.categoryWrap.removeAttribute('aria-hidden');
+            if (ui.categoryLabel) {
+              ui.categoryWrap.dataset.editableTitle = ui.categoryLabel.contentEditable === 'true' ? 'true' : 'false';
+            }
+          }
+          note._ui = ui;
+          return;
+        }
+
+        note.classList.add('super-note');
+        note.dataset.superNote = 'true';
+        if (ui.categoryWrap) {
+          ui.categoryWrap.classList.add('super-note-hidden-title');
+          ui.categoryWrap.setAttribute('aria-hidden', 'true');
+          ui.categoryWrap.dataset.editableTitle = 'false';
+        }
+
+        let tabBar = ui.tabBar;
+        if (!tabBar || !note.contains(tabBar)) {
+          tabBar = document.createElement('div');
+          tabBar.className = 'super-note-tab-bar';
+          note.insertBefore(tabBar, note.firstChild);
+          ui.tabBar = tabBar;
+        }
+        tabBar.innerHTML = '';
+
+        let colorInput = ui.tabColorInput;
+        if (!colorInput || colorInput.parentNode !== note) {
+          if (colorInput?.parentNode) {
+            colorInput.parentNode.removeChild(colorInput);
+          }
+          colorInput = document.createElement('input');
+          colorInput.type = 'color';
+          colorInput.className = 'super-note-color-input';
+          colorInput.tabIndex = -1;
+          colorInput.style.position = 'absolute';
+          colorInput.style.opacity = '0';
+          colorInput.style.pointerEvents = 'none';
+          note.appendChild(colorInput);
+          colorInput.addEventListener('input', () => {
+            const targetTab = note.dataset.colorTargetTab;
+            if (!targetTab) return;
+            applySuperNoteTabColor(note, targetTab, colorInput.value);
+          });
+          colorInput.addEventListener('change', () => {
+            delete note.dataset.colorTargetTab;
+          });
+          ui.tabColorInput = colorInput;
+        }
+
+        const tabs = Array.isArray(noteData?.superTabs) ? noteData.superTabs : [];
+        const activeId = noteData?.activeSuperTabId || (tabs[0]?.id ?? null);
+
+        tabs.forEach((tab, index) => {
+          const tabButton = document.createElement('button');
+          tabButton.type = 'button';
+          tabButton.className = 'super-note-tab';
+          tabButton.dataset.tabId = tab.id;
+          tabButton.style.setProperty('--super-tab-color', tab.color || SUPER_NOTE_DEFAULT_TAB_COLOR);
+          if (tab.id === activeId) {
+            tabButton.classList.add('active');
+          }
+
+          const colorIndicator = document.createElement('span');
+          colorIndicator.className = 'super-note-tab-color-indicator';
+          colorIndicator.title = 'Cambiar color de pestaña';
+          colorIndicator.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openSuperNoteTabColorPicker(note, tab.id);
+          });
+
+          const titleSpan = document.createElement('span');
+          titleSpan.className = 'super-note-tab-title';
+          titleSpan.textContent = tab.title || `Pestaña ${index + 1}`;
+
+          tabButton.append(colorIndicator, titleSpan);
+
+          if (tabs.length > 1) {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'super-note-tab-remove';
+            removeBtn.title = 'Eliminar pestaña';
+            removeBtn.textContent = '×';
+            removeBtn.addEventListener('click', (event) => {
+              event.stopPropagation();
+              removeSuperNoteTab(note, tab.id);
+            });
+            tabButton.appendChild(removeBtn);
+          }
+
+          tabButton.addEventListener('click', () => {
+            activateSuperNoteTab(note, tab.id);
+          });
+
+          tabButton.addEventListener('dblclick', (event) => {
+            event.stopPropagation();
+            promptSuperNoteTabRename(note, tab.id);
+          });
+
+          tabBar.appendChild(tabButton);
+        });
+
+        let addBtn = ui.tabAddButton;
+        if (!addBtn || addBtn.parentNode !== tabBar) {
+          addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'super-note-tab-add';
+          addBtn.title = 'Agregar pestaña';
+          addBtn.textContent = '+';
+          addBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            addSuperNoteTab(note);
+          });
+          ui.tabAddButton = addBtn;
+        }
+        tabBar.appendChild(addBtn);
+        note._ui = ui;
+      }
+
+      function activateSuperNoteTab(note, tabId) {
+        if (!note || !tabId) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current || current.activeSuperTabId === tabId) {
+          return;
+        }
+        bringNoteToFront(note);
+        const updated = updateNoteData(noteId, { activeSuperTabId: tabId });
+        updateSuperNoteBody(note, updated);
+        syncNoteElementMeta(note, updated);
+      }
+
+      function addSuperNoteTab(note) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return;
+        const tabs = cloneSuperTabs(current.superTabs);
+        const nowIso = new Date().toISOString();
+        const newTabId = generateUniqueId('super-tab');
+        const newTab = {
+          id: newTabId,
+          title: `Pestaña ${tabs.length + 1}`,
+          color: SUPER_NOTE_DEFAULT_TAB_COLOR,
+          pages: [{
+            id: generateUniqueId('note-page'),
+            title: null,
+            html: '',
+            content: '',
+            createdAt: nowIso,
+            updatedAt: nowIso
+          }],
+          currentPageIndex: 0,
+          html: '',
+          content: '',
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+        const updated = updateNoteData(noteId, {
+          superNote: true,
+          superTabs: [...tabs, newTab],
+          activeSuperTabId: newTabId,
+          pages: newTab.pages,
+          currentPageIndex: 0,
+          html: '',
+          content: ''
+        });
+        updateSuperNoteBody(note, updated);
+        syncNoteElementMeta(note, updated);
+        if (isEditMode) {
+          setTimeout(() => {
+            const body = note.querySelector('.floating-note-body');
+            body?.focus();
+          }, 0);
+        }
+      }
+
+      function removeSuperNoteTab(note, tabId) {
+        if (!note || !tabId) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return;
+        const tabs = cloneSuperTabs(current.superTabs);
+        if (tabs.length <= 1) {
+          window.alert('La super nota debe tener al menos una pestaña.');
+          return;
+        }
+        const filtered = tabs.filter(tab => tab.id !== tabId);
+        if (filtered.length === tabs.length) {
+          return;
+        }
+        const nextActiveId = current.activeSuperTabId === tabId
+          ? (filtered[0]?.id ?? null)
+          : current.activeSuperTabId;
+        const updated = updateNoteData(noteId, {
+          superTabs: filtered,
+          activeSuperTabId: nextActiveId
+        });
+        updateSuperNoteBody(note, updated);
+        syncNoteElementMeta(note, updated);
+      }
+
+      function promptSuperNoteTabRename(note, tabId) {
+        if (!note || !tabId) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return;
+        const tabs = cloneSuperTabs(current.superTabs);
+        const target = tabs.find(tab => tab.id === tabId);
+        if (!target) return;
+        const initial = target.title || '';
+        const result = window.prompt('Nuevo título de la pestaña', initial);
+        if (result === null) {
+          return;
+        }
+        const trimmed = result.trim();
+        const nowIso = new Date().toISOString();
+        const updatedTabs = tabs.map(tab => (
+          tab.id === tabId
+            ? { ...tab, title: trimmed || null, updatedAt: nowIso }
+            : tab
+        ));
+        const updated = updateNoteData(noteId, { superTabs: updatedTabs, updatedAt: nowIso });
+        syncNoteElementMeta(note, updated);
+      }
+
+      function openSuperNoteTabColorPicker(note, tabId) {
+        const ui = note._ui || {};
+        const colorInput = ui.tabColorInput;
+        if (!colorInput) {
+          return;
+        }
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return;
+        const target = (current.superTabs || []).find(tab => tab.id === tabId);
+        const currentColor = normalizeColorValue(target?.color || SUPER_NOTE_DEFAULT_TAB_COLOR);
+        note.dataset.colorTargetTab = tabId;
+        colorInput.value = currentColor;
+        colorInput.click();
+      }
+
+      function applySuperNoteTabColor(note, tabId, color) {
+        if (!note || !tabId) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return;
+        const tabs = cloneSuperTabs(current.superTabs);
+        const index = tabs.findIndex(tab => tab.id === tabId);
+        if (index === -1) {
+          return;
+        }
+        const normalizedColor = normalizeColorValue(color) || SUPER_NOTE_DEFAULT_TAB_COLOR;
+        tabs[index] = { ...tabs[index], color: normalizedColor };
+        const updated = updateNoteData(noteId, { superTabs: tabs });
+        syncNoteElementMeta(note, updated);
+      }
+
+      function toggleSuperNoteMode(note) {
+        if (!note) return null;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return null;
+        const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
+        if (!current) return null;
+        bringNoteToFront(note);
+
+        if (current.superNote) {
+          const activeTab = (current.superTabs || []).find(tab => tab.id === current.activeSuperTabId)
+            || (current.superTabs || [])[0];
+          const fallbackPages = activeTab?.pages?.map(page => ({ ...page }))
+            || (current.pages || []).map(page => ({ ...page }));
+          const updated = updateNoteData(noteId, {
+            superNote: false,
+            superTabs: [],
+            activeSuperTabId: null,
+            pages: fallbackPages,
+            currentPageIndex: activeTab?.currentPageIndex ?? current.currentPageIndex ?? 0,
+            html: activeTab?.html ?? current.html ?? '',
+            content: activeTab?.content ?? current.content ?? '',
+            type: NOTE_TYPES.FLOATING
+          });
+          updateSuperNoteBody(note, updated);
+          syncNoteElementMeta(note, updated);
+          return updated;
+        }
+
+        const basePages = Array.isArray(current.pages) && current.pages.length
+          ? current.pages.map(page => ({ ...page }))
+          : [{
+              id: generateUniqueId('note-page'),
+              title: null,
+              html: current.html || '',
+              content: current.content || '',
+              createdAt: current.createdAt || new Date().toISOString(),
+              updatedAt: current.updatedAt || new Date().toISOString()
+            }];
+        const nowIso = new Date().toISOString();
+        const tabId = generateUniqueId('super-tab');
+        const defaultIndex = Math.min(
+          Math.max(current.currentPageIndex || 0, 0),
+          Math.max(basePages.length - 1, 0)
+        );
+        const tab = {
+          id: tabId,
+          title: current.title || 'Pestaña 1',
+          color: SUPER_NOTE_DEFAULT_TAB_COLOR,
+          pages: basePages,
+          currentPageIndex: defaultIndex,
+          html: current.html || basePages[defaultIndex]?.html || '',
+          content: current.content || basePages[defaultIndex]?.content || '',
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+        const updated = updateNoteData(noteId, {
+          superNote: true,
+          superTabs: [tab],
+          activeSuperTabId: tabId,
+          pages: basePages,
+          currentPageIndex: defaultIndex,
+          html: tab.html,
+          content: tab.content,
+          type: NOTE_TYPES.SUPER
+        });
+        updateSuperNoteBody(note, updated);
+        syncNoteElementMeta(note, updated);
+        if (isEditMode) {
+          setTimeout(() => {
+            const body = note.querySelector('.floating-note-body');
+            body?.focus();
+          }, 0);
+        }
+        return updated;
+      }
+
       function normalizeCustomIconValue(value) {
         if (typeof value !== 'string') {
           return null;
@@ -6447,7 +6840,7 @@ export async function initializeEditor() {
         if (shouldAnimate) {
           note.dataset.hoverAnimation = 'true';
         } else {
-          note.dataset.hoverAnimation = 'false';
+          delete note.dataset.hoverAnimation;
         }
         if (persist) {
           const noteId = note.dataset.noteId;
@@ -7394,6 +7787,17 @@ export async function initializeEditor() {
           return false;
         })();
 
+        const resolvedSuperNote = resolveBooleanFlag(
+          data.superNote !== undefined ? data.superNote : metaSource.superNote,
+          false
+        );
+        const incomingSuperTabs = Array.isArray(data.superTabs)
+          ? data.superTabs
+          : (Array.isArray(metaSource.superTabs) ? metaSource.superTabs : undefined);
+        const incomingActiveSuperTabId = data.activeSuperTabId
+          ?? metaSource.activeSuperTabId
+          ?? undefined;
+
         const htmlContent = typeof data.html === 'string'
           ? data.html
           : (typeof metaSource.html === 'string' ? metaSource.html : '');
@@ -7508,7 +7912,10 @@ export async function initializeEditor() {
           ultraCompact: resolvedUltraCompact,
           hoverAnimation: resolvedHoverAnimation,
           styleNeutralText: resolvedNeutralText,
-          customIcon: resolvedCustomIcon
+          customIcon: resolvedCustomIcon,
+          superNote: resolvedSuperNote,
+          superTabs: incomingSuperTabs,
+          activeSuperTabId: incomingActiveSuperTabId
         });
         notesRegistry.set(noteId, noteData);
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
@@ -7670,6 +8077,30 @@ export async function initializeEditor() {
           }
         });
 
+        body.addEventListener('copy', (event) => {
+          if (!event.clipboardData) {
+            return;
+          }
+          const selection = document.getSelection();
+          if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+            return;
+          }
+          const range = selection.getRangeAt(0);
+          if (!note.contains(range.commonAncestorContainer)) {
+            return;
+          }
+          const fragment = range.cloneContents();
+          const container = document.createElement('div');
+          container.appendChild(fragment);
+          const sanitizedHtml = sanitizeFloatingNotePasteHtml(container.innerHTML || '');
+          const plainText = container.textContent || '';
+          event.preventDefault();
+          event.clipboardData.setData('text/plain', plainText);
+          if (sanitizedHtml.trim()) {
+            event.clipboardData.setData('text/html', sanitizedHtml);
+          }
+        });
+
         const footer = document.createElement('div');
         footer.className = 'note-footer';
 
@@ -7697,7 +8128,10 @@ export async function initializeEditor() {
           navigation,
           actions,
           menuBtn,
-          header
+          header,
+          tabBar: null,
+          tabAddButton: null,
+          tabColorInput: null
         };
 
         priorityBtn.addEventListener('click', (event) => {
@@ -8124,6 +8558,18 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
+        const superNoteBtn = document.createElement('button');
+        superNoteBtn.type = 'button';
+        superNoteBtn.dataset.action = 'toggle-super-note';
+        superNoteBtn.classList.add('note-super-toggle');
+        superNoteBtn.textContent = '🪄 Convertir en super nota';
+        superNoteBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleSuperNoteMode(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const tagsBtn = document.createElement('button');
         tagsBtn.type = 'button';
         tagsBtn.textContent = '🏷️ Etiquetas';
@@ -8157,7 +8603,16 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, ultraCompactBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(
+          compactHeaderBtn,
+          ultraCompactBtn,
+          neutralTextBtn,
+          hoverAnimationBtn,
+          superNoteBtn,
+          tagsBtn,
+          reviewBtn,
+          behindBtn
+        );
         actionsSection.appendChild(inlineActions);
 
         const duplicateBtn = document.createElement('button');
@@ -8227,6 +8682,13 @@ export async function initializeEditor() {
           hoverBtn.textContent = isActive ? '✨ Animación activa' : '✨ Animación desactivada';
           hoverBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
           hoverBtn.classList.toggle('active', isActive);
+        }
+        const superBtn = menu.querySelector('button[data-action="toggle-super-note"]');
+        if (superBtn) {
+          const isSuper = noteData.superNote === true;
+          superBtn.textContent = isSuper ? '🪄 Volver a nota simple' : '🪄 Convertir en super nota';
+          superBtn.setAttribute('aria-pressed', isSuper ? 'true' : 'false');
+          superBtn.classList.toggle('active', isSuper);
         }
         const neutralBtn = menu.querySelector('button[data-action="toggle-neutral-text"]');
         if (neutralBtn) {
@@ -8310,6 +8772,9 @@ export async function initializeEditor() {
           hoverAnimation: original.hoverAnimation,
           styleNeutralText: original.styleNeutralText,
           customIcon: original.customIcon,
+          superNote: original.superNote,
+          superTabs: cloneSuperTabs(original.superTabs),
+          activeSuperTabId: original.activeSuperTabId,
           focus: true,
           meta: metaClone
         });
@@ -8579,6 +9044,7 @@ export async function initializeEditor() {
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
         applyNoteHoverAnimationState(note, noteData.hoverAnimation === true, { persist: false });
         applyFloatingNoteTextNeutralState(note, noteData.styleNeutralText === true, { persist: false });
+        updateSuperNoteBody(note, noteData);
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -8603,6 +9069,7 @@ export async function initializeEditor() {
         applyNoteBehindState(note, !!noteData.behindMainContent, { persist: false });
 
         const ui = note._ui || {};
+        renderSuperNoteUI(note, noteData);
         const categoryInfo = getNoteCategoryInfo(noteData.category);
         if (ui.categoryIcon) {
           const iconSymbol = typeof noteData.customIcon === 'string' && noteData.customIcon.length
@@ -8732,7 +9199,10 @@ export async function initializeEditor() {
               ultraCompact: noteData.ultraCompact,
               hoverAnimation: noteData.hoverAnimation,
               styleNeutralText: noteData.styleNeutralText,
-              customIcon: noteData.customIcon
+              customIcon: noteData.customIcon,
+              superNote: noteData.superNote,
+              superTabs: noteData.superTabs,
+              activeSuperTabId: noteData.activeSuperTabId
             });
           });
         }
@@ -8901,7 +9371,7 @@ export async function initializeEditor() {
         }
 
         getAllNotes() {
-          return Array.from(notesRegistry.values()).filter(note => note && note.type === NOTE_TYPES.FLOATING);
+          return Array.from(notesRegistry.values()).filter(note => isFloatingFamilyNote(note));
         }
 
         getFilteredNotes() {
@@ -12855,6 +13325,30 @@ ${inlineStyles}
           noteExport.hoverAnimation = noteData.hoverAnimation === true;
           noteExport.styleNeutralText = noteData.styleNeutralText === true;
           noteExport.ultraCompact = noteData.ultraCompact === true;
+          noteExport.superNote = noteData.superNote === true;
+          if (Array.isArray(noteData.superTabs)) {
+            noteExport.superTabs = noteData.superTabs.map(tab => ({
+              id: tab.id,
+              title: tab.title || null,
+              color: tab.color || null,
+              pages: Array.isArray(tab.pages)
+                ? tab.pages.map(page => ({
+                    id: page.id,
+                    title: page.title || null,
+                    html: typeof page.html === 'string' ? page.html : '',
+                    content: typeof page.content === 'string' ? page.content : '',
+                    createdAt: page.createdAt || null,
+                    updatedAt: page.updatedAt || null
+                  }))
+                : [],
+              currentPageIndex: Number.isInteger(tab.currentPageIndex) ? tab.currentPageIndex : 0,
+              html: typeof tab.html === 'string' ? tab.html : '',
+              content: typeof tab.content === 'string' ? tab.content : '',
+              createdAt: tab.createdAt || null,
+              updatedAt: tab.updatedAt || null
+            }));
+          }
+          noteExport.activeSuperTabId = noteData.activeSuperTabId || null;
           if (Array.isArray(noteData.pages)) {
             noteExport.pages = noteData.pages.map(page => ({
               id: page.id,

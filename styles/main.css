@@ -4388,9 +4388,37 @@ body.pages-hidden .floating-note-behind:focus-within {
   transform: translateY(-2px);
 }
 
-.floating-note-compact-header .note-navigation,
 .floating-note-compact-header .note-actions .note-priority {
   display: none !important;
+}
+
+.floating-note-compact-header .note-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7em;
+  opacity: 0.9;
+  padding: 0 4px;
+}
+
+.floating-note-compact-header .note-navigation .note-nav-btn {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  background: rgba(15, 23, 42, 0.05);
+  color: inherit;
+}
+
+.floating-note-compact-header .note-navigation .note-nav-btn:not(:disabled):hover {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.floating-note-compact-header .note-navigation .note-nav-btn:disabled {
+  opacity: 0.45;
+}
+
+.floating-note-compact-header .note-navigation .note-page-indicator {
+  font-weight: 600;
 }
 
 .floating-note-compact-header .note-header {
@@ -4576,6 +4604,117 @@ body.pages-hidden .floating-note-behind:focus-within {
   padding: 8px 10px 10px;
   font-size: 0.78em;
   color: rgba(15, 23, 42, 0.7);
+}
+
+.floating-note.super-note {
+  padding-top: 0;
+}
+
+.floating-note.super-note .note-header {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding-top: 6px;
+}
+
+.floating-note.super-note .note-body {
+  padding-top: 10px;
+}
+
+.super-note-hidden-title {
+  display: none !important;
+}
+
+.super-note-tab-bar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 0;
+}
+
+.super-note-tab {
+  --super-tab-color-value: var(--super-tab-color, #334155);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px 10px 0 0;
+  border: 1px solid rgba(51, 65, 85, 0.35);
+  border: 1px solid color-mix(in srgb, var(--super-tab-color-value) 35%, #000000 8%);
+  background: rgba(51, 65, 85, 0.12);
+  background: color-mix(in srgb, var(--super-tab-color-value) 15%, #ffffff);
+  color: #334155;
+  color: color-mix(in srgb, var(--super-tab-color-value) 80%, #0f172a);
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.super-note-tab:hover {
+  background: rgba(51, 65, 85, 0.18);
+  background: color-mix(in srgb, var(--super-tab-color-value) 22%, #ffffff);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.super-note-tab.active {
+  background: rgba(51, 65, 85, 0.24);
+  background: color-mix(in srgb, var(--super-tab-color-value) 32%, #ffffff);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  color: #1f2937;
+  color: color-mix(in srgb, var(--super-tab-color-value) 92%, #0f172a);
+}
+
+.super-note-tab-color-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--super-tab-color-value);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+}
+
+.super-note-tab-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9em;
+  margin-left: 4px;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: opacity 0.2s ease;
+}
+
+.super-note-tab-remove:hover,
+.super-note-tab-remove:focus-visible {
+  opacity: 1;
+}
+
+.super-note-tab-add {
+  border: 1px dashed rgba(15, 23, 42, 0.25);
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  width: 28px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.super-note-tab-add:hover,
+.super-note-tab-add:focus-visible {
+  background: rgba(148, 163, 184, 0.22);
+  border-color: rgba(15, 23, 42, 0.35);
+}
+
+.super-note-color-input {
+  width: 0;
+  height: 0;
 }
 
 .enhanced-note .note-tags {

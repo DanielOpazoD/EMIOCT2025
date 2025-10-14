@@ -2,7 +2,8 @@ export const NOTE_TYPES = Object.freeze({
   FLOATING: 'floating',
   MARGIN: 'margin',
   INLINE: 'inline',
-  FOOTNOTE: 'footnote'
+  FOOTNOTE: 'footnote',
+  SUPER: 'super'
 });
 
 export const NOTE_CATEGORIES = Object.freeze({
