@@ -27,6 +27,10 @@ function normalizeBooleanFlag(value, defaultValue = false) {
   return defaultValue;
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function createNormalizedNotePage(rawPage = {}, {
   fallbackHtml = '',
   fallbackContent = ''
@@ -71,6 +75,92 @@ function normalizeNotePages(pagesInput, options = {}) {
   return normalized;
 }
 
+function applyPageStateToTab(tab, overrides = {}, options = {}) {
+  const baseHtml = typeof tab.html === 'string' ? tab.html : '';
+  const baseContent = typeof tab.content === 'string' ? tab.content : '';
+  const fallbackHtml = typeof overrides.html === 'string'
+    ? overrides.html
+    : (baseHtml || options.fallbackHtml || '');
+  const fallbackContent = typeof overrides.content === 'string'
+    ? overrides.content
+    : (baseContent || options.fallbackContent || '');
+
+  const pages = normalizeNotePages(
+    overrides.pages !== undefined ? overrides.pages : tab.pages,
+    { fallbackHtml, fallbackContent }
+  );
+
+  let currentIndex = Number.isInteger(overrides.currentPageIndex)
+    ? overrides.currentPageIndex
+    : (Number.isInteger(tab.currentPageIndex) ? tab.currentPageIndex : 0);
+  currentIndex = clamp(currentIndex, 0, pages.length - 1);
+
+  if (typeof overrides.html === 'string' || typeof overrides.content === 'string') {
+    const nowIso = overrides.updatedAt ? String(overrides.updatedAt) : new Date().toISOString();
+    const targetPage = pages[currentIndex];
+    const updatedPage = {
+      ...targetPage,
+      html: typeof overrides.html === 'string' ? overrides.html : targetPage.html,
+      content: typeof overrides.content === 'string' ? overrides.content : targetPage.content,
+      updatedAt: nowIso
+    };
+    pages[currentIndex] = updatedPage;
+  }
+
+  const activePage = pages[currentIndex] || pages[0] || { html: '', content: '' };
+
+  return {
+    ...tab,
+    pages,
+    currentPageIndex: currentIndex,
+    html: activePage.html || '',
+    content: activePage.content || ''
+  };
+}
+
+function normalizeNoteTab(rawTab = {}, options = {}, seenIds = new Set()) {
+  const base = rawTab && typeof rawTab === 'object' ? { ...rawTab } : {};
+  let id = base.id ? String(base.id).trim() : '';
+  while (!id || seenIds.has(id)) {
+    id = generateUniqueId('note-tab');
+  }
+  seenIds.add(id);
+
+  const title = typeof base.title === 'string' ? base.title.trim() : '';
+  const color = typeof base.color === 'string' && base.color.trim()
+    ? base.color.trim()
+    : (options.defaultColor || '#0d6efd');
+
+  const tab = {
+    id,
+    title,
+    color,
+    pages: Array.isArray(base.pages) ? base.pages : [],
+    currentPageIndex: Number.isInteger(base.currentPageIndex) ? base.currentPageIndex : 0,
+    html: typeof base.html === 'string' ? base.html : '',
+    content: typeof base.content === 'string' ? base.content : ''
+  };
+
+  return applyPageStateToTab(tab, {}, {
+    fallbackHtml: options.fallbackHtml || '',
+    fallbackContent: options.fallbackContent || ''
+  });
+}
+
+function normalizeNoteTabs(tabsInput, options = {}) {
+  const seenIds = new Set();
+  const source = Array.isArray(tabsInput) ? tabsInput : [];
+  const normalized = source
+    .map(tab => normalizeNoteTab(tab, options, seenIds))
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    normalized.push(normalizeNoteTab({}, options, seenIds));
+  }
+
+  return normalized;
+}
+
 function applyPageStateToNote(note, overrides = {}) {
   const fallbackHtml = typeof overrides.html === 'string'
     ? overrides.html
@@ -78,6 +168,75 @@ function applyPageStateToNote(note, overrides = {}) {
   const fallbackContent = typeof overrides.content === 'string'
     ? overrides.content
     : (note.content || '');
+
+  const nextSuperState = overrides.superNote !== undefined
+    ? normalizeBooleanFlag(overrides.superNote, !!note.superNote)
+    : !!note.superNote;
+
+  if (nextSuperState) {
+    const normalizedTabs = normalizeNoteTabs(
+      overrides.tabs !== undefined ? overrides.tabs : note.tabs,
+      { fallbackHtml, fallbackContent }
+    );
+
+    let currentTabId = null;
+    if (overrides.currentTabId) {
+      const candidate = String(overrides.currentTabId).trim();
+      currentTabId = normalizedTabs.some(tab => tab.id === candidate) ? candidate : null;
+    }
+    if (!currentTabId && note.currentTabId) {
+      const candidate = String(note.currentTabId).trim();
+      currentTabId = normalizedTabs.some(tab => tab.id === candidate) ? candidate : null;
+    }
+    if (!currentTabId && normalizedTabs.length) {
+      currentTabId = normalizedTabs[0].id;
+    }
+
+    let activeIndex = normalizedTabs.findIndex(tab => tab.id === currentTabId);
+    if (activeIndex === -1) {
+      activeIndex = 0;
+      currentTabId = normalizedTabs[0]?.id || null;
+    }
+
+    const tabOverrides = {
+      pages: overrides.pages,
+      currentPageIndex: overrides.currentPageIndex,
+      html: overrides.html,
+      content: overrides.content,
+      updatedAt: overrides.updatedAt
+    };
+
+    const hasTabOverrides = Object.values(tabOverrides).some(value => value !== undefined);
+    const updatedTabs = normalizedTabs.map((tab, index) => {
+      if (index !== activeIndex) {
+        return tab;
+      }
+      if (!hasTabOverrides) {
+        return tab;
+      }
+      return applyPageStateToTab(tab, tabOverrides, {
+        fallbackHtml,
+        fallbackContent
+      });
+    });
+
+    const activeTab = updatedTabs[activeIndex] || updatedTabs[0] || normalizeNoteTab({}, { fallbackHtml, fallbackContent });
+
+    return {
+      ...note,
+      superNote: true,
+      tabs: updatedTabs,
+      currentTabId,
+      pages: activeTab.pages,
+      currentPageIndex: clamp(
+        activeTab.currentPageIndex ?? 0,
+        0,
+        Math.max(activeTab.pages.length - 1, 0)
+      ),
+      html: activeTab.html || '',
+      content: activeTab.content || ''
+    };
+  }
 
   const pages = normalizeNotePages(
     overrides.pages !== undefined ? overrides.pages : note.pages,
@@ -87,7 +246,7 @@ function applyPageStateToNote(note, overrides = {}) {
   let currentIndex = Number.isInteger(overrides.currentPageIndex)
     ? overrides.currentPageIndex
     : (Number.isInteger(note.currentPageIndex) ? note.currentPageIndex : 0);
-  currentIndex = Math.min(Math.max(currentIndex, 0), pages.length - 1);
+  currentIndex = clamp(currentIndex, 0, pages.length - 1);
 
   if (typeof overrides.html === 'string' || typeof overrides.content === 'string') {
     const nowIso = overrides.updatedAt ? String(overrides.updatedAt) : new Date().toISOString();
@@ -105,6 +264,9 @@ function applyPageStateToNote(note, overrides = {}) {
 
   return {
     ...note,
+    superNote: false,
+    tabs: overrides.tabs !== undefined ? overrides.tabs : note.tabs,
+    currentTabId: null,
     pages,
     currentPageIndex: currentIndex,
     html: activePage?.html || '',
@@ -200,7 +362,10 @@ export function createEnhancedNote(options = {}) {
     behindMainContent: !!options.behindMainContent,
     compactHeader: !!options.compactHeader,
     ultraCompact: !!options.ultraCompact,
-    customIcon: normalizeCustomIcon(options.customIcon)
+    customIcon: normalizeCustomIcon(options.customIcon),
+    superNote: normalizeBooleanFlag(options.superNote, false),
+    tabs: Array.isArray(options.tabs) ? options.tabs : [],
+    currentTabId: options.currentTabId ? String(options.currentTabId) : null
   };
 
   return applyPageStateToNote(base, {
@@ -208,6 +373,9 @@ export function createEnhancedNote(options = {}) {
     currentPageIndex: options.currentPageIndex,
     html: typeof options.html === 'string' ? options.html : base.html,
     content: typeof options.content === 'string' ? options.content : base.content,
+    tabs: options.tabs,
+    currentTabId: options.currentTabId,
+    superNote: base.superNote,
     updatedAt: options.updatedAt || nowIso
   });
 }
@@ -296,6 +464,12 @@ export class NoteRegistry {
           merged.styleNeutralText = normalizeBooleanFlag(overrides.styleNeutralText, merged.styleNeutralText);
         } else if (key === 'customIcon') {
           merged.customIcon = normalizeCustomIcon(overrides.customIcon);
+        } else if (key === 'superNote') {
+          merged.superNote = normalizeBooleanFlag(overrides.superNote, merged.superNote);
+        } else if (key === 'currentTabId') {
+          merged.currentTabId = overrides.currentTabId ? String(overrides.currentTabId) : null;
+        } else if (key === 'tabs') {
+          merged.tabs = Array.isArray(overrides.tabs) ? overrides.tabs : merged.tabs;
         } else if (key === 'titleHtml') {
           if (typeof overrides.titleHtml === 'string') {
             const sanitizedHtml = sanitizeNoteTitleHtml(overrides.titleHtml);
