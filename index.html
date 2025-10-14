@@ -28,6 +28,7 @@
         </div>
         <button class="topbar-btn" type="button" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
         <button class="topbar-btn" type="button" id="notesViewBtn" title="Vista de notas"><span>📝</span> <span class="topbar-btn-label">Notas</span></button>
+        <button class="topbar-btn" type="button" id="imageViewerBtn" title="Visor de imágenes"><span>🖼️</span> <span class="topbar-btn-label">Imágenes</span></button>
         <button class="topbar-btn" type="button" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
         <button class="topbar-btn" type="button" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
         <button class="topbar-btn" type="button" id="printCurrentBtn" title="Imprimir documento"><span>🖨️</span> <span class="topbar-btn-label">Imprimir</span></button>
@@ -66,6 +67,7 @@
 
   <input type="file" id="loadHtmlInput" accept=".html" multiple />
   <input type="file" id="importDataInput" accept="application/json" />
+  <input type="file" id="imageViewerFileInput" accept="image/*" multiple hidden />
 
   <!-- Barra de herramientas -->
   <div class="edit-toolbar" id="editToolbar">
@@ -591,6 +593,43 @@
   
   <aside id="magic-view" class="magic-view">
   </aside>
+
+  <div id="imageViewer" class="image-viewer" aria-hidden="true">
+    <div class="image-viewer-header">
+      <div class="image-viewer-title" aria-live="polite">
+        <span aria-hidden="true">🖼️</span>
+        <h3>Visor de imágenes</h3>
+      </div>
+      <div class="image-viewer-header-actions">
+        <button type="button" class="image-viewer-notes-toggle" id="imageViewerNotesToggle" aria-controls="imageViewerNotesPanel" aria-expanded="false" title="Mostrar notas ocultas">📝 Notas</button>
+        <button type="button" class="image-viewer-add-image" id="imageViewerAddImageBtn" title="Agregar imágenes privadas">➕ Imágenes</button>
+        <button type="button" class="image-viewer-close" id="imageViewerCloseBtn" title="Cerrar visor">×</button>
+      </div>
+    </div>
+    <div class="image-viewer-body">
+      <div class="image-viewer-main" id="imageViewerMain">
+        <img id="imageViewerMainImage" alt="Imagen seleccionada en el visor" hidden />
+        <div class="image-viewer-empty" id="imageViewerEmptyState">
+          <p>Selecciona una imagen del documento o agrega imágenes privadas para visualizarlas aquí.</p>
+        </div>
+      </div>
+      <div class="image-viewer-tools">
+        <a id="imageViewerDownloadBtn" class="image-viewer-download" href="#" download aria-disabled="true">⬇️ Descargar</a>
+      </div>
+      <div class="image-viewer-gallery" id="imageViewerGallery" aria-label="Imágenes disponibles"></div>
+    </div>
+    <div class="image-viewer-notes" id="imageViewerNotesPanel" hidden>
+      <form id="imageViewerNoteForm" class="image-viewer-note-form">
+        <label for="imageViewerNoteInput">Nueva nota oculta</label>
+        <textarea id="imageViewerNoteInput" placeholder="Escribe una nota visible solo en este visor..."></textarea>
+        <div class="image-viewer-note-actions">
+          <button type="submit">Guardar nota</button>
+        </div>
+      </form>
+      <ul id="imageViewerNotesList" class="image-viewer-notes-list"></ul>
+      <p id="imageViewerNotesEmpty" class="image-viewer-notes-empty">Todavía no hay notas ocultas.</p>
+    </div>
+  </div>
 
   <div id="floatingNotesLayer" class="floating-notes-layer"></div>
 
