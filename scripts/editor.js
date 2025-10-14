@@ -138,8 +138,8 @@ export async function initializeEditor() {
         startY: 0
       };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
-      const FLOATING_NOTE_MIN_WIDTH = 160;
-      const FLOATING_NOTE_MIN_HEIGHT = 140;
+      const FLOATING_NOTE_MIN_WIDTH = 0;
+      const FLOATING_NOTE_MIN_HEIGHT = 0;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let floatingNotesViewportRelaxedMatching = false;
@@ -4774,6 +4774,22 @@ export async function initializeEditor() {
 
         const actionButtons = Array.from(tableMenu.querySelectorAll('[data-action]'));
 
+        function isCellInTopRow(cell, table) {
+          if (!cell || !table) return false;
+          const row = cell.closest('tr');
+          if (!row) return false;
+          if (row.closest('table') !== table) return false;
+          const rowIndex = typeof row.rowIndex === 'number' ? row.rowIndex : -1;
+          return rowIndex === 0;
+        }
+
+        function getTopRowFirstCell(table) {
+          if (!table) return null;
+          const firstRow = table.rows && table.rows.length ? table.rows[0] : null;
+          if (!firstRow) return null;
+          return firstRow.cells && firstRow.cells.length ? firstRow.cells[0] : firstRow.querySelector('td,th');
+        }
+
         function hideMenu(options = {}) {
           tableMenu.classList.remove('show');
           tableMenu.setAttribute('aria-hidden', 'true');
@@ -4790,6 +4806,10 @@ export async function initializeEditor() {
         function showMenu(table, cell) {
           if (!isEditMode || !table) return;
           if (!table.closest('[contenteditable="true"]')) return;
+          if (cell && !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           if (selectedTable && selectedTable !== table) {
             selectedTable.classList.remove('table-menu-selected');
             clearColumnHighlight();
@@ -4797,8 +4817,12 @@ export async function initializeEditor() {
           selectedTable = table;
           if (cell) {
             selectedCell = cell;
-          } else if (!selectedCell || !selectedTable.contains(selectedCell)) {
-            selectedCell = selectedTable.querySelector('td,th');
+          } else if (!selectedCell || !selectedTable.contains(selectedCell) || !isCellInTopRow(selectedCell, selectedTable)) {
+            selectedCell = getTopRowFirstCell(selectedTable);
+          }
+          if (!selectedCell || !isCellInTopRow(selectedCell, selectedTable)) {
+            hideMenu();
+            return;
           }
 
           if (selectedTable) {
@@ -5396,8 +5420,11 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = event.target.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = event.target.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -5416,8 +5443,11 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = element.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = element.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -7486,13 +7516,15 @@ export async function initializeEditor() {
 
       function applyFloatingNoteSize(note, width, height) {
         if (!note) return;
-        if (Number.isFinite(width) && width > 0) {
-          note.style.width = `${Math.max(width, FLOATING_NOTE_MIN_WIDTH)}px`;
+        if (Number.isFinite(width)) {
+          const safeWidth = Math.max(width, FLOATING_NOTE_MIN_WIDTH);
+          note.style.width = `${safeWidth}px`;
         } else {
           note.style.width = `${FLOATING_NOTE_DEFAULT_WIDTH}px`;
         }
-        if (Number.isFinite(height) && height > 0) {
-          note.style.height = `${Math.max(height, FLOATING_NOTE_MIN_HEIGHT)}px`;
+        if (Number.isFinite(height)) {
+          const safeHeight = Math.max(height, FLOATING_NOTE_MIN_HEIGHT);
+          note.style.height = `${safeHeight}px`;
         } else {
           note.style.height = '';
         }
@@ -8299,11 +8331,6 @@ export async function initializeEditor() {
         const actions = document.createElement('div');
         actions.className = 'note-actions floating-note-actions';
 
-        const priorityBtn = document.createElement('button');
-        priorityBtn.type = 'button';
-        priorityBtn.className = 'note-priority';
-        priorityBtn.title = 'Prioridad';
-
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
         menuBtn.className = 'note-menu';
@@ -8318,7 +8345,7 @@ export async function initializeEditor() {
           }
         }
 
-        actions.append(priorityBtn, menuBtn);
+        actions.append(menuBtn);
         header.append(categoryWrap, navigation, actions);
 
         const body = document.createElement('div');
@@ -8435,7 +8462,6 @@ export async function initializeEditor() {
           categoryIcon,
           categoryLabel,
           categoryWrap,
-          priorityBtn,
           tagsContainer,
           optionsMenu,
           pageIndicator,
@@ -8451,11 +8477,6 @@ export async function initializeEditor() {
           tabAddButton: null,
           tabColorInput: null
         };
-
-        priorityBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          cycleNotePriority(note);
-        });
 
         prevPageBtn.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -8723,6 +8744,37 @@ export async function initializeEditor() {
         categorySection.appendChild(categoryGrid);
         quickWrapper.appendChild(categorySection);
 
+        const prioritySection = document.createElement('div');
+        prioritySection.className = 'note-menu-section note-menu-priority';
+        const priorityTitle = document.createElement('div');
+        priorityTitle.className = 'note-menu-title';
+        priorityTitle.textContent = '⚑';
+        prioritySection.appendChild(priorityTitle);
+        const priorityOptions = document.createElement('div');
+        priorityOptions.className = 'note-menu-priority-options';
+        const priorityDefinitions = [
+          { id: 'high', label: 'Alta', icon: '⭐' },
+          { id: 'normal', label: 'Normal', icon: '⚑' },
+          { id: 'low', label: 'Baja', icon: '⬇️' }
+        ];
+        priorityDefinitions.forEach(({ id, label, icon }) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'note-priority-option';
+          button.dataset.priorityId = id;
+          button.textContent = `${icon} ${label}`;
+          button.setAttribute('aria-pressed', 'false');
+          button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setNotePriority(note, id);
+            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+            closeFloatingNoteStyleMenu(menu);
+          });
+          priorityOptions.appendChild(button);
+        });
+        prioritySection.appendChild(priorityOptions);
+        quickWrapper.appendChild(prioritySection);
+
         const iconSection = document.createElement('div');
         iconSection.className = 'note-menu-section note-menu-icons';
         const iconTitle = document.createElement('div');
@@ -8967,6 +9019,12 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
+        const activePriority = noteData.priority || DEFAULT_NOTE_PRIORITY;
+        menu.querySelectorAll('button[data-priority-id]').forEach(button => {
+          const isActive = button.dataset.priorityId === activePriority;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
         const currentIcon = typeof noteData.customIcon === 'string' && noteData.customIcon.length
           ? noteData.customIcon
           : '';
@@ -9134,6 +9192,17 @@ export async function initializeEditor() {
         setNoteTags(note, tags);
       }
 
+      function setNotePriority(note, priority) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const normalized = NOTE_PRIORITY_SEQUENCE.includes(priority)
+          ? priority
+          : DEFAULT_NOTE_PRIORITY;
+        const updated = updateNoteData(noteId, { priority: normalized });
+        syncNoteElementMeta(note, updated);
+      }
+
       function cycleNotePriority(note) {
         if (!note) return;
         const noteId = note.dataset.noteId;
@@ -9141,8 +9210,7 @@ export async function initializeEditor() {
         const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
         const currentIndex = NOTE_PRIORITY_SEQUENCE.indexOf(current.priority || DEFAULT_NOTE_PRIORITY);
         const nextPriority = NOTE_PRIORITY_SEQUENCE[(currentIndex + 1) % NOTE_PRIORITY_SEQUENCE.length];
-        const updated = updateNoteData(noteId, { priority: nextPriority });
-        syncNoteElementMeta(note, updated);
+        setNotePriority(note, nextPriority);
       }
 
       function toggleNoteReviewed(note, forceValue = null) {
@@ -9416,23 +9484,6 @@ export async function initializeEditor() {
             ui.categoryWrap.setAttribute('aria-label', tooltip);
             ui.categoryWrap.dataset.editableTitle = ui.categoryLabel?.contentEditable === 'true' ? 'true' : 'false';
           }
-        }
-        if (ui.priorityBtn) {
-          const btn = ui.priorityBtn;
-          btn.classList.remove('high', 'low');
-          let symbol = '⬤';
-          let title = 'Prioridad normal';
-          if (noteData.priority === 'high') {
-            symbol = '⭐';
-            title = 'Prioridad alta';
-            btn.classList.add('high');
-          } else if (noteData.priority === 'low') {
-            symbol = '⚪';
-            title = 'Prioridad baja';
-            btn.classList.add('low');
-          }
-          btn.textContent = symbol;
-          btn.title = title;
         }
         if (ui.tagsContainer) {
           ui.tagsContainer.innerHTML = '';
