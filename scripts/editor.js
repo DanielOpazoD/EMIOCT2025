@@ -408,7 +408,7 @@ export async function initializeEditor() {
       const imageViewerZoomResetBtn = document.getElementById('imageViewerZoomResetBtn');
       const imageViewerZoomValue = document.getElementById('imageViewerZoomValue');
       const imageViewerNotesDefaultPlaceholder = imageViewerNotes ? imageViewerNotes.getAttribute('placeholder') || '' : '';
-      const imageViewerNotesPreviewPlaceholder = 'Notas disponibles solo para imágenes privadas.';
+      const imageViewerNotesPreviewPlaceholder = 'Selecciona una imagen para escribir una nota.';
       const templateToolbar = document.getElementById('templateToolbar');
       const templateBgColorInput = document.getElementById('templateBgColor');
       const templateClearBgBtn = document.getElementById('templateClearBgBtn');
@@ -2514,7 +2514,7 @@ export async function initializeEditor() {
           display = { ...imageViewerPreviewSource, source: 'preview', runtimeId: 'preview' };
         }
 
-        if (display && display.source && display.source !== 'library') {
+        if (display && display.source === 'preview') {
           isPreview = true;
         }
 
@@ -2560,6 +2560,17 @@ export async function initializeEditor() {
           }
         }
 
+        const noteKey = display
+          ? (display.source === 'preview'
+            ? ''
+            : (display.source === 'library' && display.id
+              ? display.id
+              : (display.runtimeId || display.id || '')))
+          : '';
+        const legacyNoteKey = display && display.source === 'library' && display.runtimeId
+          ? display.runtimeId
+          : '';
+
         if (!display) {
           if (imageViewerActiveImage) {
             imageViewerActiveImage.removeAttribute('src');
@@ -2575,8 +2586,9 @@ export async function initializeEditor() {
               imageViewerNotes.value = '';
             }
             imageViewerNotes.dataset.imageId = '';
+            delete imageViewerNotes.dataset.fallbackId;
             imageViewerNotes.disabled = true;
-            imageViewerNotes.placeholder = imageViewerNotesDefaultPlaceholder;
+            imageViewerNotes.placeholder = imageViewerNotesPreviewPlaceholder;
           }
           imageViewerDownloadBtn?.setAttribute('disabled', 'true');
           imageViewerRemoveBtn?.setAttribute('disabled', 'true');
@@ -2596,21 +2608,30 @@ export async function initializeEditor() {
           updateImageViewerMetaDisplay(display);
 
           if (imageViewerNotes) {
-            if (!display || display.source !== 'library' || !display.id) {
+            if (!noteKey) {
               if (document.activeElement !== imageViewerNotes) {
                 imageViewerNotes.value = '';
               }
               imageViewerNotes.dataset.imageId = '';
+              delete imageViewerNotes.dataset.fallbackId;
               imageViewerNotes.disabled = true;
               imageViewerNotes.placeholder = imageViewerNotesPreviewPlaceholder;
             } else {
-              const currentValue = typeof context.notesById?.[display.id] === 'string'
-                ? context.notesById[display.id]
-                : '';
-              if (imageViewerNotes.dataset.imageId !== display.id || document.activeElement !== imageViewerNotes) {
+              let currentValue = '';
+              if (typeof context.notesById?.[noteKey] === 'string') {
+                currentValue = context.notesById[noteKey];
+              } else if (legacyNoteKey && typeof context.notesById?.[legacyNoteKey] === 'string') {
+                currentValue = context.notesById[legacyNoteKey];
+              }
+              if (imageViewerNotes.dataset.imageId !== noteKey || document.activeElement !== imageViewerNotes) {
                 imageViewerNotes.value = currentValue;
               }
-              imageViewerNotes.dataset.imageId = display.id;
+              imageViewerNotes.dataset.imageId = noteKey;
+              if (legacyNoteKey) {
+                imageViewerNotes.dataset.fallbackId = legacyNoteKey;
+              } else {
+                delete imageViewerNotes.dataset.fallbackId;
+              }
               imageViewerNotes.disabled = false;
               imageViewerNotes.placeholder = imageViewerNotesDefaultPlaceholder;
             }
@@ -2631,21 +2652,28 @@ export async function initializeEditor() {
 
         if (imageViewerGallery) {
           imageViewerGallery.innerHTML = '';
-          const libraryImages = Array.isArray(context.images) ? context.images : [];
-          if (libraryImages.length) {
+          if (combined.length) {
             const fragment = document.createDocumentFragment();
-            libraryImages.forEach(image => {
+            combined.forEach(item => {
               const button = document.createElement('button');
               button.type = 'button';
               button.className = 'image-viewer-thumb';
-              if (!isPreview && display && display.source === 'library' && image.id === display.id) {
+              if (display && item.runtimeId === (display.runtimeId || display.id)) {
                 button.classList.add('active');
               }
-              button.dataset.imageId = image.id;
-              button.dataset.runtimeId = `library:${image.id}`;
+              const runtimeId = item.runtimeId || item.id || '';
+              const thumbId = item.source === 'library' ? item.id : runtimeId;
+              if (thumbId) {
+                button.dataset.imageId = thumbId;
+              }
+              if (runtimeId) {
+                button.dataset.runtimeId = runtimeId;
+              }
+              button.dataset.source = item.source || 'document';
               const thumb = document.createElement('img');
-              thumb.src = image.dataUrl;
-              thumb.alt = image.name || 'Imagen';
+              thumb.src = item.dataUrl || item.src;
+              thumb.alt = item.name || 'Imagen';
+              button.title = item.name || '';
               button.appendChild(thumb);
               fragment.appendChild(button);
             });
@@ -2964,20 +2992,36 @@ export async function initializeEditor() {
           return;
         }
         event.preventDefault();
+        const source = button.dataset.source || 'library';
         const id = button.dataset.imageId || '';
-        const runtimeId = button.dataset.runtimeId || `library:${id}`;
+        const runtimeId = button.dataset.runtimeId || '';
+        const resolvedRuntimeId = runtimeId || (source === 'library' && id ? `library:${id}` : id);
+        if (!resolvedRuntimeId && !id) {
+          return;
+        }
         const { context } = getActiveImageViewerContext();
-        if (!id || (context.selectedImageId === id && imageViewerRuntimeSelectionId === runtimeId)) {
+        if (source === 'library') {
+          if (!id) {
+            return;
+          }
+          if (context.selectedImageId === id && imageViewerRuntimeSelectionId === resolvedRuntimeId) {
+            return;
+          }
+        } else if (imageViewerRuntimeSelectionId === resolvedRuntimeId) {
           return;
         }
         clearImageViewerPreview();
         imageViewerCurrentToken = null;
-        imageViewerRuntimeSelectionId = runtimeId;
-        updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
-          images: ctx.images,
-          selectedImageId: id,
-          notesById: ctx.notesById
-        }));
+        imageViewerRuntimeSelectionId = resolvedRuntimeId;
+        if (source === 'library') {
+          updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
+            images: ctx.images,
+            selectedImageId: id,
+            notesById: ctx.notesById
+          }));
+        } else {
+          renderImageViewer();
+        }
       }
 
       function handleImageViewerNotesInput() {
@@ -2989,18 +3033,25 @@ export async function initializeEditor() {
           return;
         }
         const value = imageViewerNotes.value;
+        const fallbackId = imageViewerNotes.dataset.fallbackId || '';
         if (imageViewerNotesSaveTimer) {
           clearTimeout(imageViewerNotesSaveTimer);
         }
         imageViewerNotesSaveTimer = setTimeout(() => {
-          updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
-            images: ctx.images,
-            selectedImageId: ctx.selectedImageId,
-            notesById: {
+          updateImageViewerContext(getActiveImageViewerContextKey(), ctx => {
+            const nextNotes = {
               ...ctx.notesById,
               [targetId]: value
+            };
+            if (fallbackId && fallbackId !== targetId && Object.prototype.hasOwnProperty.call(nextNotes, fallbackId)) {
+              delete nextNotes[fallbackId];
             }
-          }), { rerender: false });
+            return {
+              images: ctx.images,
+              selectedImageId: ctx.selectedImageId,
+              notesById: nextNotes
+            };
+          }, { rerender: false });
         }, 250);
       }
 
