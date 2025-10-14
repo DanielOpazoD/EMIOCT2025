@@ -603,7 +603,8 @@
     </div>
     <div class="image-viewer-content">
       <div class="image-viewer-stage">
-        <div class="image-viewer-stage-surface">
+        <div class="image-viewer-stage-surface" id="imageViewerStageSurface">
+          <button type="button" class="image-viewer-nav image-viewer-nav-prev" id="imageViewerPrevBtn" aria-label="Ver imagen anterior">‹</button>
           <div class="image-viewer-zoom-controls">
             <button type="button" class="image-viewer-zoom-btn" id="imageViewerZoomOutBtn" title="Reducir" aria-label="Reducir zoom">−</button>
             <span class="image-viewer-zoom-value" id="imageViewerZoomValue">100%</span>
@@ -611,6 +612,7 @@
             <button type="button" class="image-viewer-zoom-btn" id="imageViewerZoomResetBtn" title="Restablecer zoom" aria-label="Restablecer zoom">⤢</button>
           </div>
           <img id="imageViewerActiveImage" alt="Imagen seleccionada en el visor" />
+          <button type="button" class="image-viewer-nav image-viewer-nav-next" id="imageViewerNextBtn" aria-label="Ver imagen siguiente">›</button>
           <div class="image-viewer-empty" id="imageViewerEmptyState">
             <strong>Sin imágenes cargadas</strong>
             <p>Usa “Añadir” para abrir imágenes privadas visibles solo en este visor.</p>

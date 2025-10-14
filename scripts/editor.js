@@ -85,22 +85,22 @@ export async function initializeEditor() {
       ];
 
       const ICON_FEATURE_ENABLED = true;
+      const IMAGE_VIEWER_DEFAULT_CONTEXT_KEY = 'global';
       const IMAGE_VIEWER_STORAGE_KEY = 'emi2025-image-viewer';
       const IMAGE_VIEWER_ZOOM_MIN = 0.25;
       const IMAGE_VIEWER_ZOOM_MAX = 4;
       const IMAGE_VIEWER_ZOOM_STEP = 0.25;
 
-      let imageViewerState = {
-        images: [],
-        selectedImageId: null,
-        notesById: {}
-      };
+      let imageViewerState = getDefaultImageViewerState();
       let imageViewerPreviousShift = null;
       let imageViewerActiveShift = null;
       let imageViewerNotesSaveTimer = null;
       let imageViewerZoom = 1;
       let imageViewerPreviewSource = null;
       let imageViewerCurrentToken = null;
+      let imageViewerContextExternalImages = [];
+      let imageViewerRuntimeSelectionId = null;
+      let imageViewerContextKey = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
 
       let floatingNotesHidden = false;
       let mainContentHidden = false;
@@ -394,12 +394,15 @@ export async function initializeEditor() {
       const imageViewerCloseBtn = document.getElementById('imageViewerCloseBtn');
       const imageViewerUploadInput = document.getElementById('imageViewerUploadInput');
       const imageViewerActiveImage = document.getElementById('imageViewerActiveImage');
+      const imageViewerStageSurface = document.getElementById('imageViewerStageSurface');
       const imageViewerEmptyState = document.getElementById('imageViewerEmptyState');
       const imageViewerFileName = document.getElementById('imageViewerFileName');
       const imageViewerMeta = document.getElementById('imageViewerMeta');
       const imageViewerNotes = document.getElementById('imageViewerNotes');
       const imageViewerGallery = document.getElementById('imageViewerGallery');
       const imageViewerRemoveBtn = document.getElementById('imageViewerRemoveBtn');
+      const imageViewerPrevBtn = document.getElementById('imageViewerPrevBtn');
+      const imageViewerNextBtn = document.getElementById('imageViewerNextBtn');
       const imageViewerZoomOutBtn = document.getElementById('imageViewerZoomOutBtn');
       const imageViewerZoomInBtn = document.getElementById('imageViewerZoomInBtn');
       const imageViewerZoomResetBtn = document.getElementById('imageViewerZoomResetBtn');
@@ -1956,11 +1959,20 @@ export async function initializeEditor() {
         }
       }
 
-      function getDefaultImageViewerState() {
+      function getDefaultImageViewerContext() {
         return {
           images: [],
           selectedImageId: null,
           notesById: {}
+        };
+      }
+
+      function getDefaultImageViewerState() {
+        return {
+          contexts: {
+            [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: getDefaultImageViewerContext()
+          },
+          activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
         };
       }
 
@@ -1992,20 +2004,20 @@ export async function initializeEditor() {
         return Array.from(unique.values());
       }
 
-      function sanitizeImageViewerState(next) {
-        if (!next || typeof next !== 'object') {
-          return getDefaultImageViewerState();
+      function sanitizeImageViewerContext(context) {
+        if (!context || typeof context !== 'object') {
+          return getDefaultImageViewerContext();
         }
-        const sanitizedImages = sanitizeViewerImages(next.images);
+        const sanitizedImages = sanitizeViewerImages(context.images);
         const notesById = {};
-        if (next.notesById && typeof next.notesById === 'object') {
-          Object.entries(next.notesById).forEach(([key, value]) => {
+        if (context.notesById && typeof context.notesById === 'object') {
+          Object.entries(context.notesById).forEach(([key, value]) => {
             if (typeof value === 'string') {
               notesById[key] = value;
             }
           });
         }
-        let selectedImageId = typeof next.selectedImageId === 'string' ? next.selectedImageId : null;
+        let selectedImageId = typeof context.selectedImageId === 'string' ? context.selectedImageId : null;
         if (!sanitizedImages.some(image => image.id === selectedImageId)) {
           selectedImageId = sanitizedImages.length ? sanitizedImages[sanitizedImages.length - 1].id : null;
         }
@@ -2013,6 +2025,69 @@ export async function initializeEditor() {
           images: sanitizedImages,
           selectedImageId,
           notesById
+        };
+      }
+
+      function sanitizeImageViewerState(next) {
+        if (!next || typeof next !== 'object') {
+          return getDefaultImageViewerState();
+        }
+
+        const looksLegacy = Array.isArray(next.images)
+          || typeof next.selectedImageId === 'string'
+          || (next.notesById && typeof next.notesById === 'object');
+
+        if (looksLegacy) {
+          const legacyContext = sanitizeImageViewerContext({
+            images: next.images,
+            selectedImageId: next.selectedImageId,
+            notesById: next.notesById
+          });
+          return {
+            contexts: {
+              [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: legacyContext
+            },
+            activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
+          };
+        }
+
+        const incomingContexts = next.contexts && typeof next.contexts === 'object' ? next.contexts : {};
+        const sanitizedContexts = {};
+
+        Object.entries(incomingContexts).forEach(([key, value]) => {
+          if (typeof key !== 'string' || !key) {
+            return;
+          }
+          sanitizedContexts[key] = sanitizeImageViewerContext(value);
+        });
+
+        if (!Object.keys(sanitizedContexts).length) {
+          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
+        } else if (!sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]) {
+          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
+        }
+
+        const availableKeys = Object.keys(sanitizedContexts);
+        let activeContext = typeof next.activeContext === 'string' && sanitizedContexts[next.activeContext]
+          ? next.activeContext
+          : null;
+
+        if (!activeContext) {
+          if (availableKeys.includes(IMAGE_VIEWER_DEFAULT_CONTEXT_KEY)) {
+            activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+          } else {
+            activeContext = availableKeys[0];
+          }
+        }
+
+        if (!activeContext || !sanitizedContexts[activeContext]) {
+          activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+          sanitizedContexts[activeContext] = sanitizedContexts[activeContext] || getDefaultImageViewerContext();
+        }
+
+        return {
+          contexts: sanitizedContexts,
+          activeContext
         };
       }
 
@@ -2051,9 +2126,8 @@ export async function initializeEditor() {
           next = { ...current };
         }
         imageViewerState = sanitizeImageViewerState({
-          images: next?.images ?? current.images,
-          selectedImageId: next?.selectedImageId ?? current.selectedImageId,
-          notesById: next?.notesById ?? current.notesById
+          contexts: next?.contexts ?? current.contexts,
+          activeContext: next?.activeContext ?? current.activeContext
         });
         persistImageViewerState();
         if (options.rerender !== false) {
@@ -2061,22 +2135,153 @@ export async function initializeEditor() {
         }
       }
 
+      function getActiveImageViewerContextKey() {
+        const state = imageViewerState || getDefaultImageViewerState();
+        const desiredKey = imageViewerContextKey || state.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        if (state.contexts && state.contexts[desiredKey]) {
+          return desiredKey;
+        }
+        const availableKeys = state.contexts ? Object.keys(state.contexts) : [];
+        if (availableKeys.length) {
+          return availableKeys[0];
+        }
+        return IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+      }
+
+      function getActiveImageViewerContext() {
+        const key = getActiveImageViewerContextKey();
+        const context = imageViewerState.contexts?.[key];
+        if (context) {
+          return { key, context };
+        }
+        return { key, context: getDefaultImageViewerContext() };
+      }
+
+      function updateImageViewerContext(contextKey, updater, options = {}) {
+        const targetKey = contextKey || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        setImageViewerState(state => {
+          const contexts = { ...state.contexts };
+          const currentContext = sanitizeImageViewerContext(contexts[targetKey] || getDefaultImageViewerContext());
+          const nextContext = sanitizeImageViewerContext(
+            typeof updater === 'function' ? updater(currentContext) : updater
+          );
+          contexts[targetKey] = nextContext;
+          return {
+            contexts,
+            activeContext: targetKey
+          };
+        }, options);
+      }
+
+      function activateImageViewerContext(contextKey, { externalImages, selectedRuntimeId, rerender = true } = {}) {
+        const targetKey = contextKey || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        const previousKey = imageViewerContextKey;
+        if (Array.isArray(externalImages)) {
+          imageViewerContextExternalImages = externalImages;
+        } else if (externalImages === null) {
+          imageViewerContextExternalImages = [];
+        } else if (previousKey !== targetKey) {
+          imageViewerContextExternalImages = [];
+        }
+        if (selectedRuntimeId !== undefined) {
+          imageViewerRuntimeSelectionId = selectedRuntimeId;
+        }
+        imageViewerContextKey = targetKey;
+        setImageViewerState(state => {
+          const contexts = { ...state.contexts };
+          if (!contexts[targetKey]) {
+            contexts[targetKey] = getDefaultImageViewerContext();
+          }
+          return {
+            contexts,
+            activeContext: targetKey
+          };
+        }, { rerender });
+      }
+
       function clearImageViewerPreview() {
         imageViewerPreviewSource = null;
       }
 
+      function getImageViewerCombinedImages() {
+        const { key, context } = getActiveImageViewerContext();
+        const external = Array.isArray(imageViewerContextExternalImages)
+          ? imageViewerContextExternalImages
+          : [];
+
+        const normalizedExternal = external.reduce((list, entry, index) => {
+          if (!entry || typeof entry !== 'object') {
+            return list;
+          }
+          const src = typeof entry.src === 'string' && entry.src
+            ? entry.src
+            : (typeof entry.dataUrl === 'string' ? entry.dataUrl : '');
+          if (!src) {
+            return list;
+          }
+          const runtimeId = entry.runtimeId || `external:${key}:${index}`;
+          list.push({
+            runtimeId,
+            id: entry.id || runtimeId,
+            src,
+            dataUrl: typeof entry.dataUrl === 'string' && entry.dataUrl ? entry.dataUrl : (src.startsWith('data:') ? src : ''),
+            name: entry.name || entry.alt || 'Imagen',
+            alt: entry.alt || entry.name || 'Imagen',
+            width: Number.isFinite(entry.width) ? entry.width : null,
+            height: Number.isFinite(entry.height) ? entry.height : null,
+            size: Number.isFinite(entry.size) ? entry.size : null,
+            type: entry.type || '',
+            source: 'document',
+            element: entry.element instanceof HTMLImageElement ? entry.element : null
+          });
+          return list;
+        }, []);
+
+        const library = Array.isArray(context.images)
+          ? context.images.map(image => ({
+              runtimeId: `library:${image.id}`,
+              id: image.id,
+              dataUrl: image.dataUrl,
+              src: image.dataUrl,
+              name: image.name || 'imagen',
+              alt: image.alt || image.name || 'imagen',
+              width: Number.isFinite(image.width) ? image.width : null,
+              height: Number.isFinite(image.height) ? image.height : null,
+              size: Number.isFinite(image.size) ? image.size : null,
+              type: image.type || 'image/*',
+              source: 'library'
+            }))
+          : [];
+
+        return [...normalizedExternal, ...library];
+      }
+
       function getActiveViewerImage() {
-        const { images, selectedImageId } = imageViewerState;
-        if (Array.isArray(images) && images.length) {
-          const selected = images.find(image => image.id === selectedImageId) || images[images.length - 1];
-          if (selected) {
-            return { ...selected, source: 'library' };
+        const combined = getImageViewerCombinedImages();
+        if (!combined.length) {
+          if (imageViewerPreviewSource && imageViewerPreviewSource.src) {
+            return { ...imageViewerPreviewSource, source: 'preview', runtimeId: 'preview' };
+          }
+          return null;
+        }
+        const runtimeId = imageViewerRuntimeSelectionId;
+        let active = null;
+        if (runtimeId) {
+          active = combined.find(item => item.runtimeId === runtimeId) || null;
+        }
+        if (!active) {
+          const { context } = getActiveImageViewerContext();
+          if (context.selectedImageId) {
+            active = combined.find(item => item.source === 'library' && item.id === context.selectedImageId) || null;
           }
         }
-        if (imageViewerPreviewSource && imageViewerPreviewSource.src) {
-          return { ...imageViewerPreviewSource, source: 'preview' };
+        if (!active) {
+          active = combined[0] || null;
         }
-        return null;
+        if (active) {
+          imageViewerRuntimeSelectionId = active.runtimeId || null;
+        }
+        return active;
       }
 
       function clampImageViewerZoom(value) {
@@ -2300,19 +2505,25 @@ export async function initializeEditor() {
 
       function renderImageViewer() {
         if (!imageViewerPanel) return;
-        const { images, selectedImageId, notesById } = imageViewerState;
-        const hasImages = images.length > 0;
-        const selected = hasImages ? images.find(image => image.id === selectedImageId) || images[images.length - 1] : null;
-        let display = selected;
+        const { context } = getActiveImageViewerContext();
+        const combined = getImageViewerCombinedImages();
+        let display = getActiveViewerImage();
         let isPreview = false;
 
         if (!display && imageViewerPreviewSource && imageViewerPreviewSource.src) {
-          display = imageViewerPreviewSource;
+          display = { ...imageViewerPreviewSource, source: 'preview', runtimeId: 'preview' };
+        }
+
+        if (display && display.source && display.source !== 'library') {
           isPreview = true;
         }
 
+        if (display && display.runtimeId) {
+          imageViewerRuntimeSelectionId = display.runtimeId;
+        }
+
         const displayToken = display
-          ? (isPreview ? `preview:${display.src || display.dataUrl || ''}` : `library:${display.id}`)
+          ? `${display.runtimeId || display.id || 'preview'}:${display.src || display.dataUrl || ''}`
           : null;
 
         if (displayToken !== imageViewerCurrentToken) {
@@ -2325,6 +2536,29 @@ export async function initializeEditor() {
 
         imageViewerPanel.classList.toggle('has-image', !!display);
         imageViewerPanel.classList.toggle('viewer-preview-mode', isPreview);
+        imageViewerPanel.classList.toggle('viewer-has-multi', combined.length > 1);
+
+        if (imageViewerPrevBtn) {
+          const disabled = combined.length <= 1;
+          if (disabled) {
+            imageViewerPrevBtn.setAttribute('disabled', 'true');
+            imageViewerPrevBtn.setAttribute('aria-hidden', 'true');
+          } else {
+            imageViewerPrevBtn.removeAttribute('disabled');
+            imageViewerPrevBtn.setAttribute('aria-hidden', 'false');
+          }
+        }
+
+        if (imageViewerNextBtn) {
+          const disabled = combined.length <= 1;
+          if (disabled) {
+            imageViewerNextBtn.setAttribute('disabled', 'true');
+            imageViewerNextBtn.setAttribute('aria-hidden', 'true');
+          } else {
+            imageViewerNextBtn.removeAttribute('disabled');
+            imageViewerNextBtn.setAttribute('aria-hidden', 'false');
+          }
+        }
 
         if (!display) {
           if (imageViewerActiveImage) {
@@ -2362,15 +2596,17 @@ export async function initializeEditor() {
           updateImageViewerMetaDisplay(display);
 
           if (imageViewerNotes) {
-            if (isPreview) {
+            if (!display || display.source !== 'library' || !display.id) {
               if (document.activeElement !== imageViewerNotes) {
                 imageViewerNotes.value = '';
               }
               imageViewerNotes.dataset.imageId = '';
               imageViewerNotes.disabled = true;
               imageViewerNotes.placeholder = imageViewerNotesPreviewPlaceholder;
-            } else if (display && display.id) {
-              const currentValue = typeof notesById?.[display.id] === 'string' ? notesById[display.id] : '';
+            } else {
+              const currentValue = typeof context.notesById?.[display.id] === 'string'
+                ? context.notesById[display.id]
+                : '';
               if (imageViewerNotes.dataset.imageId !== display.id || document.activeElement !== imageViewerNotes) {
                 imageViewerNotes.value = currentValue;
               }
@@ -2386,25 +2622,27 @@ export async function initializeEditor() {
             imageViewerDownloadBtn?.setAttribute('disabled', 'true');
           }
 
-          if (isPreview) {
-            imageViewerRemoveBtn?.setAttribute('disabled', 'true');
-          } else {
+          if (display.source === 'library') {
             imageViewerRemoveBtn?.removeAttribute('disabled');
+          } else {
+            imageViewerRemoveBtn?.setAttribute('disabled', 'true');
           }
         }
 
         if (imageViewerGallery) {
           imageViewerGallery.innerHTML = '';
-          if (hasImages) {
+          const libraryImages = Array.isArray(context.images) ? context.images : [];
+          if (libraryImages.length) {
             const fragment = document.createDocumentFragment();
-            images.forEach(image => {
+            libraryImages.forEach(image => {
               const button = document.createElement('button');
               button.type = 'button';
               button.className = 'image-viewer-thumb';
-              if (!isPreview && display && image.id === display.id) {
+              if (!isPreview && display && display.source === 'library' && image.id === display.id) {
                 button.classList.add('active');
               }
               button.dataset.imageId = image.id;
+              button.dataset.runtimeId = `library:${image.id}`;
               const thumb = document.createElement('img');
               thumb.src = image.dataUrl;
               thumb.alt = image.name || 'Imagen';
@@ -2424,6 +2662,7 @@ export async function initializeEditor() {
           return;
         }
         const additions = [];
+        const contextKey = getActiveImageViewerContextKey();
         for (const file of files) {
           try {
             const dataUrl = await readFileAsDataUrl(file);
@@ -2445,17 +2684,16 @@ export async function initializeEditor() {
             computeImageDimensions(dataUrl)
               .then(dimensions => {
                 if (!dimensions) return;
-                setImageViewerState(state => {
-                  if (!state.images.some(img => img.id === id)) {
-                    return state;
+                updateImageViewerContext(contextKey, ctx => {
+                  if (!ctx.images.some(img => img.id === id)) {
+                    return ctx;
                   }
-                  const updatedImages = state.images.map(img => img.id === id ? { ...img, ...dimensions } : img);
                   return {
-                    images: updatedImages,
-                    selectedImageId: state.selectedImageId,
-                    notesById: state.notesById
+                    images: ctx.images.map(img => img.id === id ? { ...img, ...dimensions } : img),
+                    selectedImageId: ctx.selectedImageId,
+                    notesById: ctx.notesById
                   };
-                }, { rerender: true });
+                }, { rerender: id === (additions[additions.length - 1]?.id || id) });
               })
               .catch(() => {});
           } catch (error) {
@@ -2465,12 +2703,14 @@ export async function initializeEditor() {
         if (!additions.length) {
           return;
         }
+        const lastAdditionId = additions[additions.length - 1].id;
         clearImageViewerPreview();
         imageViewerCurrentToken = null;
-        setImageViewerState(state => ({
-          images: [...state.images, ...additions],
-          selectedImageId: additions[additions.length - 1].id,
-          notesById: { ...state.notesById }
+        imageViewerRuntimeSelectionId = `library:${lastAdditionId}`;
+        updateImageViewerContext(contextKey, ctx => ({
+          images: [...ctx.images, ...additions],
+          selectedImageId: lastAdditionId,
+          notesById: { ...ctx.notesById }
         }));
         if (!imageViewerPanel?.classList.contains('open')) {
           openImageViewer();
@@ -2519,61 +2759,203 @@ export async function initializeEditor() {
           return;
         }
         const targetId = active.id;
-        setImageViewerState(state => {
-          const nextImages = state.images.filter(image => image.id !== targetId);
-          const nextNotes = { ...state.notesById };
+        const contextKey = getActiveImageViewerContextKey();
+        let nextRuntimeSelection = null;
+        updateImageViewerContext(contextKey, ctx => {
+          const nextImages = ctx.images.filter(image => image.id !== targetId);
+          const nextNotes = { ...ctx.notesById };
           delete nextNotes[targetId];
+          let nextSelectedId = ctx.selectedImageId;
+          if (!nextImages.some(image => image.id === nextSelectedId)) {
+            nextSelectedId = nextImages.length ? nextImages[nextImages.length - 1].id : null;
+          }
+          nextRuntimeSelection = nextSelectedId ? `library:${nextSelectedId}` : null;
           return {
             images: nextImages,
-            selectedImageId: nextImages.length ? nextImages[nextImages.length - 1].id : null,
+            selectedImageId: nextSelectedId,
             notesById: nextNotes
           };
         });
+        imageViewerRuntimeSelectionId = nextRuntimeSelection;
+      }
+
+      function buildViewerContextKey(prefix, identifier) {
+        const cleanPrefix = typeof prefix === 'string' && prefix.length ? prefix : IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        const rawId = typeof identifier === 'string' ? identifier.trim() : '';
+        if (!rawId) {
+          return cleanPrefix;
+        }
+        const sanitized = rawId.replace(/[^a-zA-Z0-9:_-]+/g, '-');
+        return `${cleanPrefix}:${sanitized || 'default'}`;
+      }
+
+      function resolveImageViewerScopeForElement(element) {
+        if (!element) {
+          return { key: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY, container: null };
+        }
+        const floatingNote = element.closest('.floating-note');
+        if (floatingNote) {
+          const noteId = floatingNote.dataset.noteId || floatingNote.id || 'floating';
+          const body = floatingNote.querySelector('.floating-note-body') || floatingNote;
+          return { key: buildViewerContextKey('floating', noteId), container: body };
+        }
+        const noteContainer = element.closest('[data-note-id]');
+        if (noteContainer) {
+          const noteId = noteContainer.dataset.noteId || noteContainer.id || 'note';
+          const body = noteContainer.querySelector('.note-body') || noteContainer;
+          return { key: buildViewerContextKey('note', noteId), container: body };
+        }
+        const page = element.closest('.page, .magic-page');
+        if (page) {
+          const pageKey = page.dataset.topicId || page.dataset.sectionId || page.id || 'page';
+          return { key: buildViewerContextKey('page', pageKey), container: page };
+        }
+        const fallbackContainer = element.closest('.page-content, main, body') || document.body;
+        return { key: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY, container: fallbackContainer };
+      }
+
+      function createExternalEntryFromImage(img, contextKey, index) {
+        if (!(img instanceof HTMLImageElement)) {
+          return null;
+        }
+        const src = img.currentSrc || img.src;
+        if (!src) {
+          return null;
+        }
+        const alt = (img.getAttribute('alt') || '').trim();
+        const title = (img.getAttribute('title') || '').trim();
+        const name = alt || title || 'Imagen';
+        const width = Number.isFinite(img.naturalWidth) && img.naturalWidth > 0 ? img.naturalWidth : null;
+        const height = Number.isFinite(img.naturalHeight) && img.naturalHeight > 0 ? img.naturalHeight : null;
+        let type = '';
+        if (img.dataset && typeof img.dataset.mimeType === 'string' && img.dataset.mimeType) {
+          type = img.dataset.mimeType;
+        } else if (src.startsWith('data:image/')) {
+          const match = src.slice(0, 32).match(/^data:image\/([^;]+)/i);
+          if (match && match[1]) {
+            type = `image/${match[1]}`;
+          }
+        }
+        return {
+          runtimeId: `external:${contextKey}:${index}`,
+          id: `external:${contextKey}:${index}`,
+          src,
+          dataUrl: src.startsWith('data:') ? src : '',
+          name,
+          alt: name,
+          width,
+          height,
+          size: null,
+          type,
+          source: 'document',
+          element: img
+        };
+      }
+
+      function buildExternalImagesForScope(scope, anchorImage) {
+        const contextKey = scope?.key || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        const container = scope?.container;
+        const nodes = container ? Array.from(container.querySelectorAll('img')) : [];
+        const entries = [];
+        nodes.forEach((img, index) => {
+          const entry = createExternalEntryFromImage(img, contextKey, index);
+          if (entry) {
+            entries.push(entry);
+          }
+        });
+        if (!entries.length && anchorImage instanceof HTMLImageElement) {
+          const fallback = createExternalEntryFromImage(anchorImage, contextKey, 0);
+          if (fallback) {
+            entries.push(fallback);
+          }
+        }
+        return entries;
       }
 
       function previewImageFromElement(imgElement) {
         if (!imgElement) {
           return;
         }
-        const src = imgElement.currentSrc || imgElement.src;
-        if (!src) {
-          return;
-        }
-        const alt = (imgElement.getAttribute('alt') || '').trim();
-        const title = (imgElement.getAttribute('title') || '').trim();
-        const label = alt || title || 'Imagen del documento';
-        let type = '';
-        if (src.startsWith('data:image/')) {
-          const match = src.slice(0, 32).match(/^data:image\/([^;]+)/i);
-          if (match && match[1]) {
-            type = `image/${match[1]}`;
-          }
-        } else if (imgElement.dataset && imgElement.dataset.mimeType) {
-          type = imgElement.dataset.mimeType;
-        }
-        const width = Number.isFinite(imgElement.naturalWidth) && imgElement.naturalWidth > 0
-          ? imgElement.naturalWidth
-          : null;
-        const height = Number.isFinite(imgElement.naturalHeight) && imgElement.naturalHeight > 0
-          ? imgElement.naturalHeight
-          : null;
         hideImageToolbar();
+        const scope = resolveImageViewerScopeForElement(imgElement);
+        const externalImages = buildExternalImagesForScope(scope, imgElement);
+        const selection = externalImages.find(entry => entry.element === imgElement)
+          || externalImages.find(entry => entry.src === (imgElement.currentSrc || imgElement.src));
+        const selectedRuntimeId = selection ? selection.runtimeId : (externalImages[0]?.runtimeId || null);
         const wasOpen = imageViewerPanel?.classList.contains('open');
-        imageViewerPreviewSource = {
-          src,
-          name: label,
-          alt: label,
-          width,
-          height,
-          size: null,
-          type,
-          createdAt: new Date().toISOString()
-        };
+        imageViewerPreviewSource = null;
         imageViewerCurrentToken = null;
-        openImageViewer();
+        activateImageViewerContext(scope.key, {
+          externalImages,
+          selectedRuntimeId,
+          rerender: false
+        });
+        if (selectedRuntimeId) {
+          imageViewerRuntimeSelectionId = selectedRuntimeId;
+        }
         if (wasOpen) {
           renderImageViewer();
         }
+        openImageViewer();
+      }
+
+      function stepImageViewerSelection(direction) {
+        const combined = getImageViewerCombinedImages();
+        if (combined.length <= 1) {
+          return;
+        }
+        const normalizedDirection = direction >= 0 ? 1 : -1;
+        const currentId = imageViewerRuntimeSelectionId;
+        let currentIndex = combined.findIndex(item => item.runtimeId === currentId);
+        if (currentIndex === -1) {
+          const { context } = getActiveImageViewerContext();
+          if (context.selectedImageId) {
+            currentIndex = combined.findIndex(item => item.source === 'library' && item.id === context.selectedImageId);
+          }
+        }
+        if (currentIndex === -1) {
+          currentIndex = 0;
+        }
+        let nextIndex = currentIndex + normalizedDirection;
+        if (nextIndex < 0) {
+          nextIndex = combined.length - 1;
+        } else if (nextIndex >= combined.length) {
+          nextIndex = 0;
+        }
+        const next = combined[nextIndex];
+        if (!next) {
+          return;
+        }
+        if (next.source === 'library') {
+          imageViewerRuntimeSelectionId = next.runtimeId;
+          clearImageViewerPreview();
+          updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
+            images: ctx.images,
+            selectedImageId: next.id,
+            notesById: ctx.notesById
+          }));
+        } else {
+          imageViewerRuntimeSelectionId = next.runtimeId;
+          clearImageViewerPreview();
+          renderImageViewer();
+        }
+      }
+
+      function handleImageViewerWheelZoom(event) {
+        if (!event || (!event.metaKey && !event.ctrlKey)) {
+          return;
+        }
+        if (!getActiveViewerImage()) {
+          return;
+        }
+        event.preventDefault();
+        const delta = event.deltaY || 0;
+        if (!delta) {
+          return;
+        }
+        const magnitude = Math.min(3, Math.max(1, Math.abs(delta) / 180));
+        const step = IMAGE_VIEWER_ZOOM_STEP * 0.5 * magnitude;
+        adjustImageViewerZoom(delta > 0 ? -step : step);
       }
 
       function handleImageViewerSelect(event) {
@@ -2583,15 +2965,18 @@ export async function initializeEditor() {
         }
         event.preventDefault();
         const id = button.dataset.imageId || '';
-        if (!id || imageViewerState.selectedImageId === id) {
+        const runtimeId = button.dataset.runtimeId || `library:${id}`;
+        const { context } = getActiveImageViewerContext();
+        if (!id || (context.selectedImageId === id && imageViewerRuntimeSelectionId === runtimeId)) {
           return;
         }
         clearImageViewerPreview();
         imageViewerCurrentToken = null;
-        setImageViewerState(state => ({
-          images: state.images,
+        imageViewerRuntimeSelectionId = runtimeId;
+        updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
+          images: ctx.images,
           selectedImageId: id,
-          notesById: state.notesById
+          notesById: ctx.notesById
         }));
       }
 
@@ -2608,14 +2993,14 @@ export async function initializeEditor() {
           clearTimeout(imageViewerNotesSaveTimer);
         }
         imageViewerNotesSaveTimer = setTimeout(() => {
-          imageViewerState = {
-            ...imageViewerState,
+          updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
+            images: ctx.images,
+            selectedImageId: ctx.selectedImageId,
             notesById: {
-              ...imageViewerState.notesById,
+              ...ctx.notesById,
               [targetId]: value
             }
-          };
-          persistImageViewerState();
+          }), { rerender: false });
         }, 250);
       }
 
@@ -2631,34 +3016,38 @@ export async function initializeEditor() {
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
       imageViewerState = loadImageViewerState();
+      imageViewerContextKey = imageViewerState.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
       renderImageViewer();
       updateImageViewerZoomControls();
 
-      imageViewerState.images.forEach(image => {
-        if (!image || !image.dataUrl) {
-          return;
-        }
-        if (Number.isFinite(image.width) && Number.isFinite(image.height)) {
-          return;
-        }
-        computeImageDimensions(image.dataUrl)
-          .then(dimensions => {
-            if (!dimensions) {
-              return;
-            }
-            setImageViewerState(state => {
-              if (!state.images.some(img => img.id === image.id)) {
-                return state;
+      Object.entries(imageViewerState.contexts || {}).forEach(([contextKey, contextValue]) => {
+        (contextValue?.images || []).forEach(image => {
+          if (!image || !image.dataUrl) {
+            return;
+          }
+          if (Number.isFinite(image.width) && Number.isFinite(image.height)) {
+            return;
+          }
+          computeImageDimensions(image.dataUrl)
+            .then(dimensions => {
+              if (!dimensions) {
+                return;
               }
-              const updatedImages = state.images.map(img => img.id === image.id ? { ...img, ...dimensions } : img);
-              return {
-                images: updatedImages,
-                selectedImageId: state.selectedImageId,
-                notesById: state.notesById
-              };
-            }, { rerender: image.id === imageViewerState.selectedImageId });
-          })
-          .catch(() => {});
+              updateImageViewerContext(contextKey, ctx => {
+                if (!ctx.images.some(img => img.id === image.id)) {
+                  return ctx;
+                }
+                return {
+                  images: ctx.images.map(img => img.id === image.id ? { ...img, ...dimensions } : img),
+                  selectedImageId: ctx.selectedImageId,
+                  notesById: ctx.notesById
+                };
+              }, {
+                rerender: contextKey === getActiveImageViewerContextKey()
+              });
+            })
+            .catch(() => {});
+        });
       });
 
       if (imageViewerActiveImage) {
@@ -2673,21 +3062,23 @@ export async function initializeEditor() {
           }
           if (active.source === 'library' && active.id) {
             if (Number.isFinite(width) || Number.isFinite(height)) {
-              setImageViewerState(state => {
-                if (!state.images.some(img => img.id === active.id)) {
-                  return state;
+              const contextKey = getActiveImageViewerContextKey();
+              updateImageViewerContext(contextKey, ctx => {
+                if (!ctx.images.some(img => img.id === active.id)) {
+                  return ctx;
                 }
-                const updatedImages = state.images.map(img => img.id === active.id ? { ...img, width, height } : img);
                 return {
-                  images: updatedImages,
-                  selectedImageId: state.selectedImageId,
-                  notesById: state.notesById
+                  images: ctx.images.map(img => img.id === active.id ? { ...img, width, height } : img),
+                  selectedImageId: ctx.selectedImageId,
+                  notesById: ctx.notesById
                 };
               }, { rerender: false });
-              const refreshed = imageViewerState.images.find(img => img.id === active.id);
-              updateImageViewerMetaDisplay(refreshed ? { ...refreshed, width, height } : { width, height, size: 0 });
+              const refreshedContext = imageViewerState.contexts?.[contextKey];
+              const refreshedImage = refreshedContext?.images?.find(img => img.id === active.id);
+              updateImageViewerMetaDisplay(refreshedImage ? { ...refreshedImage, width, height } : { width, height, size: 0 });
             } else {
-              const existing = imageViewerState.images.find(img => img.id === active.id) || null;
+              const { context } = getActiveImageViewerContext();
+              const existing = context.images?.find(img => img.id === active.id) || null;
               updateImageViewerMetaDisplay(existing);
             }
           } else if (active.source === 'preview' && imageViewerPreviewSource) {
@@ -2722,6 +3113,9 @@ export async function initializeEditor() {
       imageViewerZoomOutBtn?.addEventListener('click', () => adjustImageViewerZoom(-IMAGE_VIEWER_ZOOM_STEP));
       imageViewerZoomInBtn?.addEventListener('click', () => adjustImageViewerZoom(IMAGE_VIEWER_ZOOM_STEP));
       imageViewerZoomResetBtn?.addEventListener('click', () => resetImageViewerZoom());
+      imageViewerPrevBtn?.addEventListener('click', () => stepImageViewerSelection(-1));
+      imageViewerNextBtn?.addEventListener('click', () => stepImageViewerSelection(1));
+      imageViewerStageSurface?.addEventListener('wheel', handleImageViewerWheelZoom, { passive: false });
 
       window.addEventListener('resize', () => enforceImageViewerShift({ force: false }));
       document.addEventListener('keydown', (event) => {
