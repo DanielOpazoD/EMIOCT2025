@@ -121,6 +121,11 @@ export async function initializeEditor() {
       const FLOATING_NOTE_MIN_HEIGHT = 140;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
+      const imageViewerState = {
+        images: [],
+        notes: [],
+        activeImageId: null
+      };
       let floatingNotesViewportRelaxedMatching = false;
       let pendingFloatingNotesViewportSync = false;
       let pendingFloatingNoteViewportRefresh = false;
@@ -304,6 +309,21 @@ export async function initializeEditor() {
       const toggleMainContentBtn = document.getElementById('toggleMainContentBtn');
       const printFloatingNotesViewBtn = document.getElementById('printFloatingNotesViewBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
+      const imageViewerToggleBtn = document.getElementById('imageViewerBtn');
+      const imageViewer = document.getElementById('imageViewer');
+      const imageViewerCloseBtn = document.getElementById('imageViewerCloseBtn');
+      const imageViewerAddImageBtn = document.getElementById('imageViewerAddImageBtn');
+      const imageViewerFileInput = document.getElementById('imageViewerFileInput');
+      const imageViewerMainImage = document.getElementById('imageViewerMainImage');
+      const imageViewerEmptyState = document.getElementById('imageViewerEmptyState');
+      const imageViewerDownloadBtn = document.getElementById('imageViewerDownloadBtn');
+      const imageViewerGallery = document.getElementById('imageViewerGallery');
+      const imageViewerNotesToggle = document.getElementById('imageViewerNotesToggle');
+      const imageViewerNotesPanel = document.getElementById('imageViewerNotesPanel');
+      const imageViewerNoteForm = document.getElementById('imageViewerNoteForm');
+      const imageViewerNoteInput = document.getElementById('imageViewerNoteInput');
+      const imageViewerNotesList = document.getElementById('imageViewerNotesList');
+      const imageViewerNotesEmpty = document.getElementById('imageViewerNotesEmpty');
       const topbar = document.querySelector('.topbar');
       const topbarToolsToggle = document.getElementById('topbarToolsToggle');
       const topbarToolsDropdown = document.getElementById('topbarToolsDropdown');
@@ -4970,6 +4990,14 @@ export async function initializeEditor() {
         selectedImage = img;
         img.classList.add('selected-image');
 
+        if (document.body.classList.contains('image-viewer-open')) {
+          const viewerId = ensureViewerImageFromElement(img);
+          if (viewerId) {
+            imageViewerState.activeImageId = viewerId;
+            renderImageViewer();
+          }
+        }
+
         updateToolbarState(img);
         updateToolbarPosition(img);
       }
@@ -5002,6 +5030,27 @@ export async function initializeEditor() {
           }
         } else if (!e.target.closest('#templateToolbar')) {
           hideTemplateToolbar();
+        }
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!document.body.classList.contains('image-viewer-open')) {
+          return;
+        }
+        if (isEditMode) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof HTMLImageElement)) {
+          return;
+        }
+        if (imageViewer?.contains(target)) {
+          return;
+        }
+        const id = ensureViewerImageFromElement(target);
+        if (id) {
+          imageViewerState.activeImageId = id;
+          renderImageViewer();
         }
       });
 
@@ -5042,6 +5091,424 @@ export async function initializeEditor() {
           event.preventDefault();
           changeSelectedImageWidth(1 - IMAGE_RESIZE_STEP);
         }
+      });
+
+      function ensureFileNameExtension(name, fallback = 'imagen') {
+        const base = (name || '').trim();
+        const sanitized = base
+          .replace(/[\s]+/g, '_')
+          .replace(/["'<>:|?*\\/]+/g, '')
+          .replace(/_{2,}/g, '_');
+        if (!sanitized) {
+          return `${fallback}.png`;
+        }
+        if (/\.[a-z0-9]{2,4}$/i.test(sanitized)) {
+          return sanitized;
+        }
+        return `${sanitized}.png`;
+      }
+
+      function deriveViewerImageName(img) {
+        if (!img) {
+          return 'imagen.png';
+        }
+        const alt = (img.getAttribute('alt') || '').trim();
+        if (alt) {
+          return ensureFileNameExtension(alt, 'imagen');
+        }
+        const source = img.currentSrc || img.src || '';
+        if (source) {
+          try {
+            const parsed = new URL(source, window.location.href);
+            const pathname = parsed.pathname || '';
+            if (pathname) {
+              const lastSegment = pathname.split('/').filter(Boolean).pop();
+              if (lastSegment) {
+                return ensureFileNameExtension(lastSegment.split('?')[0], 'imagen');
+              }
+            }
+          } catch (error) {
+            const parts = source.split('/').filter(Boolean);
+            const nameCandidate = parts.pop();
+            if (nameCandidate) {
+              return ensureFileNameExtension(nameCandidate.split('?')[0], 'imagen');
+            }
+          }
+        }
+        return 'imagen.png';
+      }
+
+      function setImageViewerOpenState(open) {
+        document.body.classList.toggle('image-viewer-open', open);
+        if (imageViewer) {
+          imageViewer.setAttribute('aria-hidden', open ? 'false' : 'true');
+        }
+        if (imageViewerToggleBtn) {
+          imageViewerToggleBtn.classList.toggle('active', open);
+          imageViewerToggleBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+        }
+      }
+
+      function ensureViewerImageFromElement(img) {
+        if (!img || !(img instanceof HTMLImageElement)) {
+          return null;
+        }
+        const existingId = img.dataset.viewerImageId;
+        if (existingId) {
+          const existing = imageViewerState.images.find(image => image.id === existingId);
+          if (existing) {
+            existing.url = img.currentSrc || img.src || existing.url;
+            existing.name = deriveViewerImageName(img);
+            existing.element = img;
+            return existing.id;
+          }
+        }
+        const src = img.currentSrc || img.src || '';
+        if (!src) {
+          return null;
+        }
+        const id = generateUniqueId('viewer-image');
+        const entry = {
+          id,
+          url: src,
+          name: deriveViewerImageName(img),
+          type: 'document',
+          element: img
+        };
+        img.dataset.viewerImageId = id;
+        imageViewerState.images = [
+          entry,
+          ...imageViewerState.images.filter(image => image.element !== img)
+        ];
+        return id;
+      }
+
+      function addViewerImagesFromFiles(fileList) {
+        if (!fileList) {
+          return;
+        }
+        const files = Array.from(fileList).filter(file => file && file.type && file.type.startsWith('image/'));
+        if (!files.length) {
+          return;
+        }
+        files.forEach(file => {
+          const id = generateUniqueId('viewer-image');
+          const objectUrl = URL.createObjectURL(file);
+          const entry = {
+            id,
+            url: objectUrl,
+            name: ensureFileNameExtension(file.name || 'imagen', 'imagen'),
+            type: 'local',
+            objectUrl
+          };
+          imageViewerState.images.unshift(entry);
+          imageViewerState.activeImageId = entry.id;
+        });
+        renderImageViewer();
+      }
+
+      function selectViewerImage(imageId) {
+        if (!imageId) {
+          return;
+        }
+        const target = imageViewerState.images.find(image => image.id === imageId);
+        if (!target) {
+          return;
+        }
+        imageViewerState.activeImageId = imageId;
+        renderImageViewer();
+      }
+
+      function removeViewerImage(imageId) {
+        if (!imageId) {
+          return;
+        }
+        const index = imageViewerState.images.findIndex(image => image.id === imageId);
+        if (index === -1) {
+          return;
+        }
+        const [removed] = imageViewerState.images.splice(index, 1);
+        if (removed?.element && removed.element.dataset.viewerImageId === imageId) {
+          delete removed.element.dataset.viewerImageId;
+        }
+        if (removed?.type === 'local' && removed.objectUrl) {
+          URL.revokeObjectURL(removed.objectUrl);
+        }
+        if (imageViewerState.activeImageId === imageId) {
+          imageViewerState.activeImageId = imageViewerState.images[0]?.id || null;
+        }
+        renderImageViewer();
+      }
+
+      function renderImageViewerGallery() {
+        if (!imageViewerGallery) {
+          return;
+        }
+        imageViewerGallery.innerHTML = '';
+        imageViewerState.images.forEach(image => {
+          const item = document.createElement('div');
+          item.className = `image-viewer-thumbnail${image.id === imageViewerState.activeImageId ? ' active' : ''}`;
+          item.dataset.imageId = image.id;
+          const thumbnail = document.createElement('img');
+          thumbnail.src = image.url;
+          thumbnail.alt = image.name || 'Imagen disponible';
+          item.appendChild(thumbnail);
+          if (image.type === 'local') {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'image-viewer-thumb-remove';
+            removeBtn.dataset.removeImageId = image.id;
+            removeBtn.setAttribute('aria-label', `Eliminar ${image.name || 'imagen'}`);
+            removeBtn.textContent = '×';
+            item.appendChild(removeBtn);
+          }
+          imageViewerGallery.appendChild(item);
+        });
+      }
+
+      function renderImageViewerMain() {
+        if (!imageViewerMainImage || !imageViewerEmptyState) {
+          return;
+        }
+        let active = null;
+        if (imageViewerState.activeImageId) {
+          active = imageViewerState.images.find(image => image.id === imageViewerState.activeImageId) || null;
+        }
+        if (!active && imageViewerState.images.length) {
+          active = imageViewerState.images[0];
+          imageViewerState.activeImageId = active.id;
+        }
+        if (!active) {
+          imageViewerMainImage.hidden = true;
+          imageViewerMainImage.removeAttribute('src');
+          imageViewerEmptyState.hidden = false;
+          if (imageViewerDownloadBtn) {
+            imageViewerDownloadBtn.href = '#';
+            imageViewerDownloadBtn.setAttribute('aria-disabled', 'true');
+          }
+          return;
+        }
+        imageViewerMainImage.hidden = false;
+        imageViewerMainImage.src = active.url;
+        imageViewerMainImage.alt = active.name ? `Vista previa: ${active.name}` : 'Imagen seleccionada';
+        imageViewerEmptyState.hidden = true;
+        if (imageViewerDownloadBtn) {
+          imageViewerDownloadBtn.href = active.url;
+          imageViewerDownloadBtn.download = active.name || 'imagen.png';
+          imageViewerDownloadBtn.setAttribute('aria-disabled', 'false');
+        }
+      }
+
+      function renderImageViewer() {
+        renderImageViewerMain();
+        renderImageViewerGallery();
+      }
+
+      function formatViewerNoteDate(isoString) {
+        if (!isoString) {
+          return '';
+        }
+        try {
+          const date = new Date(isoString);
+          return date.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+        } catch (error) {
+          return '';
+        }
+      }
+
+      function renderImageViewerNotes() {
+        if (!imageViewerNotesList || !imageViewerNotesEmpty) {
+          return;
+        }
+        imageViewerNotesList.innerHTML = '';
+        if (!imageViewerState.notes.length) {
+          imageViewerNotesEmpty.hidden = false;
+          return;
+        }
+        imageViewerNotesEmpty.hidden = true;
+        imageViewerState.notes.forEach(note => {
+          const item = document.createElement('li');
+          item.className = 'image-viewer-note-item';
+          item.dataset.noteId = note.id;
+          const text = document.createElement('p');
+          text.textContent = note.text;
+          const meta = document.createElement('span');
+          meta.className = 'image-viewer-note-meta';
+          meta.textContent = formatViewerNoteDate(note.createdAt);
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'image-viewer-note-remove';
+          removeBtn.dataset.removeNoteId = note.id;
+          removeBtn.setAttribute('aria-label', 'Eliminar nota oculta');
+          removeBtn.textContent = '×';
+          item.append(text, meta, removeBtn);
+          imageViewerNotesList.appendChild(item);
+        });
+      }
+
+      function addImageViewerNote(text) {
+        const content = (text || '').trim();
+        if (!content) {
+          return;
+        }
+        imageViewerState.notes.unshift({
+          id: generateUniqueId('viewer-note'),
+          text: content,
+          createdAt: new Date().toISOString()
+        });
+        renderImageViewerNotes();
+      }
+
+      function removeImageViewerNote(noteId) {
+        if (!noteId) {
+          return;
+        }
+        const index = imageViewerState.notes.findIndex(note => note.id === noteId);
+        if (index === -1) {
+          return;
+        }
+        imageViewerState.notes.splice(index, 1);
+        renderImageViewerNotes();
+      }
+
+      function openImageViewer(initialImageElement = null) {
+        if (initialImageElement instanceof HTMLImageElement) {
+          const id = ensureViewerImageFromElement(initialImageElement);
+          if (id) {
+            imageViewerState.activeImageId = id;
+          }
+        }
+        renderImageViewer();
+        renderImageViewerNotes();
+        setImageViewerOpenState(true);
+        if (imageViewerNotesToggle && imageViewerNotesPanel) {
+          imageViewerNotesToggle.setAttribute('aria-expanded', imageViewerNotesPanel.hidden ? 'false' : 'true');
+        }
+      }
+
+      function closeImageViewer() {
+        setImageViewerOpenState(false);
+      }
+
+      function toggleImageViewer() {
+        if (document.body.classList.contains('image-viewer-open')) {
+          closeImageViewer();
+        } else {
+          openImageViewer(selectedImage || null);
+        }
+      }
+
+      if (imageViewerNotesToggle && imageViewerNotesPanel) {
+        imageViewerNotesToggle.setAttribute('aria-expanded', 'false');
+        imageViewerNotesPanel.hidden = true;
+      }
+
+      imageViewerToggleBtn?.setAttribute('aria-pressed', 'false');
+
+      imageViewerToggleBtn?.addEventListener('click', () => {
+        toggleImageViewer();
+      });
+
+      imageViewerCloseBtn?.addEventListener('click', () => {
+        closeImageViewer();
+      });
+
+      imageViewerAddImageBtn?.addEventListener('click', () => {
+        imageViewerFileInput?.click();
+      });
+
+      imageViewerFileInput?.addEventListener('change', (event) => {
+        const input = event.target;
+        addViewerImagesFromFiles(input?.files || null);
+        if (input) {
+          input.value = '';
+        }
+        if (!document.body.classList.contains('image-viewer-open')) {
+          openImageViewer();
+        } else {
+          renderImageViewer();
+        }
+      });
+
+      imageViewerGallery?.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const removeId = target.dataset.removeImageId;
+        if (removeId) {
+          event.stopPropagation();
+          removeViewerImage(removeId);
+          return;
+        }
+        const item = target.closest('.image-viewer-thumbnail');
+        if (!item) {
+          return;
+        }
+        const imageId = item.dataset.imageId;
+        if (imageId) {
+          selectViewerImage(imageId);
+        }
+      });
+
+      imageViewerNotesToggle?.addEventListener('click', () => {
+        if (!imageViewerNotesPanel) {
+          return;
+        }
+        const expanded = imageViewerNotesToggle.getAttribute('aria-expanded') === 'true';
+        const nextState = !expanded;
+        imageViewerNotesToggle.setAttribute('aria-expanded', nextState ? 'true' : 'false');
+        imageViewerNotesPanel.hidden = !nextState;
+        if (!imageViewerNotesPanel.hidden) {
+          renderImageViewerNotes();
+          imageViewerNoteInput?.focus();
+        }
+      });
+
+      imageViewerNoteForm?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        addImageViewerNote(imageViewerNoteInput?.value || '');
+        if (imageViewerNoteInput) {
+          imageViewerNoteInput.value = '';
+          imageViewerNoteInput.focus();
+        }
+      });
+
+      imageViewerNotesList?.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const noteId = target.dataset.removeNoteId;
+        if (noteId) {
+          event.preventDefault();
+          removeImageViewerNote(noteId);
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+          return;
+        }
+        if (!document.body.classList.contains('image-viewer-open')) {
+          return;
+        }
+        if (imageViewerNotesPanel && !imageViewerNotesPanel.hidden && imageViewerNotesPanel.contains(document.activeElement)) {
+          return;
+        }
+        closeImageViewer();
+      });
+
+      window.addEventListener('beforeunload', () => {
+        imageViewerState.images.forEach(image => {
+          if (image?.type === 'local' && image.objectUrl) {
+            try {
+              URL.revokeObjectURL(image.objectUrl);
+            } catch (error) {
+              // Ignore revoke errors
+            }
+          }
+        });
       });
 
       /* === NOTAS FLOTANTES === */
@@ -5805,6 +6272,57 @@ export async function initializeEditor() {
         event.preventDefault();
       }
 
+      function isFloatingNoteTopDragZone(note, event) {
+        if (!note || !event || typeof event.button !== 'number') {
+          return false;
+        }
+        if (event.button !== 0) {
+          return false;
+        }
+        if (event.target instanceof HTMLElement) {
+          if (event.target.closest('.floating-note-header')) {
+            return false;
+          }
+          if (event.target.closest('.floating-note-body')) {
+            return false;
+          }
+          if (event.target.closest('button') || event.target.closest('a') || event.target.closest('[role="button"]')) {
+            return false;
+          }
+          if (event.target.closest('.note-category')) {
+            return false;
+          }
+        }
+        const rect = note.getBoundingClientRect();
+        const offsetY = event.clientY - rect.top;
+        if (!Number.isFinite(offsetY) || offsetY < 0 || offsetY > 24) {
+          return false;
+        }
+        const offsetX = event.clientX - rect.left;
+        if (!Number.isFinite(offsetX) || offsetX < 0) {
+          return false;
+        }
+        let guardWidth = 24;
+        const category = note.querySelector('.note-category');
+        if (category instanceof HTMLElement) {
+          const categoryRect = category.getBoundingClientRect();
+          if (Number.isFinite(categoryRect.right) && Number.isFinite(rect.left)) {
+            guardWidth = Math.max(guardWidth, categoryRect.right - rect.left);
+          }
+        }
+        if (offsetX < guardWidth) {
+          return false;
+        }
+        return true;
+      }
+
+      function tryStartFloatingNoteDragFromTopEdge(note, event) {
+        if (!isFloatingNoteTopDragZone(note, event)) {
+          return;
+        }
+        startFloatingNoteDrag(note, event);
+      }
+
       function startFloatingNoteHorizontalResize(note, edge, event) {
         if (!note || !floatingNotesLayer) return;
         floatingNoteResizeState.note = note;
@@ -6535,6 +7053,9 @@ export async function initializeEditor() {
           }
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu();
+          if (!event.target.closest('.floating-note-header')) {
+            tryStartFloatingNoteDragFromTopEdge(note, event);
+          }
         });
 
         if (floatingNoteResizeObserver) {
