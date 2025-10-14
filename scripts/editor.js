@@ -101,6 +101,15 @@ export async function initializeEditor() {
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
       const floatingNoteDragState = { note: null, pointerId: null, offsetX: 0, offsetY: 0 };
+      const floatingNoteResizeState = {
+        note: null,
+        pointerId: null,
+        originX: 0,
+        originWidth: 0,
+        originLeft: 0,
+        edge: null,
+        captureTarget: null
+      };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
       const FLOATING_NOTE_MIN_WIDTH = 160;
       const FLOATING_NOTE_MIN_HEIGHT = 140;
@@ -287,6 +296,7 @@ export async function initializeEditor() {
       const addFloatingNoteBtn = document.getElementById('addFloatingNoteBtn');
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
       const toggleMainContentBtn = document.getElementById('toggleMainContentBtn');
+      const printFloatingNotesBtn = document.getElementById('printFloatingNotesBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
       const topbar = document.querySelector('.topbar');
       const topbarToolsToggle = document.getElementById('topbarToolsToggle');
@@ -4649,6 +4659,21 @@ export async function initializeEditor() {
         repositionImageToolbar();
       }
 
+      document.addEventListener('keydown', (event) => {
+        if (!selectedImage) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+          return;
+        }
+        const key = event.key;
+        if (key === '+' || event.code === 'NumpadAdd') {
+          changeSelectedImageWidth(1 + IMAGE_RESIZE_STEP);
+          event.preventDefault();
+        } else if (key === '-' || key === '_' || event.code === 'NumpadSubtract') {
+          changeSelectedImageWidth(1 - IMAGE_RESIZE_STEP);
+          event.preventDefault();
+        }
+      });
+
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
 
@@ -5105,7 +5130,34 @@ export async function initializeEditor() {
           }
         }
 
+        if (!shouldCompact && note.dataset.ultraCompactHeader === 'true') {
+          applyNoteHeaderUltraCompactState(note, false, { persist });
+        }
+
         return shouldCompact;
+      }
+
+      function applyNoteHeaderUltraCompactState(note, ultraCompact, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldUltra = ultraCompact === true;
+        note.classList.toggle('floating-note-ultracompact', shouldUltra);
+        if (shouldUltra) {
+          note.dataset.ultraCompactHeader = 'true';
+          if (!note.classList.contains('floating-note-compact-header')) {
+            applyNoteHeaderCompactState(note, true, { persist });
+          }
+        } else {
+          delete note.dataset.ultraCompactHeader;
+        }
+
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { ultraCompactHeader: shouldUltra }, { silent: true });
+          }
+        }
+
+        return shouldUltra;
       }
 
       function applyNoteBehindState(note, behind, { persist = true } = {}) {
@@ -5206,6 +5258,13 @@ export async function initializeEditor() {
         if (!note) return false;
         const nextState = !note.classList.contains('floating-note-compact-header');
         applyNoteHeaderCompactState(note, nextState);
+        return nextState;
+      }
+
+      function toggleNoteHeaderUltraCompact(note) {
+        if (!note) return false;
+        const nextState = note.dataset.ultraCompactHeader === 'true' ? false : true;
+        applyNoteHeaderUltraCompactState(note, nextState);
         return nextState;
       }
 
@@ -5636,6 +5695,92 @@ export async function initializeEditor() {
         });
       }
 
+      function startFloatingNoteResize(note, event, edge) {
+        if (!note || !floatingNotesLayer || !edge) return;
+        floatingNoteResizeState.note = note;
+        floatingNoteResizeState.pointerId = event.pointerId;
+        floatingNoteResizeState.originX = event.clientX;
+        floatingNoteResizeState.originWidth = note.offsetWidth
+          || note.getBoundingClientRect().width
+          || FLOATING_NOTE_DEFAULT_WIDTH;
+        floatingNoteResizeState.originLeft = Number.parseFloat(note.dataset.left || note.style.left || '0') || 0;
+        floatingNoteResizeState.edge = edge;
+        floatingNoteResizeState.captureTarget = event.target;
+        note.classList.add('resizing');
+        bringNoteToFront(note);
+        try {
+          floatingNoteResizeState.captureTarget?.setPointerCapture(event.pointerId);
+        } catch (captureError) {
+          try {
+            note.setPointerCapture(event.pointerId);
+          } catch (ignoreError) {
+            // ignore pointer capture errors
+          }
+        }
+        event.preventDefault();
+      }
+
+      function handleFloatingNoteResizePointerMove(event) {
+        const state = floatingNoteResizeState;
+        if (!state.note || state.pointerId !== event.pointerId) {
+          return;
+        }
+        const note = state.note;
+        const edge = state.edge;
+        if (edge === 'right') {
+          const delta = event.clientX - state.originX;
+          const nextWidth = Math.max(FLOATING_NOTE_MIN_WIDTH, state.originWidth + delta);
+          const roundedWidth = Math.round(nextWidth);
+          note.style.width = `${roundedWidth}px`;
+          note.dataset.width = String(roundedWidth);
+        } else if (edge === 'left') {
+          const delta = event.clientX - state.originX;
+          const rightEdge = state.originLeft + state.originWidth;
+          let nextLeft = state.originLeft + delta;
+          const maxLeft = rightEdge - FLOATING_NOTE_MIN_WIDTH;
+          nextLeft = Math.min(nextLeft, maxLeft);
+          nextLeft = Math.max(nextLeft, 0);
+          const roundedLeft = Math.round(nextLeft);
+          let nextWidth = rightEdge - roundedLeft;
+          nextWidth = Math.max(nextWidth, FLOATING_NOTE_MIN_WIDTH);
+          const roundedWidth = Math.round(nextWidth);
+          note.style.left = `${roundedLeft}px`;
+          note.dataset.left = String(roundedLeft);
+          note.style.width = `${roundedWidth}px`;
+          note.dataset.width = String(roundedWidth);
+        }
+        event.preventDefault();
+      }
+
+      function endFloatingNoteResize(event) {
+        const state = floatingNoteResizeState;
+        if (!state.note) {
+          return;
+        }
+        if (event && state.pointerId !== null && event.pointerId !== state.pointerId) {
+          return;
+        }
+        const note = state.note;
+        try {
+          state.captureTarget?.releasePointerCapture(state.pointerId);
+        } catch (releaseError) {
+          try {
+            note.releasePointerCapture(state.pointerId);
+          } catch (ignoreError) {
+            // ignore release errors
+          }
+        }
+        note.classList.remove('resizing');
+        const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0') || 0;
+        const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0') || 0;
+        positionFloatingNote(note, currentLeft, currentTop);
+        updateFloatingNoteSizeDataset(note);
+        floatingNoteResizeState.note = null;
+        floatingNoteResizeState.pointerId = null;
+        floatingNoteResizeState.edge = null;
+        floatingNoteResizeState.captureTarget = null;
+      }
+
       function startFloatingNoteDrag(note, event) {
         if (!note || !floatingNotesLayer) return;
         floatingNoteDragState.note = note;
@@ -5654,6 +5799,10 @@ export async function initializeEditor() {
       }
 
       function handleFloatingNotePointerMove(event) {
+        if (floatingNoteResizeState.note && floatingNoteResizeState.pointerId === event.pointerId) {
+          handleFloatingNoteResizePointerMove(event);
+          return;
+        }
         const state = floatingNoteDragState;
         if (!state.note || state.pointerId !== event.pointerId || !floatingNotesLayer) {
           return;
@@ -5738,6 +5887,19 @@ export async function initializeEditor() {
           }
           if (typeof data.meta?.compactHeader !== 'undefined') {
             return !!data.meta.compactHeader;
+          }
+          return false;
+        })();
+
+        const resolvedUltraCompact = (() => {
+          if (data.ultraCompactHeader !== undefined) {
+            return !!data.ultraCompactHeader;
+          }
+          if (metaSource.ultraCompactHeader !== undefined) {
+            return !!metaSource.ultraCompactHeader;
+          }
+          if (typeof data.meta?.ultraCompactHeader !== 'undefined') {
+            return !!data.meta.ultraCompactHeader;
           }
           return false;
         })();
@@ -5893,6 +6055,7 @@ export async function initializeEditor() {
           currentPageIndex: incomingPageIndex,
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
+          ultraCompactHeader: resolvedUltraCompact,
           hoverAnimation: resolvedHoverAnimation,
           styleNeutralText: resolvedNeutralText,
           customIcon: resolvedCustomIcon
@@ -5900,6 +6063,7 @@ export async function initializeEditor() {
         notesRegistry.set(noteId, noteData);
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        applyNoteHeaderUltraCompactState(note, resolvedUltraCompact, { persist: false });
         applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
         applyFloatingNoteTextNeutralState(note, resolvedNeutralText, { persist: false });
         if (resolvedCustomIcon) {
@@ -6064,7 +6228,23 @@ export async function initializeEditor() {
 
         footer.append(tagsContainer);
 
-        note.append(header, body, footer);
+        const leftResizeHandle = document.createElement('div');
+        leftResizeHandle.className = 'floating-note-resize-handle floating-note-resize-handle-left';
+        leftResizeHandle.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          startFloatingNoteResize(note, event, 'left');
+        });
+
+        const rightResizeHandle = document.createElement('div');
+        rightResizeHandle.className = 'floating-note-resize-handle floating-note-resize-handle-right';
+        rightResizeHandle.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          startFloatingNoteResize(note, event, 'right');
+        });
+
+        note.append(header, body, footer, leftResizeHandle, rightResizeHandle);
         floatingNotesLayer.appendChild(note);
 
         note._ui = {
@@ -6427,6 +6607,18 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
+        const ultraCompactBtn = document.createElement('button');
+        ultraCompactBtn.type = 'button';
+        ultraCompactBtn.dataset.action = 'toggle-ultracompact-header';
+        ultraCompactBtn.classList.add('note-ultracompact-toggle');
+        ultraCompactBtn.textContent = '📦 Modo ultracompacto';
+        ultraCompactBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteHeaderUltraCompact(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const neutralTextBtn = document.createElement('button');
         neutralTextBtn.type = 'button';
         neutralTextBtn.dataset.action = 'toggle-neutral-text';
@@ -6484,8 +6676,28 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(
+          compactHeaderBtn,
+          ultraCompactBtn,
+          neutralTextBtn,
+          hoverAnimationBtn,
+          tagsBtn,
+          reviewBtn,
+          behindBtn
+        );
         actionsSection.appendChild(inlineActions);
+
+        const duplicateBtn = document.createElement('button');
+        duplicateBtn.type = 'button';
+        duplicateBtn.dataset.action = 'duplicate-note';
+        duplicateBtn.className = 'note-menu-duplicate';
+        duplicateBtn.textContent = '📄 Duplicar nota';
+        duplicateBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          duplicateFloatingNote(note);
+          closeFloatingNoteStyleMenu(menu);
+        });
+        actionsSection.appendChild(duplicateBtn);
 
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
@@ -6530,6 +6742,13 @@ export async function initializeEditor() {
           compactBtn.setAttribute('aria-pressed', isCompact ? 'true' : 'false');
           compactBtn.classList.toggle('active', isCompact);
         }
+        const ultraCompactBtn = menu.querySelector('button[data-action="toggle-ultracompact-header"]');
+        if (ultraCompactBtn) {
+          const isUltra = !!noteData.ultraCompactHeader;
+          ultraCompactBtn.textContent = isUltra ? '📦 Modo estándar' : '📦 Modo ultracompacto';
+          ultraCompactBtn.setAttribute('aria-pressed', isUltra ? 'true' : 'false');
+          ultraCompactBtn.classList.toggle('active', isUltra);
+        }
         const hoverBtn = menu.querySelector('button[data-action="toggle-hover-animation"]');
         if (hoverBtn) {
           const isActive = noteData.hoverAnimation === true;
@@ -6571,6 +6790,140 @@ export async function initializeEditor() {
         note.remove();
         removeNoteAnchor(noteId);
         removeNoteData(noteId);
+      }
+
+      function duplicateFloatingNote(sourceNote) {
+        if (!sourceNote || !floatingNotesLayer) return null;
+        const noteId = sourceNote.dataset.noteId || '';
+        const noteData = noteId ? notesRegistry.get(noteId) : null;
+        const body = sourceNote.querySelector('.floating-note-body');
+        const currentLeft = Number.parseFloat(sourceNote.dataset.left || sourceNote.style.left || '0') || 0;
+        const currentTop = Number.parseFloat(sourceNote.dataset.top || sourceNote.style.top || '0') || 0;
+        const width = Math.round(sourceNote.offsetWidth || Number.parseFloat(sourceNote.dataset.width || `${FLOATING_NOTE_DEFAULT_WIDTH}`));
+        const height = Math.round(sourceNote.offsetHeight || Number.parseFloat(sourceNote.dataset.height || '0'));
+        const offsetAmount = 32;
+        const nowIso = new Date().toISOString();
+
+        const duplicatePayload = {
+          style: noteData?.style || sourceNote.dataset.style || DEFAULT_NOTE_STYLE,
+          title: noteData?.title || null,
+          titleHtml: noteData?.titleHtml || '',
+          html: noteData?.html || (body ? body.innerHTML : ''),
+          content: noteData?.content || getNotePlainTextFromHtml(body ? body.innerHTML : ''),
+          category: noteData?.category || sourceNote.dataset.category || DEFAULT_NOTE_CATEGORY,
+          priority: noteData?.priority || sourceNote.dataset.priority || DEFAULT_NOTE_PRIORITY,
+          tags: Array.isArray(noteData?.tags) ? [...noteData.tags] : [],
+          reviewed: noteData?.reviewed || false,
+          reviewCount: noteData?.reviewCount || 0,
+          lastReviewed: noteData?.lastReviewed || null,
+          topicId: noteData?.topicId || resolveNoteTopicId(sourceNote) || null,
+          sectionId: noteData?.sectionId || null,
+          type: noteData?.type || DEFAULT_NOTE_TYPE,
+          anchorId: null,
+          linkedTo: null,
+          hoverAnimation: noteData?.hoverAnimation === true,
+          styleNeutralText: noteData?.styleNeutralText === true,
+          customIcon: noteData?.customIcon || null,
+          behindMainContent: noteData?.behindMainContent || sourceNote.classList.contains('floating-note-behind'),
+          compactHeader: noteData?.compactHeader || sourceNote.classList.contains('floating-note-compact-header'),
+          ultraCompactHeader: noteData?.ultraCompactHeader || sourceNote.dataset.ultraCompactHeader === 'true',
+          left: Math.max(0, currentLeft + offsetAmount),
+          top: Math.max(0, currentTop + offsetAmount),
+          width: Number.isFinite(width) && width > 0 ? width : FLOATING_NOTE_DEFAULT_WIDTH,
+          height: Number.isFinite(height) && height > 0 ? height : undefined,
+          pages: Array.isArray(noteData?.pages) ? noteData.pages.map(page => ({ ...page })) : undefined,
+          currentPageIndex: Number.isInteger(noteData?.currentPageIndex) ? noteData.currentPageIndex : undefined,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          focus: true
+        };
+
+        return createFloatingNote(duplicatePayload);
+      }
+
+      function printVisibleFloatingNotesSnapshot() {
+        if (!floatingNotesLayer) return;
+        const activeTopicId = getCurrentTopicId();
+        const notes = Array.from(floatingNotesLayer.querySelectorAll('.floating-note')).filter(note => {
+          if (!note.isConnected) return false;
+          const style = window.getComputedStyle(note);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+            return false;
+          }
+          if (note.offsetParent === null && style.position !== 'fixed') {
+            return false;
+          }
+          const topicId = resolveNoteTopicId(note);
+          if (activeTopicId && topicId && topicId !== activeTopicId) {
+            return false;
+          }
+          return true;
+        });
+
+        if (!notes.length) {
+          alert('No hay notas visibles para imprimir.');
+          return;
+        }
+
+        const noteMetrics = notes.map(note => {
+          const left = Number.parseFloat(note.dataset.left || note.style.left || '0') || 0;
+          const top = Number.parseFloat(note.dataset.top || note.style.top || '0') || 0;
+          const width = Math.round(note.offsetWidth || Number.parseFloat(note.dataset.width || `${FLOATING_NOTE_DEFAULT_WIDTH}`));
+          const height = Math.round(note.offsetHeight || Number.parseFloat(note.dataset.height || '0'));
+          return { note, left, top, width: Math.max(width, FLOATING_NOTE_MIN_WIDTH), height: Math.max(height, FLOATING_NOTE_MIN_HEIGHT) };
+        });
+
+        const minLeft = Math.min(...noteMetrics.map(info => info.left), 0);
+        const minTop = Math.min(...noteMetrics.map(info => info.top), 0);
+        const maxRight = Math.max(...noteMetrics.map(info => info.left + info.width));
+        const maxBottom = Math.max(...noteMetrics.map(info => info.top + info.height));
+        const wrapperWidth = Math.ceil(maxRight - minLeft);
+        const wrapperHeight = Math.ceil(maxBottom - minTop);
+
+        const printWindow = window.open('', '_blank', 'noopener');
+        if (!printWindow) {
+          alert('No se pudo abrir la ventana de impresión. Permite las ventanas emergentes para continuar.');
+          return;
+        }
+
+        const doc = printWindow.document;
+        const stylesheetHref = document.querySelector('link[rel="stylesheet"]')?.href || '';
+        const extraStyles = `body{margin:0;padding:24px;background:#f8fafc;font-family:inherit;}@media print{body{padding:0;background:#fff;}}.floating-notes-print-wrapper{position:relative;margin:0 auto;page-break-inside:avoid;width:${wrapperWidth}px;height:${wrapperHeight}px;}.floating-notes-print-wrapper .floating-note{pointer-events:none;box-shadow:0 8px 20px rgba(15,23,42,0.18);}.floating-notes-print-wrapper .floating-note-resize-handle{display:none !important;}`;
+        doc.open();
+        doc.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Notas flotantes</title>${stylesheetHref ? `<link rel="stylesheet" href="${stylesheetHref}">` : ''}<style>${extraStyles}</style></head><body><div id="printNotesRoot" class="floating-notes-print-wrapper"></div></body></html>`);
+        doc.close();
+
+        printWindow.addEventListener('load', () => {
+          const root = doc.getElementById('printNotesRoot');
+          if (!root) {
+            return;
+          }
+          noteMetrics.forEach(info => {
+            const clone = info.note.cloneNode(true);
+            clone.classList.add('floating-note-compact-header');
+            clone.classList.remove('dragging');
+            clone.classList.remove('resizing');
+            clone.style.left = `${Math.round(info.left - minLeft)}px`;
+            clone.style.top = `${Math.round(info.top - minTop)}px`;
+            clone.style.width = `${info.width}px`;
+            clone.style.height = `${info.height}px`;
+            clone.style.zIndex = 'auto';
+            clone.style.pointerEvents = 'none';
+            clone.style.resize = 'none';
+            delete clone.dataset.left;
+            delete clone.dataset.top;
+            delete clone.dataset.width;
+            delete clone.dataset.height;
+            clone.querySelectorAll('.floating-note-resize-handle').forEach(handle => handle.remove());
+            clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));
+            root.appendChild(clone);
+          });
+
+          setTimeout(() => {
+            printWindow.focus();
+            printWindow.print();
+          }, 200);
+        });
       }
 
       function setNoteCategory(note, categoryId) {
@@ -6829,6 +7182,8 @@ export async function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
+        applyNoteHeaderCompactState(note, !!noteData.compactHeader, { persist: false });
+        applyNoteHeaderUltraCompactState(note, !!noteData.ultraCompactHeader, { persist: false });
         applyNoteHoverAnimationState(note, noteData.hoverAnimation === true, { persist: false });
         applyFloatingNoteTextNeutralState(note, noteData.styleNeutralText === true, { persist: false });
         if (noteData.topicId) {
@@ -6978,7 +7333,12 @@ export async function initializeEditor() {
               pageOffsetTop: noteData.pageOffsetTop,
               relativeLeft: noteData.relativeLeft,
               relativeTop: noteData.relativeTop,
-              behindMainContent: noteData.behindMainContent
+              behindMainContent: noteData.behindMainContent,
+              compactHeader: noteData.compactHeader,
+              ultraCompactHeader: noteData.ultraCompactHeader,
+              hoverAnimation: noteData.hoverAnimation,
+              styleNeutralText: noteData.styleNeutralText,
+              customIcon: noteData.customIcon
             });
           });
         }
@@ -7542,12 +7902,16 @@ export async function initializeEditor() {
 
       window.addEventListener('pointermove', handleFloatingNotePointerMove);
       window.addEventListener('pointerup', (event) => {
+        endFloatingNoteResize(event);
         endFloatingNoteDrag(event);
         if (!floatingNoteResizeObserver && floatingNotesLayer) {
           floatingNotesLayer.querySelectorAll('.floating-note').forEach(updateFloatingNoteSizeDataset);
         }
       });
-      window.addEventListener('pointercancel', endFloatingNoteDrag);
+      window.addEventListener('pointercancel', (event) => {
+        endFloatingNoteResize(event);
+        endFloatingNoteDrag(event);
+      });
       window.addEventListener('resize', requestFloatingNotesViewportSync);
       if (window.visualViewport) {
         const handleVisualViewportChange = () => {
@@ -7578,6 +7942,11 @@ export async function initializeEditor() {
 
       toggleNotesBtn?.addEventListener('click', () => {
         setFloatingNotesVisibility(!floatingNotesHidden);
+      });
+
+      printFloatingNotesBtn?.addEventListener('click', () => {
+        if (printFloatingNotesBtn.disabled) return;
+        printVisibleFloatingNotesSnapshot();
       });
 
       imageWidthIncreaseBtn?.addEventListener('click', () => {
@@ -10480,6 +10849,14 @@ export async function initializeEditor() {
           toggleMainContentBtn.title = mainContentHidden ? 'Mostrar contenido principal' : 'Ocultar contenido principal';
           toggleMainContentBtn.textContent = mainContentHidden ? '📄' : '🗂️';
         }
+        if (printFloatingNotesBtn) {
+          const enabled = !!mainContentHidden;
+          printFloatingNotesBtn.disabled = !enabled;
+          printFloatingNotesBtn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+          printFloatingNotesBtn.title = enabled
+            ? 'Imprimir notas visibles'
+            : 'Disponible al ocultar el contenido principal';
+        }
       }
 
       editBtn?.addEventListener('click', toggleEditMode);
@@ -11092,6 +11469,7 @@ ${inlineStyles}
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
           noteExport.compactHeader = !!noteData.compactHeader;
+          noteExport.ultraCompactHeader = !!noteData.ultraCompactHeader;
           noteExport.customIcon = noteData.customIcon || null;
           noteExport.hoverAnimation = noteData.hoverAnimation === true;
           noteExport.styleNeutralText = noteData.styleNeutralText === true;
