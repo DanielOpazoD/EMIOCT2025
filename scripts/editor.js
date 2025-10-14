@@ -104,12 +104,16 @@ export async function initializeEditor() {
       const floatingNoteResizeState = {
         note: null,
         pointerId: null,
+        orientation: null,
         edge: null,
         startWidth: 0,
+        startHeight: 0,
         startLeft: 0,
         startTop: 0,
         startRight: 0,
-        startX: 0
+        startBottom: 0,
+        startX: 0,
+        startY: 0
       };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
       const FLOATING_NOTE_MIN_WIDTH = 160;
@@ -5804,13 +5808,45 @@ export async function initializeEditor() {
         if (!note || !floatingNotesLayer) return;
         floatingNoteResizeState.note = note;
         floatingNoteResizeState.pointerId = event.pointerId;
+        floatingNoteResizeState.orientation = 'horizontal';
         floatingNoteResizeState.edge = edge === 'left' ? 'left' : 'right';
         floatingNoteResizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
+        floatingNoteResizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
         floatingNoteResizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
         floatingNoteResizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
         floatingNoteResizeState.startRight = floatingNoteResizeState.startLeft + floatingNoteResizeState.startWidth;
+        floatingNoteResizeState.startBottom = floatingNoteResizeState.startTop + floatingNoteResizeState.startHeight;
         floatingNoteResizeState.startX = event.clientX;
+        floatingNoteResizeState.startY = event.clientY;
         note.classList.add('resizing');
+        note.classList.add('resizing-horizontal');
+        note.classList.remove('resizing-vertical');
+        bringNoteToFront(note);
+        try {
+          note.setPointerCapture(event.pointerId);
+        } catch (err) {
+          // Ignore pointer capture errors
+        }
+        event.preventDefault();
+      }
+
+      function startFloatingNoteVerticalResize(note, edge, event) {
+        if (!note || !floatingNotesLayer) return;
+        floatingNoteResizeState.note = note;
+        floatingNoteResizeState.pointerId = event.pointerId;
+        floatingNoteResizeState.orientation = 'vertical';
+        floatingNoteResizeState.edge = edge === 'top' ? 'top' : 'bottom';
+        floatingNoteResizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
+        floatingNoteResizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
+        floatingNoteResizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+        floatingNoteResizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+        floatingNoteResizeState.startRight = floatingNoteResizeState.startLeft + floatingNoteResizeState.startWidth;
+        floatingNoteResizeState.startBottom = floatingNoteResizeState.startTop + floatingNoteResizeState.startHeight;
+        floatingNoteResizeState.startX = event.clientX;
+        floatingNoteResizeState.startY = event.clientY;
+        note.classList.add('resizing');
+        note.classList.add('resizing-vertical');
+        note.classList.remove('resizing-horizontal');
         bringNoteToFront(note);
         try {
           note.setPointerCapture(event.pointerId);
@@ -5824,28 +5860,61 @@ export async function initializeEditor() {
         if (floatingNoteResizeState.note && floatingNoteResizeState.pointerId === event.pointerId) {
           const state = floatingNoteResizeState;
           const note = state.note;
-          const rawDelta = event.clientX - state.startX;
-          let newWidth = state.startWidth;
-          if (state.edge === 'right') {
-            newWidth = state.startWidth + rawDelta;
-          } else {
-            newWidth = state.startWidth - rawDelta;
+          if (state.orientation === 'horizontal') {
+            const rawDelta = event.clientX - state.startX;
+            let newWidth = state.startWidth;
+            if (state.edge === 'right') {
+              newWidth = state.startWidth + rawDelta;
+            } else {
+              newWidth = state.startWidth - rawDelta;
+            }
+            newWidth = Math.max(FLOATING_NOTE_MIN_WIDTH, newWidth);
+            note.style.width = `${Math.round(newWidth)}px`;
+            if (state.edge === 'left') {
+              const desiredLeft = state.startRight - newWidth;
+              positionFloatingNote(note, desiredLeft, state.startTop);
+            } else {
+              const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+              positionFloatingNote(note, currentLeft, state.startTop);
+            }
+            updateFloatingNoteSizeDataset(note);
+            state.startWidth = newWidth;
+            state.startLeft = Number.parseFloat(note.dataset.left || note.style.left || String(state.startLeft));
+            state.startRight = state.startLeft + newWidth;
+            state.startX = event.clientX;
+            state.startY = event.clientY;
+            event.preventDefault();
+            return;
           }
-          newWidth = Math.max(FLOATING_NOTE_MIN_WIDTH, newWidth);
-          note.style.width = `${Math.round(newWidth)}px`;
-          if (state.edge === 'left') {
-            const desiredLeft = state.startRight - newWidth;
-            positionFloatingNote(note, desiredLeft, state.startTop);
-          } else {
-            const currentLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
-            positionFloatingNote(note, currentLeft, state.startTop);
+
+          if (state.orientation === 'vertical') {
+            const rawDeltaY = event.clientY - state.startY;
+            let newHeight = state.startHeight;
+            if (state.edge === 'bottom') {
+              newHeight = state.startHeight + rawDeltaY;
+            } else {
+              newHeight = state.startHeight - rawDeltaY;
+            }
+            newHeight = Math.max(FLOATING_NOTE_MIN_HEIGHT, newHeight);
+            note.style.height = `${Math.round(newHeight)}px`;
+            if (state.edge === 'top') {
+              const desiredTop = state.startBottom - newHeight;
+              positionFloatingNote(note, state.startLeft, desiredTop);
+            } else {
+              const currentTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+              positionFloatingNote(note, state.startLeft, currentTop);
+            }
+            updateFloatingNoteSizeDataset(note);
+            state.startHeight = newHeight;
+            state.startTop = Number.parseFloat(note.dataset.top || note.style.top || String(state.startTop));
+            state.startBottom = state.startTop + newHeight;
+            state.startLeft = Number.parseFloat(note.dataset.left || note.style.left || String(state.startLeft));
+            state.startY = event.clientY;
+            state.startX = event.clientX;
+            event.preventDefault();
+            return;
           }
-          updateFloatingNoteSizeDataset(note);
-          state.startWidth = newWidth;
-          state.startLeft = Number.parseFloat(note.dataset.left || note.style.left || String(state.startLeft));
-          state.startRight = state.startLeft + newWidth;
-          state.startX = event.clientX;
-          event.preventDefault();
+
           return;
         }
 
@@ -5868,11 +5937,20 @@ export async function initializeEditor() {
           } catch (err) {
             // Ignore errors when releasing pointer capture
           }
-          resizeState.note.classList.remove('resizing');
+          resizeState.note.classList.remove('resizing', 'resizing-horizontal', 'resizing-vertical');
           updateFloatingNoteSizeDataset(resizeState.note);
           floatingNoteResizeState.note = null;
           floatingNoteResizeState.pointerId = null;
+          floatingNoteResizeState.orientation = null;
           floatingNoteResizeState.edge = null;
+          floatingNoteResizeState.startWidth = 0;
+          floatingNoteResizeState.startHeight = 0;
+          floatingNoteResizeState.startLeft = 0;
+          floatingNoteResizeState.startTop = 0;
+          floatingNoteResizeState.startRight = 0;
+          floatingNoteResizeState.startBottom = 0;
+          floatingNoteResizeState.startX = 0;
+          floatingNoteResizeState.startY = 0;
         }
 
         const state = floatingNoteDragState;
@@ -6507,20 +6585,26 @@ export async function initializeEditor() {
           const handle = document.createElement('div');
           handle.className = `floating-note-resize-handle handle-${edge}`;
           handle.setAttribute('role', 'separator');
-          handle.setAttribute('aria-orientation', 'horizontal');
+          const orientation = edge === 'top' ? 'vertical' : 'horizontal';
+          handle.setAttribute('aria-orientation', orientation);
           handle.tabIndex = -1;
           handle.addEventListener('pointerdown', (event) => {
             if (event.button !== 0) return;
             event.stopPropagation();
             closeFloatingNoteStyleMenu();
-            startFloatingNoteHorizontalResize(note, edge, event);
+            if (edge === 'top') {
+              startFloatingNoteVerticalResize(note, edge, event);
+            } else {
+              startFloatingNoteHorizontalResize(note, edge, event);
+            }
           });
           return handle;
         };
 
         const leftHandle = createHandle('left');
         const rightHandle = createHandle('right');
-        note.append(leftHandle, rightHandle);
+        const topHandle = createHandle('top');
+        note.append(leftHandle, rightHandle, topHandle);
       }
 
       function buildNoteOptionsMenu(note) {

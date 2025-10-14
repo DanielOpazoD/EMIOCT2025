@@ -3398,6 +3398,21 @@ body.reading-mode .floating-notes-layer {
   right: -5px;
 }
 
+.floating-note-resize-handle.handle-top {
+  top: -6px;
+  bottom: auto;
+  left: 14px;
+  right: 14px;
+  height: 12px;
+  width: auto;
+  cursor: ns-resize;
+}
+
+.floating-note-resize-handle.handle-top::after {
+  width: 32px;
+  height: 3px;
+}
+
 .floating-note:hover .floating-note-resize-handle,
 .floating-note:focus-within .floating-note-resize-handle,
 .floating-note.resizing .floating-note-resize-handle {
@@ -3411,7 +3426,15 @@ body.reading-mode .floating-notes-layer {
 }
 
 .floating-note.resizing {
+  user-select: none;
+}
+
+.floating-note.resizing-horizontal {
   cursor: ew-resize;
+}
+
+.floating-note.resizing-vertical {
+  cursor: ns-resize;
 }
 
 .floating-note-hover-animated:not(.dragging):hover,
