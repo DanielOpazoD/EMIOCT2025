@@ -72,6 +72,17 @@ function normalizeNotePages(pagesInput, options = {}) {
 }
 
 function applyPageStateToNote(note, overrides = {}) {
+  const targetType = overrides.type || note.type;
+  if (targetType === NOTE_TYPES.SUPER) {
+    const baseNote = {
+      ...note,
+      type: NOTE_TYPES.SUPER,
+      tabs: Array.isArray(note.tabs) ? note.tabs : [],
+      activeTabId: note.activeTabId || null
+    };
+    return applyTabStateToNote(baseNote, overrides);
+  }
+
   const fallbackHtml = typeof overrides.html === 'string'
     ? overrides.html
     : (note.html || '');
@@ -121,6 +132,161 @@ function normalizeCustomIcon(value) {
     return null;
   }
   return Array.from(trimmed).slice(0, 2).join('');
+}
+
+const DEFAULT_SUPER_TAB_TITLE = 'Pestaña';
+const DEFAULT_SUPER_TAB_COLOR = '#0d6efd';
+
+function normalizeTabTitle(value, fallback = DEFAULT_SUPER_TAB_TITLE) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length) {
+      return trimmed;
+    }
+  }
+  return fallback || DEFAULT_SUPER_TAB_TITLE;
+}
+
+function normalizeTabColor(value, fallback = DEFAULT_SUPER_TAB_COLOR) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length) {
+      return trimmed;
+    }
+  }
+  return fallback || DEFAULT_SUPER_TAB_COLOR;
+}
+
+function applyPageStateToTab(tab, overrides = {}) {
+  const fallbackHtml = typeof overrides.html === 'string'
+    ? overrides.html
+    : (tab.html || (Array.isArray(tab.pages) && tab.pages[tab.currentPageIndex]?.html) || '');
+  const fallbackContent = typeof overrides.content === 'string'
+    ? overrides.content
+    : (tab.content || (Array.isArray(tab.pages) && tab.pages[tab.currentPageIndex]?.content) || '');
+
+  const pages = normalizeNotePages(
+    overrides.pages !== undefined ? overrides.pages : tab.pages,
+    { fallbackHtml, fallbackContent }
+  );
+
+  let currentIndex = Number.isInteger(overrides.currentPageIndex)
+    ? overrides.currentPageIndex
+    : (Number.isInteger(tab.currentPageIndex) ? tab.currentPageIndex : 0);
+  currentIndex = Math.min(Math.max(currentIndex, 0), pages.length - 1);
+
+  let activePage = pages[currentIndex] || pages[0];
+  if (typeof overrides.html === 'string' || typeof overrides.content === 'string') {
+    const nowIso = overrides.updatedAt ? String(overrides.updatedAt) : new Date().toISOString();
+    const updatedPage = {
+      ...activePage,
+      html: typeof overrides.html === 'string' ? overrides.html : activePage.html,
+      content: typeof overrides.content === 'string' ? overrides.content : activePage.content,
+      updatedAt: nowIso
+    };
+    pages[currentIndex] = updatedPage;
+    activePage = updatedPage;
+  }
+
+  return {
+    ...tab,
+    pages,
+    currentPageIndex: currentIndex,
+    html: activePage?.html || '',
+    content: activePage?.content || ''
+  };
+}
+
+function createNormalizedSuperTab(rawTab = {}, options = {}, seenIds = new Set()) {
+  const base = rawTab && typeof rawTab === 'object' ? { ...rawTab } : {};
+  let id = base.id ? String(base.id).trim() : '';
+  while (!id || seenIds.has(id)) {
+    id = generateUniqueId('note-tab');
+  }
+  seenIds.add(id);
+
+  const tab = {
+    id,
+    title: normalizeTabTitle(base.title, options.defaultTitle),
+    color: normalizeTabColor(base.color, options.defaultColor),
+    pages: Array.isArray(base.pages) ? base.pages : [],
+    currentPageIndex: Number.isInteger(base.currentPageIndex) ? base.currentPageIndex : 0,
+    html: typeof base.html === 'string' ? base.html : '',
+    content: typeof base.content === 'string' ? base.content : ''
+  };
+
+  return applyPageStateToTab(tab, {
+    html: typeof base.html === 'string' ? base.html : undefined,
+    content: typeof base.content === 'string' ? base.content : undefined
+  });
+}
+
+function normalizeSuperTabs(tabsInput, options = {}) {
+  const seen = new Set();
+  const source = Array.isArray(tabsInput) ? tabsInput : [];
+  const normalized = source
+    .map(tab => createNormalizedSuperTab(tab, options, seen))
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    normalized.push(createNormalizedSuperTab({}, options, seen));
+  }
+
+  return normalized;
+}
+
+function applyTabStateToNote(note, overrides = {}) {
+  const defaultTitle = overrides.defaultTabTitle || DEFAULT_SUPER_TAB_TITLE;
+  const defaultColor = overrides.defaultTabColor || DEFAULT_SUPER_TAB_COLOR;
+  const fallbackHtml = typeof overrides.html === 'string'
+    ? overrides.html
+    : (note.html || '');
+  const fallbackContent = typeof overrides.content === 'string'
+    ? overrides.content
+    : (note.content || '');
+
+  const normalizedTabs = normalizeSuperTabs(
+    overrides.tabs !== undefined ? overrides.tabs : note.tabs,
+    {
+      defaultTitle,
+      defaultColor,
+      fallbackHtml,
+      fallbackContent
+    }
+  );
+
+  let activeTabId = overrides.activeTabId || note.activeTabId || null;
+  if (!normalizedTabs.some(tab => tab.id === activeTabId)) {
+    activeTabId = normalizedTabs[0]?.id || null;
+  }
+
+  const activeIndex = Math.max(normalizedTabs.findIndex(tab => tab.id === activeTabId), 0);
+  let activeTab = normalizedTabs[activeIndex];
+
+  const tabOverrides = {};
+  if (overrides.pages !== undefined) tabOverrides.pages = overrides.pages;
+  if (overrides.currentPageIndex !== undefined) tabOverrides.currentPageIndex = overrides.currentPageIndex;
+  if (overrides.html !== undefined) tabOverrides.html = overrides.html;
+  if (overrides.content !== undefined) tabOverrides.content = overrides.content;
+  if (overrides.updatedAt !== undefined) tabOverrides.updatedAt = overrides.updatedAt;
+
+  if (Object.keys(tabOverrides).length > 0) {
+    activeTab = applyPageStateToTab(activeTab, tabOverrides);
+    normalizedTabs[activeIndex] = activeTab;
+  }
+
+  const activePage = activeTab.pages[activeTab.currentPageIndex] || activeTab.pages[0] || { html: '', content: '' };
+
+  return {
+    ...note,
+    type: NOTE_TYPES.SUPER,
+    tabs: normalizedTabs,
+    activeTabId,
+    pages: activeTab.pages,
+    currentPageIndex: activeTab.currentPageIndex,
+    html: activePage.html || '',
+    content: activePage.content || ''
+  };
 }
 
 export function createEnhancedNote(options = {}) {
@@ -197,6 +363,8 @@ export function createEnhancedNote(options = {}) {
     element: options.element || null,
     pages: [],
     currentPageIndex: 0,
+    tabs: Array.isArray(options.tabs) ? options.tabs : [],
+    activeTabId: options.activeTabId || null,
     behindMainContent: !!options.behindMainContent,
     compactHeader: !!options.compactHeader,
     ultraCompact: !!options.ultraCompact,
@@ -268,7 +436,14 @@ export class NoteRegistry {
     } else if (overrides && typeof overrides === 'object') {
       const merged = { ...existing };
       Object.keys(overrides).forEach((key) => {
-        if (key === 'pages' || key === 'currentPageIndex' || key === 'html' || key === 'content') {
+        if (
+          key === 'pages' ||
+          key === 'currentPageIndex' ||
+          key === 'html' ||
+          key === 'content' ||
+          key === 'tabs' ||
+          key === 'activeTabId'
+        ) {
           return;
         }
         if (key === 'tags') {

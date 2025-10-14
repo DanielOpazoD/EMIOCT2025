@@ -1,5 +1,6 @@
 export const NOTE_TYPES = Object.freeze({
   FLOATING: 'floating',
+  SUPER: 'super',
   MARGIN: 'margin',
   INLINE: 'inline',
   FOOTNOTE: 'footnote'
