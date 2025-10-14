@@ -1576,6 +1576,418 @@ img.inline-image {
   color: #495057;
 }
 
+.image-viewer-panel {
+  position: fixed;
+  top: var(--topbar-height);
+  right: 0;
+  width: clamp(360px, 48vw, 820px);
+  min-width: 320px;
+  height: calc(100vh - var(--topbar-height));
+  background: #f8fafc;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -16px 0 36px rgba(15, 23, 42, 0.18);
+  transform: translateX(102%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.28s ease, opacity 0.28s ease;
+  z-index: 4400;
+  display: flex;
+  flex-direction: column;
+}
+
+.image-viewer-panel.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, rgba(241, 245, 249, 0.96), rgba(226, 232, 240, 0.9));
+}
+
+.image-viewer-header-info h3 {
+  margin: 0;
+  font-size: 1.18rem;
+  color: #0f172a;
+}
+
+.image-viewer-header-info p {
+  margin: 3px 0 0 0;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.image-viewer-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.image-viewer-action {
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  color: #1d4ed8;
+  font-weight: 600;
+  border-radius: 16px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.image-viewer-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.image-viewer-action:not(:disabled):hover,
+.image-viewer-action:not(:disabled):focus-visible {
+  background: #e0e7ff;
+  box-shadow: 0 8px 18px rgba(59, 130, 246, 0.22);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.image-viewer-close {
+  border: none;
+  background: #0f172a;
+  color: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.image-viewer-close:hover,
+.image-viewer-close:focus-visible {
+  transform: rotate(90deg);
+  background: #1d4ed8;
+  outline: none;
+}
+
+.image-viewer-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  overflow: hidden;
+}
+
+.image-viewer-stage {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.image-viewer-stage-surface {
+  flex: 1 1 auto;
+  position: relative;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-viewer-stage-surface img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: none;
+  transform-origin: center;
+  transition: transform 0.2s ease;
+}
+
+.image-viewer-panel.has-image #imageViewerActiveImage {
+  display: block;
+}
+
+.image-viewer-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 6px;
+  color: #64748b;
+  padding: 20px;
+}
+
+.image-viewer-empty strong {
+  font-size: 1.048rem;
+  color: #334155;
+}
+
+.image-viewer-panel.has-image .image-viewer-empty {
+  display: none;
+}
+
+.image-viewer-panel.viewer-preview-mode .image-viewer-notes textarea {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.image-viewer-zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.65);
+  border-radius: 999px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.28);
+  color: #e2e8f0;
+}
+
+.image-viewer-zoom-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.92rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.image-viewer-zoom-btn:hover,
+.image-viewer-zoom-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.image-viewer-zoom-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.image-viewer-zoom-value {
+  min-width: 48px;
+  text-align: center;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+}
+
+.image-viewer-stage-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.image-viewer-filename {
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-viewer-footer {
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.image-viewer-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.image-viewer-section-header h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  letter-spacing: 0.01em;
+  color: #1e293b;
+}
+
+.image-viewer-notes textarea {
+  width: 100%;
+  min-height: 84px;
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 8px 10px;
+  resize: vertical;
+  font-size: 0.72rem;
+  line-height: 1.28;
+  font-family: inherit;
+  color: #1f2937;
+  background: #fff;
+  box-shadow: inset 0 1px 3px rgba(148, 163, 184, 0.15);
+}
+
+.image-viewer-notes textarea:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.image-viewer-gallery {
+  display: flex;
+  flex-direction: column;
+}
+
+.image-viewer-gallery-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  align-content: start;
+  overflow-y: auto;
+  max-height: 160px;
+  padding-right: 2px;
+}
+
+.image-viewer-thumb {
+  position: relative;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 0;
+  background: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.image-viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-viewer-thumb:hover,
+.image-viewer-thumb:focus-visible {
+  border-color: #93c5fd;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 18px rgba(59, 130, 246, 0.18);
+  outline: none;
+}
+
+.image-viewer-thumb.active {
+  border-color: #1d4ed8;
+  box-shadow: 0 12px 24px rgba(29, 78, 216, 0.25);
+}
+
+.image-viewer-remove {
+  border: none;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.image-viewer-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.image-viewer-remove:not(:disabled):hover,
+.image-viewer-remove:not(:disabled):focus-visible {
+  background: #f87171;
+  color: #fff;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+body.image-viewer-open {
+  overflow-x: hidden;
+}
+
+body.image-viewer-open .image-viewer-panel {
+  box-shadow: -20px 0 40px rgba(15, 23, 42, 0.28);
+}
+
+body.image-viewer-open .floating-notes-layer {
+  right: clamp(360px, 48vw, 820px);
+}
+
+@media (max-width: 900px) {
+  .image-viewer-panel {
+    width: min(60vw, 640px);
+  }
+
+  body.image-viewer-open .floating-notes-layer {
+    right: min(60vw, 640px);
+  }
+}
+
+@media (max-width: 720px) {
+  .image-viewer-panel {
+    width: min(82vw, 520px);
+  }
+
+  body.image-viewer-open .floating-notes-layer {
+    right: min(82vw, 520px);
+  }
+}
+
+@media (max-width: 620px) {
+  .image-viewer-panel {
+    left: 0;
+    right: 0;
+    width: 100vw;
+  }
+
+  body.image-viewer-open .floating-notes-layer {
+    right: 0;
+  }
+
+  .image-viewer-gallery-grid {
+    max-height: 140px;
+  }
+
+  .image-viewer-notes textarea {
+    min-height: 100px;
+  }
+}
+
 .notes-view-controls {
   padding: 12px 16px;
   display: flex;
