@@ -3917,30 +3917,74 @@ body.pages-hidden .floating-note-behind:focus-within {
   gap: 2px;
 }
 
+.floating-note-ultra-compact {
+  gap: 0;
+  padding-top: 8px;
+}
+
 .floating-note-ultra-compact .note-category,
-.floating-note-ultra-compact .note-navigation {
+.floating-note-ultra-compact .note-navigation,
+.floating-note-ultra-compact .note-actions .note-priority,
+.floating-note-ultra-compact .note-footer {
   display: none !important;
 }
 
 .floating-note-ultra-compact .floating-note-header {
-  justify-content: flex-end;
-  padding: 3px 6px 1px;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  left: auto;
+  padding: 0;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  gap: 0;
+  z-index: 2;
 }
 
 .floating-note-ultra-compact .note-actions {
-  gap: 2px;
+  gap: 0;
+}
+
+.floating-note-ultra-compact .note-menu {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0;
+  position: relative;
+  border-radius: 999px;
+}
+
+.floating-note-ultra-compact .note-menu::after {
+  content: '';
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.65;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+.floating-note-ultra-compact .note-menu:hover::after,
+.floating-note-ultra-compact .note-menu:focus-visible::after {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45);
+}
+
+.floating-note-ultra-compact .note-menu:active::after {
+  opacity: 0.9;
 }
 
 .floating-note-ultra-compact .floating-note-body {
-  padding: 2px 6px 6px;
-}
-
-.floating-note-ultra-compact .note-footer {
-  display: none;
-}
-
-.floating-note-ultra-compact .note-header button {
-  padding: 2px;
+  padding: 6px 8px 8px;
 }
 
 .floating-note.enhanced-note {
@@ -4333,6 +4377,12 @@ body.printing-floating-notes .floating-notes-print-area * {
   visibility: visible !important;
 }
 
+body.printing-floating-notes .page,
+body.printing-floating-notes .magic-page {
+  display: none !important;
+  page-break-after: auto !important;
+}
+
 .floating-notes-print-area {
   position: fixed;
   inset: 0;
@@ -4402,10 +4452,6 @@ body.printing-floating-notes .floating-notes-print-area * {
   }
 
   @page {
-    size: auto;
     margin: 10mm;
   }
 }
-</style>
-<style>
-${document.querySelector('style').textContent}

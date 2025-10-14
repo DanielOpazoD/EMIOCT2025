@@ -5742,6 +5742,11 @@ export async function initializeEditor() {
         printContainer.style.width = `${Math.round(layerRect.width)}px`;
         printContainer.style.height = `${Math.round(layerRect.height)}px`;
 
+        const landscapeStyle = document.createElement('style');
+        landscapeStyle.dataset.floatingNotesPrint = 'orientation';
+        landscapeStyle.textContent = '@page { size: landscape; margin: 10mm; }';
+        document.head.appendChild(landscapeStyle);
+
         visibleNotes.forEach(({ note, rect }) => {
           const clone = note.cloneNode(true);
           clone.classList.remove('dragging', 'resizing');
@@ -5761,6 +5766,9 @@ export async function initializeEditor() {
           document.body.classList.remove('printing-floating-notes');
           if (printContainer.isConnected) {
             printContainer.remove();
+          }
+          if (landscapeStyle.isConnected) {
+            landscapeStyle.remove();
           }
           window.removeEventListener('afterprint', cleanup);
         };
