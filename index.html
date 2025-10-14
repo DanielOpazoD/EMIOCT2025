@@ -28,6 +28,7 @@
         </div>
         <button class="topbar-btn" type="button" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
         <button class="topbar-btn" type="button" id="notesViewBtn" title="Vista de notas"><span>📝</span> <span class="topbar-btn-label">Notas</span></button>
+        <button class="topbar-btn" type="button" id="imageViewerBtn" title="Visor de imágenes"><span>🖼️</span> <span class="topbar-btn-label">Imágenes</span></button>
         <button class="topbar-btn" type="button" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
         <button class="topbar-btn" type="button" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
         <button class="topbar-btn" type="button" id="printCurrentBtn" title="Imprimir documento"><span>🖨️</span> <span class="topbar-btn-label">Imprimir</span></button>
@@ -589,6 +590,42 @@
 
   <div id="panel-backdrop" class="panel-backdrop"></div>
   
+  <main id="workspaceLayout" class="workspace-layout workspace-single" data-workspace>
+    <div id="documentWorkspace" class="document-workspace">
+      <div id="documentPagesContainer" class="document-pages"></div>
+    </div>
+
+    <aside id="imageViewerPanel" class="image-viewer-panel" aria-hidden="true">
+      <div class="image-viewer-header">
+        <h3>Visor de imágenes</h3>
+        <div class="image-viewer-header-actions">
+          <button type="button" id="imageViewerAddBtn" title="Agregar imágenes">➕</button>
+          <button type="button" id="imageViewerDownloadBtn" title="Descargar imagen" disabled>⬇️</button>
+          <button type="button" id="imageViewerNotesBtn" title="Notas ocultas" disabled>📝</button>
+          <button type="button" id="imageViewerCloseBtn" title="Cerrar visor">×</button>
+        </div>
+      </div>
+
+      <div class="image-viewer-body">
+        <div class="image-viewer-display">
+          <div class="image-viewer-main">
+            <img id="imageViewerMainImage" alt="Imagen seleccionada" hidden />
+            <div id="imageViewerPlaceholder" class="image-viewer-placeholder">
+              <p>No hay imágenes cargadas.</p>
+              <p>Usa “Agregar imágenes” para comenzar.</p>
+            </div>
+          </div>
+          <div class="image-viewer-notes" id="imageViewerNotes" hidden>
+            <label for="imageViewerNotesInput">Notas ocultas</label>
+            <textarea id="imageViewerNotesInput" placeholder="Escribe notas solo visibles en este visor..."></textarea>
+          </div>
+        </div>
+        <div class="image-viewer-thumbs" id="imageViewerThumbs" role="list"></div>
+      </div>
+      <input type="file" id="imageViewerFileInput" accept="image/*" multiple hidden />
+    </aside>
+  </main>
+
   <aside id="magic-view" class="magic-view">
   </aside>
 
