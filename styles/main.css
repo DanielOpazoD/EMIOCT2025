@@ -3363,6 +3363,14 @@ body.reading-mode .floating-notes-layer {
   resize: both;
   overflow: auto;
   font-size: 14px;
+  --floating-note-title-color: currentColor;
+  --note-category-indicator: var(--floating-note-title-color, currentColor);
+}
+
+.floating-note-hover-animated:not(.dragging):hover,
+.floating-note-hover-animated:not(.dragging):focus-within {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.24);
 }
 
 /* ===== Panel de notas por tema ===== */
@@ -3694,20 +3702,21 @@ body.reading-mode .floating-notes-layer {
 }
 
 .note-menu-style-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
   gap: 6px;
 }
 
 .note-style-btn {
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 5px 7px;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
   font-size: 0.74em;
-  border-radius: 7px;
+  border-radius: 8px;
   min-width: 0;
+  min-height: 48px;
 }
 
 .note-style-preview {
@@ -3718,58 +3727,21 @@ body.reading-mode .floating-notes-layer {
   border: 2px solid transparent;
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
   flex-shrink: 0;
+  position: relative;
 }
 
-.note-style-label {
-  font-size: 0.68em;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #475569;
-  text-align: left;
+.note-style-preview::after {
+  content: '';
+  position: absolute;
+  inset: auto 3px 3px 3px;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--floating-note-title-color, rgba(15, 23, 42, 0.35));
 }
 
-.note-style-btn.active .note-style-label {
-  color: #0f172a;
-}
-
-.note-border-section {
-  gap: 6px;
-}
-
-.note-border-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.note-border-swatch {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  background: #ffffff;
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 1px rgba(15, 23, 42, 0.2);
-}
-
-.note-border-swatch:hover,
-.note-border-swatch:focus {
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 1px rgba(15, 23, 42, 0.45);
-}
-
-.note-border-swatch.active {
-  border-color: #0f172a;
-  box-shadow: inset 0 0 0 11px var(--swatch-color, #0f172a), 0 0 0 2px rgba(15, 23, 42, 0.35);
-}
-
-.note-border-reset {
-  align-self: flex-start;
-  font-size: 0.72em;
-  padding: 3px 6px;
+.note-style-btn.active .note-style-preview {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.24);
 }
 
 .note-menu-inline-actions {
@@ -3796,6 +3768,10 @@ body.reading-mode .floating-notes-layer {
 }
 
 .note-compact-toggle {
+  flex: 1 1 100%;
+}
+
+.note-hover-toggle {
   flex: 1 1 100%;
 }
 
@@ -3837,6 +3813,19 @@ body.reading-mode .floating-notes-layer {
   user-select: text;
   min-height: 80px;
   background: transparent;
+}
+
+.floating-note-text-neutral .floating-note-body {
+  color: #111827;
+}
+
+.floating-note-text-neutral .floating-note-body a {
+  color: #1d4ed8;
+}
+
+.floating-note-text-neutral .floating-note-body a:hover,
+.floating-note-text-neutral .floating-note-body a:focus {
+  color: #1e3a8a;
 }
 
 .floating-note-body[contenteditable="true"]:focus {
@@ -3896,10 +3885,12 @@ body.pages-hidden .floating-note-behind:focus-within {
   font-size: 13px;
   cursor: pointer;
   flex: 1 1 auto;
+  color: var(--floating-note-title-color, currentColor);
 }
 
 .enhanced-note .note-category .note-icon {
   font-size: 1em;
+  color: var(--note-category-indicator, var(--floating-note-title-color, currentColor));
 }
 
 .enhanced-note .note-category .note-label {
@@ -3963,7 +3954,7 @@ body.pages-hidden .floating-note-behind:focus-within {
 
 .enhanced-note .note-category:hover .note-label,
 .enhanced-note .note-category:focus .note-label {
-  border-bottom-color: rgba(15, 23, 42, 0.25);
+  border-bottom-color: var(--floating-note-title-color, rgba(15, 23, 42, 0.25));
 }
 
 .enhanced-note .note-body {
@@ -4023,32 +4014,32 @@ body.pages-hidden .floating-note-behind:focus-within {
   opacity: 0.85;
 }
 
-.enhanced-note[data-category="IMPORTANT"] .note-category {
-  color: #dc3545;
+.enhanced-note[data-category="IMPORTANT"] {
+  --note-category-indicator: #dc3545;
 }
 
-.enhanced-note[data-category="PEARL"] .note-category {
-  color: #6f42c1;
+.enhanced-note[data-category="PEARL"] {
+  --note-category-indicator: #6f42c1;
 }
 
-.enhanced-note[data-category="REMEMBER"] .note-category {
-  color: #fd7e14;
+.enhanced-note[data-category="REMEMBER"] {
+  --note-category-indicator: #fd7e14;
 }
 
-.enhanced-note[data-category="QUESTION"] .note-category {
-  color: #0dcaf0;
+.enhanced-note[data-category="QUESTION"] {
+  --note-category-indicator: #0dcaf0;
 }
 
-.enhanced-note[data-category="REFERENCE"] .note-category {
-  color: #198754;
+.enhanced-note[data-category="REFERENCE"] {
+  --note-category-indicator: #198754;
 }
 
-.enhanced-note[data-category="TODO"] .note-category {
-  color: #6c757d;
+.enhanced-note[data-category="TODO"] {
+  --note-category-indicator: #6c757d;
 }
 
-.enhanced-note[data-category="PERSONAL"] .note-category {
-  color: #0d6efd;
+.enhanced-note[data-category="PERSONAL"] {
+  --note-category-indicator: #0d6efd;
 }
 
 .note-anchor {
@@ -4076,90 +4067,133 @@ body.pages-hidden .floating-note-behind:focus-within {
   background: #fffbe6;
   border-color: #f2d479;
   color: #5c4b1f;
+  --floating-note-title-color: #b45309;
 }
 
 .floating-note-style-blank {
   background: #ffffff;
   border-color: #d1d5db;
   color: #1f2937;
+  --floating-note-title-color: #0f172a;
 }
 
 .floating-note-style-sky {
   background: #e8f4ff;
   border-color: #a8d8ff;
   color: #1b437f;
+  --floating-note-title-color: #1d4ed8;
 }
 
 .floating-note-style-mint {
   background: #e6fff3;
   border-color: #9be7c4;
   color: #1f5c3b;
+  --floating-note-title-color: #047857;
 }
 
 .floating-note-style-rose {
   background: #ffe8f3;
   border-color: #f3b4cf;
   color: #703049;
+  --floating-note-title-color: #be185d;
 }
 
 .floating-note-style-lilac {
   background: #f1e9ff;
   border-color: #cbb7f8;
   color: #463271;
+  --floating-note-title-color: #7c3aed;
 }
 
 .floating-note-style-slate {
   background: #eef1f5;
   border-color: #c5ccd6;
   color: #2f3947;
+  --floating-note-title-color: #1f2937;
 }
 
 .floating-note-style-citrus {
   background: #fff3d4;
   border-color: #f59e0b;
   color: #92400e;
+  --floating-note-title-color: #c2410c;
 }
 
 .floating-note-style-midnight {
   background: #1f2937;
   border-color: #38bdf8;
   color: #f8fafc;
+  --floating-note-title-color: #38bdf8;
 }
 
 .floating-note-style-dawn {
   background: #fdf2f8;
   border-color: #f9a8d4;
   color: #7c2d4e;
+  --floating-note-title-color: #db2777;
 }
 
 .floating-note-style-forest {
   background: #ecfdf5;
   border-color: #34d399;
   color: #14532d;
+  --floating-note-title-color: #15803d;
 }
 
 .floating-note-style-sand {
   background: #f9f4e6;
   border-color: #e2c9a5;
   color: #5f4c2a;
+  --floating-note-title-color: #b7791f;
 }
 
 .floating-note-style-peach {
   background: #ffece2;
   border-color: #f9c3a5;
   color: #7a3f1c;
+  --floating-note-title-color: #d97706;
 }
 
 .floating-note-style-ice {
   background: #edf9ff;
   border-color: #bae6fd;
   color: #155e75;
+  --floating-note-title-color: #0369a1;
 }
 
 .floating-note-style-sage {
   background: #eef8ef;
   border-color: #c7e9cc;
   color: #285034;
+  --floating-note-title-color: #2f855a;
+}
+
+.floating-note-style-morning {
+  background: #fdfcf6;
+  border-color: #f7e3b1;
+  color: #5f4d30;
+  --floating-note-title-color: #c05621;
+}
+
+.floating-note-style-breeze {
+  background: #f3fbff;
+  border-color: #d0e9ff;
+  color: #1f3f6b;
+  --floating-note-title-color: #1d4ed8;
+}
+
+.floating-note-style-mist {
+  background: #f6f7ff;
+  border-color: #dcd7fe;
+  color: #3f3f74;
+  --floating-note-title-color: #4338ca;
+}
+
+.floating-note-style-spring {
+  background: #f4fff7;
+  border-color: #ccebdc;
+  color: #1f5138;
+  --floating-note-title-color: #16a34a;
 }
 
 body.notes-hidden #floatingNotesLayer {

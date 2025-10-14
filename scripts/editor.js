@@ -55,21 +55,25 @@ export async function initializeEditor() {
       const IMAGE_RESIZE_STEP = 0.1;
 
       const NOTE_STYLE_PRESETS = [
-        { id: 'blank', name: 'Blanca', shortName: 'Blanca', className: 'floating-note-style-blank' },
-        { id: 'default', name: 'Clásica', shortName: 'Clásica', className: 'floating-note-style-default' },
-        { id: 'sky', name: 'Cielo', shortName: 'Cielo', className: 'floating-note-style-sky' },
-        { id: 'mint', name: 'Menta', shortName: 'Menta', className: 'floating-note-style-mint' },
-        { id: 'rose', name: 'Pétalo', shortName: 'Pétalo', className: 'floating-note-style-rose' },
-        { id: 'lilac', name: 'Lavanda', shortName: 'Lavanda', className: 'floating-note-style-lilac' },
-        { id: 'slate', name: 'Pizarra', shortName: 'Pizarra', className: 'floating-note-style-slate' },
-        { id: 'citrus', name: 'Cítrica', shortName: 'Cítrica', className: 'floating-note-style-citrus' },
-        { id: 'midnight', name: 'Nocturna', shortName: 'Nocturna', className: 'floating-note-style-midnight' },
-        { id: 'dawn', name: 'Aurora', shortName: 'Aurora', className: 'floating-note-style-dawn' },
-        { id: 'forest', name: 'Bosque', shortName: 'Bosque', className: 'floating-note-style-forest' },
-        { id: 'sand', name: 'Arena', shortName: 'Arena', className: 'floating-note-style-sand' },
-        { id: 'peach', name: 'Durazno', shortName: 'Durazno', className: 'floating-note-style-peach' },
-        { id: 'ice', name: 'Hielo', shortName: 'Hielo', className: 'floating-note-style-ice' },
-        { id: 'sage', name: 'Salvia', shortName: 'Salvia', className: 'floating-note-style-sage' }
+        { id: 'blank', name: 'Blanca', className: 'floating-note-style-blank' },
+        { id: 'default', name: 'Clásica', className: 'floating-note-style-default' },
+        { id: 'sky', name: 'Cielo', className: 'floating-note-style-sky' },
+        { id: 'mint', name: 'Menta', className: 'floating-note-style-mint' },
+        { id: 'rose', name: 'Pétalo', className: 'floating-note-style-rose' },
+        { id: 'lilac', name: 'Lavanda', className: 'floating-note-style-lilac' },
+        { id: 'slate', name: 'Pizarra', className: 'floating-note-style-slate' },
+        { id: 'citrus', name: 'Cítrica', className: 'floating-note-style-citrus' },
+        { id: 'midnight', name: 'Nocturna', className: 'floating-note-style-midnight' },
+        { id: 'dawn', name: 'Aurora', className: 'floating-note-style-dawn' },
+        { id: 'forest', name: 'Bosque', className: 'floating-note-style-forest' },
+        { id: 'sand', name: 'Arena', className: 'floating-note-style-sand' },
+        { id: 'peach', name: 'Durazno', className: 'floating-note-style-peach' },
+        { id: 'ice', name: 'Hielo', className: 'floating-note-style-ice' },
+        { id: 'sage', name: 'Salvia', className: 'floating-note-style-sage' },
+        { id: 'morning', name: 'Matinal', className: 'floating-note-style-morning' },
+        { id: 'breeze', name: 'Brisa', className: 'floating-note-style-breeze' },
+        { id: 'mist', name: 'Niebla', className: 'floating-note-style-mist' },
+        { id: 'spring', name: 'Primavera', className: 'floating-note-style-spring' }
       ];
 
       const NOTE_ICON_SYMBOLS = [
@@ -78,10 +82,6 @@ export async function initializeEditor() {
         '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
         '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
         '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
-      ];
-
-      const NOTE_BORDER_COLORS = [
-        '#f97316', '#f43f5e', '#facc15', '#22c55e', '#2dd4bf', '#38bdf8', '#a855f7', '#ef4444', '#0ea5e9', '#6b7280', '#1f2937', '#000000'
       ];
 
       const ICON_FEATURE_ENABLED = true;
@@ -2415,6 +2415,16 @@ export async function initializeEditor() {
         }
       }
 
+      function resolveBooleanFlag(value, defaultValue = false) {
+        if (value === true || value === 'true') {
+          return true;
+        }
+        if (value === false || value === 'false') {
+          return false;
+        }
+        return defaultValue;
+      }
+
       function parsePxValue(value, fallback = 0) {
         if (!value) return fallback;
         const parsed = parseFloat(value);
@@ -4569,6 +4579,51 @@ export async function initializeEditor() {
         return clamped;
       }
 
+      function ensureFloatingNoteImageInitialSize(img, container) {
+        if (!img || !container) return;
+        if (img.dataset.initialSizeLocked === 'true') {
+          return;
+        }
+
+        const finalize = () => {
+          const containerWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+          if (containerWidth <= 0) {
+            img.dataset.initialSizeLocked = 'true';
+            return;
+          }
+
+          const naturalWidth = getImageNaturalWidth(img);
+          const rectWidth = img.getBoundingClientRect().width || 0;
+          const currentWidth = rectWidth || naturalWidth || 0;
+
+          if (currentWidth > containerWidth) {
+            const targetWidth = Math.min(containerWidth, naturalWidth || containerWidth);
+            img.style.width = Math.round(targetWidth) + 'px';
+            img.style.height = 'auto';
+          }
+
+          img.dataset.initialSizeLocked = 'true';
+        };
+
+        if (img.complete) {
+          finalize();
+        } else {
+          img.addEventListener('load', finalize, { once: true });
+          img.addEventListener('error', () => {
+            img.dataset.initialSizeLocked = 'true';
+          }, { once: true });
+        }
+      }
+
+      function markFloatingNoteImagesInitialized(container) {
+        if (!container) return;
+        container.querySelectorAll('img').forEach(img => {
+          if (!img.dataset.initialSizeLocked) {
+            img.dataset.initialSizeLocked = 'true';
+          }
+        });
+      }
+
       function updateWidthDisplayForImage(img) {
         if (!widthDisplay) return;
         if (!img) {
@@ -4596,6 +4651,10 @@ export async function initializeEditor() {
 
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
+
+        if (!document.body.contains(imageToolbar)) {
+          document.body.appendChild(imageToolbar);
+        }
 
         imageToolbar.classList.add('show');
 
@@ -4975,10 +5034,7 @@ export async function initializeEditor() {
         note.dataset.style = preset?.id || 'default';
         const noteId = note.dataset.noteId;
         if (noteId) {
-          const updated = updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
-          applyFloatingNoteBorderColor(note, updated?.borderColor || null, { persist: false });
-        } else {
-          applyFloatingNoteBorderColor(note, note.dataset.borderColor || null, { persist: false });
+          updateNoteData(noteId, { style: note.dataset.style }, { silent: true });
         }
         const menu = note.querySelector('.floating-note-style-menu');
         if (menu) {
@@ -4987,22 +5043,6 @@ export async function initializeEditor() {
           if (noteData) {
             syncNoteOptionsMenu(menu, noteData);
           }
-        }
-      }
-
-      function applyFloatingNoteBorderColor(note, color, { persist = true } = {}) {
-        if (!note) return;
-        const noteId = note.dataset.noteId;
-        const normalized = typeof color === 'string' ? color.trim() : '';
-        if (normalized) {
-          note.style.borderColor = normalized;
-          note.dataset.borderColor = normalized;
-        } else {
-          note.style.borderColor = '';
-          delete note.dataset.borderColor;
-        }
-        if (persist && noteId) {
-          updateNoteData(noteId, { borderColor: normalized || null }, { silent: true });
         }
       }
 
@@ -5086,6 +5126,54 @@ export async function initializeEditor() {
           }
         }
         return shouldBeBehind;
+      }
+
+      function applyNoteHoverAnimationState(note, enabled, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldAnimate = enabled === true;
+        note.classList.toggle('floating-note-hover-animated', shouldAnimate);
+        if (shouldAnimate) {
+          note.dataset.hoverAnimation = 'true';
+        } else {
+          note.dataset.hoverAnimation = 'false';
+        }
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { hoverAnimation: shouldAnimate }, { silent: true });
+          }
+        }
+        return shouldAnimate;
+      }
+
+      function toggleNoteHoverAnimation(note) {
+        if (!note) return false;
+        const nextState = !note.classList.contains('floating-note-hover-animated');
+        return applyNoteHoverAnimationState(note, nextState);
+      }
+
+      function applyFloatingNoteTextNeutralState(note, keepNeutral, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldKeepNeutral = keepNeutral === true;
+        note.classList.toggle('floating-note-text-neutral', shouldKeepNeutral);
+        if (shouldKeepNeutral) {
+          note.dataset.textNeutral = 'true';
+        } else {
+          delete note.dataset.textNeutral;
+        }
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { styleNeutralText: shouldKeepNeutral }, { silent: true });
+          }
+        }
+        return shouldKeepNeutral;
+      }
+
+      function toggleFloatingNoteNeutralText(note) {
+        if (!note) return false;
+        const nextState = note.dataset.textNeutral === 'true' ? false : true;
+        return applyFloatingNoteTextNeutralState(note, nextState);
       }
 
       function setNoteCustomIcon(note, symbol) {
@@ -5668,6 +5756,32 @@ export async function initializeEditor() {
           data.customIcon ?? metaSource.customIcon ?? data.meta?.customIcon
         );
 
+        const resolvedHoverAnimation = (() => {
+          if (data.hoverAnimation !== undefined) {
+            return resolveBooleanFlag(data.hoverAnimation, false);
+          }
+          if (metaSource.hoverAnimation !== undefined) {
+            return resolveBooleanFlag(metaSource.hoverAnimation, false);
+          }
+          if (typeof data.meta?.hoverAnimation !== 'undefined') {
+            return resolveBooleanFlag(data.meta.hoverAnimation, false);
+          }
+          return false;
+        })();
+
+        const resolvedNeutralText = (() => {
+          if (data.styleNeutralText !== undefined) {
+            return resolveBooleanFlag(data.styleNeutralText, false);
+          }
+          if (metaSource.styleNeutralText !== undefined) {
+            return resolveBooleanFlag(metaSource.styleNeutralText, false);
+          }
+          if (typeof data.meta?.styleNeutralText !== 'undefined') {
+            return resolveBooleanFlag(data.meta.styleNeutralText, false);
+          }
+          return false;
+        })();
+
         const htmlContent = typeof data.html === 'string'
           ? data.html
           : (typeof metaSource.html === 'string' ? metaSource.html : '');
@@ -5714,9 +5828,6 @@ export async function initializeEditor() {
         const updatedAt = data.updatedAt || metaSource.updatedAt || null;
         const linkedTo = data.linkedTo || metaSource.linkedTo || null;
         const anchorId = data.anchorId || metaSource.anchorId || null;
-        const incomingBorderColor = typeof data.borderColor === 'string' ? data.borderColor.trim() : '';
-        const metaBorderColor = typeof metaSource.borderColor === 'string' ? metaSource.borderColor.trim() : '';
-        const borderColor = incomingBorderColor || metaBorderColor || null;
         const parsedLeft = Number.parseFloat(data.left ?? metaSource.left);
         const parsedTop = Number.parseFloat(data.top ?? metaSource.top);
         const parsedWidth = Number.parseFloat(data.width ?? metaSource.width);
@@ -5764,7 +5875,6 @@ export async function initializeEditor() {
           sectionId,
           linkedTo,
           anchorId,
-          borderColor,
           reviewed,
           reviewCount,
           lastReviewed,
@@ -5783,12 +5893,15 @@ export async function initializeEditor() {
           currentPageIndex: incomingPageIndex,
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
+          hoverAnimation: resolvedHoverAnimation,
+          styleNeutralText: resolvedNeutralText,
           customIcon: resolvedCustomIcon
         });
         notesRegistry.set(noteId, noteData);
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
+        applyFloatingNoteTextNeutralState(note, resolvedNeutralText, { persist: false });
         if (resolvedCustomIcon) {
           note.dataset.customIcon = resolvedCustomIcon;
         } else {
@@ -5874,6 +5987,7 @@ export async function initializeEditor() {
         body.spellcheck = true;
         body.contentEditable = isEditMode ? 'true' : 'false';
         body.innerHTML = noteData.html || '';
+        markFloatingNoteImagesInitialized(body);
 
         body.addEventListener('focus', () => {
           bringNoteToFront(note);
@@ -5930,7 +6044,15 @@ export async function initializeEditor() {
             toInsert = escapeHtml(fallbackText).replace(/\r?\n/g, '<br>');
           }
           if (toInsert) {
+            const existingImages = new Set(body.querySelectorAll('img'));
             document.execCommand('insertHTML', false, toInsert);
+            requestAnimationFrame(() => {
+              const container = body;
+              const newImages = Array.from(container.querySelectorAll('img')).filter(img => !existingImages.has(img));
+              newImages.forEach(img => {
+                ensureFloatingNoteImageInitialSize(img, container);
+              });
+            });
           }
         });
 
@@ -6251,11 +6373,7 @@ export async function initializeEditor() {
             preview.classList.add(preset.className);
           }
 
-          const label = document.createElement('span');
-          label.className = 'note-style-label';
-          label.textContent = preset.shortName || preset.name;
-
-          optionBtn.append(preview, label);
+          optionBtn.append(preview);
           optionBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             applyFloatingNoteStyle(note, preset.id);
@@ -6287,50 +6405,6 @@ export async function initializeEditor() {
 
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
 
-        const borderSection = document.createElement('div');
-        borderSection.className = 'note-menu-section note-border-section';
-        const borderTitle = document.createElement('div');
-        borderTitle.className = 'note-menu-title';
-        borderTitle.textContent = '⬒';
-        borderSection.appendChild(borderTitle);
-
-        const borderSwatches = document.createElement('div');
-        borderSwatches.className = 'note-border-swatches';
-        NOTE_BORDER_COLORS.forEach(color => {
-          const swatchBtn = document.createElement('button');
-          swatchBtn.type = 'button';
-          swatchBtn.dataset.borderColor = color;
-          swatchBtn.className = 'note-border-swatch';
-          swatchBtn.title = `Borde ${color}`;
-          swatchBtn.setAttribute('aria-label', `Aplicar borde ${color}`);
-          swatchBtn.style.setProperty('--swatch-color', color);
-          swatchBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            applyFloatingNoteBorderColor(note, color);
-            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-            closeFloatingNoteStyleMenu(menu);
-          });
-          borderSwatches.appendChild(swatchBtn);
-        });
-        borderSection.appendChild(borderSwatches);
-
-        const borderResetBtn = document.createElement('button');
-        borderResetBtn.type = 'button';
-        borderResetBtn.dataset.action = 'reset-border';
-        borderResetBtn.className = 'note-border-reset';
-        borderResetBtn.textContent = 'Sin borde';
-        borderResetBtn.setAttribute('aria-label', 'Quitar borde personalizado');
-        borderResetBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          applyFloatingNoteBorderColor(note, null);
-          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
-          closeFloatingNoteStyleMenu(menu);
-        });
-        borderSection.appendChild(borderResetBtn);
-        menu.appendChild(borderSection);
-
-        menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
-
         const actionsSection = document.createElement('div');
         actionsSection.className = 'note-menu-section note-menu-actions';
         const actionsTitle = document.createElement('div');
@@ -6349,6 +6423,30 @@ export async function initializeEditor() {
         compactHeaderBtn.addEventListener('click', (event) => {
           event.stopPropagation();
           toggleNoteHeaderCompact(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
+        const neutralTextBtn = document.createElement('button');
+        neutralTextBtn.type = 'button';
+        neutralTextBtn.dataset.action = 'toggle-neutral-text';
+        neutralTextBtn.classList.add('note-neutral-text-toggle');
+        neutralTextBtn.textContent = '🖋️ Texto negro';
+        neutralTextBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleFloatingNoteNeutralText(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
+        const hoverAnimationBtn = document.createElement('button');
+        hoverAnimationBtn.type = 'button';
+        hoverAnimationBtn.dataset.action = 'toggle-hover-animation';
+        hoverAnimationBtn.classList.add('note-hover-toggle');
+        hoverAnimationBtn.textContent = '✨ Animación hover';
+        hoverAnimationBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteHoverAnimation(note);
           syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
           closeFloatingNoteStyleMenu(menu);
         });
@@ -6386,7 +6484,7 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(compactHeaderBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6421,15 +6519,6 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
-        menu.querySelectorAll('button[data-border-color]').forEach(button => {
-          const isActive = (noteData.borderColor || null) === (button.dataset.borderColor || null);
-          button.classList.toggle('active', isActive);
-          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        });
-        const borderResetBtn = menu.querySelector('button[data-action="reset-border"]');
-        if (borderResetBtn) {
-          borderResetBtn.disabled = !noteData.borderColor;
-        }
         const reviewBtn = menu.querySelector('button[data-action="toggle-reviewed"]');
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
@@ -6440,6 +6529,20 @@ export async function initializeEditor() {
           compactBtn.textContent = isCompact ? '🧩 Encabezado completo' : '🧩 Encabezado compacto';
           compactBtn.setAttribute('aria-pressed', isCompact ? 'true' : 'false');
           compactBtn.classList.toggle('active', isCompact);
+        }
+        const hoverBtn = menu.querySelector('button[data-action="toggle-hover-animation"]');
+        if (hoverBtn) {
+          const isActive = noteData.hoverAnimation === true;
+          hoverBtn.textContent = isActive ? '✨ Animación activa' : '✨ Animación desactivada';
+          hoverBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+          hoverBtn.classList.toggle('active', isActive);
+        }
+        const neutralBtn = menu.querySelector('button[data-action="toggle-neutral-text"]');
+        if (neutralBtn) {
+          const isNeutral = noteData.styleNeutralText === true;
+          neutralBtn.textContent = isNeutral ? '🖋️ Texto negro activo' : '🖋️ Texto del estilo';
+          neutralBtn.setAttribute('aria-pressed', isNeutral ? 'true' : 'false');
+          neutralBtn.classList.toggle('active', isNeutral);
         }
         const behindBtn = menu.querySelector('button[data-action="toggle-behind"]');
         if (behindBtn) {
@@ -6637,6 +6740,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = targetPage.html || '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6672,6 +6776,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6711,6 +6816,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = activePage.html || '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6723,7 +6829,8 @@ export async function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
-        applyFloatingNoteBorderColor(note, noteData.borderColor || null, { persist: false });
+        applyNoteHoverAnimationState(note, noteData.hoverAnimation === true, { persist: false });
+        applyFloatingNoteTextNeutralState(note, noteData.styleNeutralText === true, { persist: false });
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -6865,7 +6972,6 @@ export async function initializeEditor() {
               type: noteData.type,
               anchorId: noteData.anchorId,
               linkedTo: noteData.linkedTo,
-              borderColor: noteData.borderColor,
               pages: Array.isArray(noteData.pages) ? noteData.pages : undefined,
               currentPageIndex: Number.isInteger(noteData.currentPageIndex) ? noteData.currentPageIndex : undefined,
               pageOffsetLeft: noteData.pageOffsetLeft,
@@ -10978,7 +11084,6 @@ ${inlineStyles}
           noteExport.reviewed = !!noteData.reviewed;
           noteExport.reviewCount = Number(noteData.reviewCount) || 0;
           noteExport.lastReviewed = noteData.lastReviewed || null;
-          noteExport.borderColor = noteData.borderColor || null;
           noteExport.topicId = noteData.topicId || null;
           noteExport.sectionId = noteData.sectionId || null;
           noteExport.type = noteData.type || NOTE_TYPES.FLOATING;
@@ -10988,6 +11093,8 @@ ${inlineStyles}
           noteExport.updatedAt = noteData.updatedAt || null;
           noteExport.compactHeader = !!noteData.compactHeader;
           noteExport.customIcon = noteData.customIcon || null;
+          noteExport.hoverAnimation = noteData.hoverAnimation === true;
+          noteExport.styleNeutralText = noteData.styleNeutralText === true;
           if (Array.isArray(noteData.pages)) {
             noteExport.pages = noteData.pages.map(page => ({
               id: page.id,
