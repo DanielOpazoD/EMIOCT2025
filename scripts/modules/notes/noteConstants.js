@@ -2,7 +2,8 @@ export const NOTE_TYPES = Object.freeze({
   FLOATING: 'floating',
   MARGIN: 'margin',
   INLINE: 'inline',
-  FOOTNOTE: 'footnote'
+  FOOTNOTE: 'footnote',
+  SUPER: 'super'
 });
 
 export const NOTE_CATEGORIES = Object.freeze({
@@ -20,3 +21,20 @@ export const DEFAULT_NOTE_PRIORITY = 'normal';
 export const DEFAULT_NOTE_CATEGORY = 'PERSONAL';
 export const DEFAULT_NOTE_TYPE = NOTE_TYPES.FLOATING;
 export const DEFAULT_NOTE_STYLE = 'blank';
+
+export const SUPER_NOTE_DEFAULT_TAB_COLOR = '#334155';
+export const SUPER_NOTE_TAB_TITLE_MAX_LENGTH = 25;
+export const SUPER_NOTE_PRESET_COLORS = Object.freeze([
+  '#334155',
+  '#0f172a',
+  '#1d4ed8',
+  '#0ea5e9',
+  '#10b981',
+  '#22c55e',
+  '#f59e0b',
+  '#f97316',
+  '#ef4444',
+  '#ec4899',
+  '#a855f7',
+  '#6366f1'
+]);
