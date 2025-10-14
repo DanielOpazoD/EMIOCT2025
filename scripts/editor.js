@@ -2415,6 +2415,16 @@ export async function initializeEditor() {
         }
       }
 
+      function resolveBooleanFlag(value, defaultValue = false) {
+        if (value === true || value === 'true') {
+          return true;
+        }
+        if (value === false || value === 'false') {
+          return false;
+        }
+        return defaultValue;
+      }
+
       function parsePxValue(value, fallback = 0) {
         if (!value) return fallback;
         const parsed = parseFloat(value);
@@ -4569,6 +4579,51 @@ export async function initializeEditor() {
         return clamped;
       }
 
+      function ensureFloatingNoteImageInitialSize(img, container) {
+        if (!img || !container) return;
+        if (img.dataset.initialSizeLocked === 'true') {
+          return;
+        }
+
+        const finalize = () => {
+          const containerWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+          if (containerWidth <= 0) {
+            img.dataset.initialSizeLocked = 'true';
+            return;
+          }
+
+          const naturalWidth = getImageNaturalWidth(img);
+          const rectWidth = img.getBoundingClientRect().width || 0;
+          const currentWidth = rectWidth || naturalWidth || 0;
+
+          if (currentWidth > containerWidth) {
+            const targetWidth = Math.min(containerWidth, naturalWidth || containerWidth);
+            img.style.width = Math.round(targetWidth) + 'px';
+            img.style.height = 'auto';
+          }
+
+          img.dataset.initialSizeLocked = 'true';
+        };
+
+        if (img.complete) {
+          finalize();
+        } else {
+          img.addEventListener('load', finalize, { once: true });
+          img.addEventListener('error', () => {
+            img.dataset.initialSizeLocked = 'true';
+          }, { once: true });
+        }
+      }
+
+      function markFloatingNoteImagesInitialized(container) {
+        if (!container) return;
+        container.querySelectorAll('img').forEach(img => {
+          if (!img.dataset.initialSizeLocked) {
+            img.dataset.initialSizeLocked = 'true';
+          }
+        });
+      }
+
       function updateWidthDisplayForImage(img) {
         if (!widthDisplay) return;
         if (!img) {
@@ -4596,6 +4651,10 @@ export async function initializeEditor() {
 
       function updateToolbarPosition(img) {
         if (!imageToolbar || !img) return;
+
+        if (!document.body.contains(imageToolbar)) {
+          document.body.appendChild(imageToolbar);
+        }
 
         imageToolbar.classList.add('show');
 
@@ -5071,7 +5130,7 @@ export async function initializeEditor() {
 
       function applyNoteHoverAnimationState(note, enabled, { persist = true } = {}) {
         if (!note) return false;
-        const shouldAnimate = enabled !== false;
+        const shouldAnimate = enabled === true;
         note.classList.toggle('floating-note-hover-animated', shouldAnimate);
         if (shouldAnimate) {
           note.dataset.hoverAnimation = 'true';
@@ -5091,6 +5150,30 @@ export async function initializeEditor() {
         if (!note) return false;
         const nextState = !note.classList.contains('floating-note-hover-animated');
         return applyNoteHoverAnimationState(note, nextState);
+      }
+
+      function applyFloatingNoteTextNeutralState(note, keepNeutral, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldKeepNeutral = keepNeutral === true;
+        note.classList.toggle('floating-note-text-neutral', shouldKeepNeutral);
+        if (shouldKeepNeutral) {
+          note.dataset.textNeutral = 'true';
+        } else {
+          delete note.dataset.textNeutral;
+        }
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { styleNeutralText: shouldKeepNeutral }, { silent: true });
+          }
+        }
+        return shouldKeepNeutral;
+      }
+
+      function toggleFloatingNoteNeutralText(note) {
+        if (!note) return false;
+        const nextState = note.dataset.textNeutral === 'true' ? false : true;
+        return applyFloatingNoteTextNeutralState(note, nextState);
       }
 
       function setNoteCustomIcon(note, symbol) {
@@ -5675,15 +5758,28 @@ export async function initializeEditor() {
 
         const resolvedHoverAnimation = (() => {
           if (data.hoverAnimation !== undefined) {
-            return data.hoverAnimation !== false;
+            return resolveBooleanFlag(data.hoverAnimation, false);
           }
           if (metaSource.hoverAnimation !== undefined) {
-            return metaSource.hoverAnimation !== false;
+            return resolveBooleanFlag(metaSource.hoverAnimation, false);
           }
           if (typeof data.meta?.hoverAnimation !== 'undefined') {
-            return data.meta.hoverAnimation !== false;
+            return resolveBooleanFlag(data.meta.hoverAnimation, false);
           }
-          return true;
+          return false;
+        })();
+
+        const resolvedNeutralText = (() => {
+          if (data.styleNeutralText !== undefined) {
+            return resolveBooleanFlag(data.styleNeutralText, false);
+          }
+          if (metaSource.styleNeutralText !== undefined) {
+            return resolveBooleanFlag(metaSource.styleNeutralText, false);
+          }
+          if (typeof data.meta?.styleNeutralText !== 'undefined') {
+            return resolveBooleanFlag(data.meta.styleNeutralText, false);
+          }
+          return false;
         })();
 
         const htmlContent = typeof data.html === 'string'
@@ -5798,12 +5894,14 @@ export async function initializeEditor() {
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
           hoverAnimation: resolvedHoverAnimation,
+          styleNeutralText: resolvedNeutralText,
           customIcon: resolvedCustomIcon
         });
         notesRegistry.set(noteId, noteData);
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
         applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
+        applyFloatingNoteTextNeutralState(note, resolvedNeutralText, { persist: false });
         if (resolvedCustomIcon) {
           note.dataset.customIcon = resolvedCustomIcon;
         } else {
@@ -5889,6 +5987,7 @@ export async function initializeEditor() {
         body.spellcheck = true;
         body.contentEditable = isEditMode ? 'true' : 'false';
         body.innerHTML = noteData.html || '';
+        markFloatingNoteImagesInitialized(body);
 
         body.addEventListener('focus', () => {
           bringNoteToFront(note);
@@ -5945,7 +6044,15 @@ export async function initializeEditor() {
             toInsert = escapeHtml(fallbackText).replace(/\r?\n/g, '<br>');
           }
           if (toInsert) {
+            const existingImages = new Set(body.querySelectorAll('img'));
             document.execCommand('insertHTML', false, toInsert);
+            requestAnimationFrame(() => {
+              const container = body;
+              const newImages = Array.from(container.querySelectorAll('img')).filter(img => !existingImages.has(img));
+              newImages.forEach(img => {
+                ensureFloatingNoteImageInitialSize(img, container);
+              });
+            });
           }
         });
 
@@ -6320,6 +6427,18 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
+        const neutralTextBtn = document.createElement('button');
+        neutralTextBtn.type = 'button';
+        neutralTextBtn.dataset.action = 'toggle-neutral-text';
+        neutralTextBtn.classList.add('note-neutral-text-toggle');
+        neutralTextBtn.textContent = '🖋️ Texto negro';
+        neutralTextBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleFloatingNoteNeutralText(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const hoverAnimationBtn = document.createElement('button');
         hoverAnimationBtn.type = 'button';
         hoverAnimationBtn.dataset.action = 'toggle-hover-animation';
@@ -6365,7 +6484,7 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(compactHeaderBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
 
         const deleteBtn = document.createElement('button');
@@ -6413,10 +6532,17 @@ export async function initializeEditor() {
         }
         const hoverBtn = menu.querySelector('button[data-action="toggle-hover-animation"]');
         if (hoverBtn) {
-          const isActive = noteData.hoverAnimation !== false;
+          const isActive = noteData.hoverAnimation === true;
           hoverBtn.textContent = isActive ? '✨ Animación activa' : '✨ Animación desactivada';
           hoverBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
           hoverBtn.classList.toggle('active', isActive);
+        }
+        const neutralBtn = menu.querySelector('button[data-action="toggle-neutral-text"]');
+        if (neutralBtn) {
+          const isNeutral = noteData.styleNeutralText === true;
+          neutralBtn.textContent = isNeutral ? '🖋️ Texto negro activo' : '🖋️ Texto del estilo';
+          neutralBtn.setAttribute('aria-pressed', isNeutral ? 'true' : 'false');
+          neutralBtn.classList.toggle('active', isNeutral);
         }
         const behindBtn = menu.querySelector('button[data-action="toggle-behind"]');
         if (behindBtn) {
@@ -6614,6 +6740,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = targetPage.html || '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6649,6 +6776,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6688,6 +6816,7 @@ export async function initializeEditor() {
         const body = note.querySelector('.floating-note-body');
         if (body) {
           body.innerHTML = activePage.html || '';
+          markFloatingNoteImagesInitialized(body);
           if (isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
@@ -6700,7 +6829,8 @@ export async function initializeEditor() {
         note.dataset.category = noteData.category || DEFAULT_NOTE_CATEGORY;
         note.dataset.priority = noteData.priority || DEFAULT_NOTE_PRIORITY;
         note.dataset.reviewed = noteData.reviewed ? 'true' : 'false';
-        applyNoteHoverAnimationState(note, noteData.hoverAnimation !== false, { persist: false });
+        applyNoteHoverAnimationState(note, noteData.hoverAnimation === true, { persist: false });
+        applyFloatingNoteTextNeutralState(note, noteData.styleNeutralText === true, { persist: false });
         if (noteData.topicId) {
           note.dataset.topicId = noteData.topicId;
         } else {
@@ -10963,7 +11093,8 @@ ${inlineStyles}
           noteExport.updatedAt = noteData.updatedAt || null;
           noteExport.compactHeader = !!noteData.compactHeader;
           noteExport.customIcon = noteData.customIcon || null;
-          noteExport.hoverAnimation = noteData.hoverAnimation !== false;
+          noteExport.hoverAnimation = noteData.hoverAnimation === true;
+          noteExport.styleNeutralText = noteData.styleNeutralText === true;
           if (Array.isArray(noteData.pages)) {
             noteExport.pages = noteData.pages.map(page => ({
               id: page.id,

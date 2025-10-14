@@ -17,6 +17,16 @@ import {
   escapeHtml
 } from './noteUtils.js';
 
+function normalizeBooleanFlag(value, defaultValue = false) {
+  if (value === true || value === 'true') {
+    return true;
+  }
+  if (value === false || value === 'false') {
+    return false;
+  }
+  return defaultValue;
+}
+
 function createNormalizedNotePage(rawPage = {}, {
   fallbackHtml = '',
   fallbackContent = ''
@@ -159,7 +169,8 @@ export function createEnhancedNote(options = {}) {
     type,
     category,
     style: (options.style && String(options.style)) || DEFAULT_NOTE_STYLE,
-    hoverAnimation: options.hoverAnimation === false ? false : true,
+    hoverAnimation: normalizeBooleanFlag(options.hoverAnimation, false),
+    styleNeutralText: normalizeBooleanFlag(options.styleNeutralText, false),
     title,
     titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
@@ -277,7 +288,9 @@ export class NoteRegistry {
         } else if (key === 'compactHeader') {
           merged.compactHeader = !!overrides.compactHeader;
         } else if (key === 'hoverAnimation') {
-          merged.hoverAnimation = overrides.hoverAnimation === false ? false : true;
+          merged.hoverAnimation = normalizeBooleanFlag(overrides.hoverAnimation, merged.hoverAnimation);
+        } else if (key === 'styleNeutralText') {
+          merged.styleNeutralText = normalizeBooleanFlag(overrides.styleNeutralText, merged.styleNeutralText);
         } else if (key === 'customIcon') {
           merged.customIcon = normalizeCustomIcon(overrides.customIcon);
         } else if (key === 'titleHtml') {

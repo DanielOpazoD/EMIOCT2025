@@ -3815,6 +3815,19 @@ body.reading-mode .floating-notes-layer {
   background: transparent;
 }
 
+.floating-note-text-neutral .floating-note-body {
+  color: #111827;
+}
+
+.floating-note-text-neutral .floating-note-body a {
+  color: #1d4ed8;
+}
+
+.floating-note-text-neutral .floating-note-body a:hover,
+.floating-note-text-neutral .floating-note-body a:focus {
+  color: #1e3a8a;
+}
+
 .floating-note-body[contenteditable="true"]:focus {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
