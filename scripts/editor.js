@@ -85,6 +85,31 @@ export async function initializeEditor() {
       ];
 
       const ICON_FEATURE_ENABLED = true;
+      const IMAGE_VIEWER_STORAGE_KEY = 'emi2025-image-viewer';
+      const IMAGE_VIEWER_ZOOM_MIN = 0.25;
+      const IMAGE_VIEWER_ZOOM_MAX = 4;
+      const IMAGE_VIEWER_ZOOM_STEP = 0.25;
+      const IMAGE_VIEWER_GLOBAL_CONTEXT = 'workspace';
+      const IMAGE_VIEWER_NOTE_PREFIX = 'note:';
+      const IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL = 'Colección privada';
+
+      let imageViewerState = {
+        images: [],
+        selectedImageId: null,
+        selectedImageIdByContext: {},
+        notesById: {}
+      };
+      let imageViewerContextKey = IMAGE_VIEWER_GLOBAL_CONTEXT;
+      let imageViewerContextLabel = IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL;
+      let imageViewerContextDomImages = [];
+      let imageViewerSequence = [];
+      let imageViewerActiveSequenceId = null;
+      let imageViewerPreviousShift = null;
+      let imageViewerActiveShift = null;
+      let imageViewerNotesSaveTimer = null;
+      let imageViewerZoom = 1;
+      let imageViewerPreviewSource = null;
+      let imageViewerCurrentToken = null;
 
       let floatingNotesHidden = false;
       let mainContentHidden = false;
@@ -371,6 +396,29 @@ export async function initializeEditor() {
       const imageCropCancelBtn = document.getElementById('imageCropCancelBtn');
       const imageCropCloseBtn = document.getElementById('imageCropCloseBtn');
       const imageCropSizeLabel = document.getElementById('imageCropSizeLabel');
+      const imageViewerBtn = document.getElementById('imageViewerBtn');
+      const imageViewerPanel = document.getElementById('imageViewerPanel');
+      const imageViewerAddImageBtn = document.getElementById('imageViewerAddImageBtn');
+      const imageViewerDownloadBtn = document.getElementById('imageViewerDownloadBtn');
+      const imageViewerCloseBtn = document.getElementById('imageViewerCloseBtn');
+      const imageViewerUploadInput = document.getElementById('imageViewerUploadInput');
+      const imageViewerActiveImage = document.getElementById('imageViewerActiveImage');
+      const imageViewerEmptyState = document.getElementById('imageViewerEmptyState');
+      const imageViewerFileName = document.getElementById('imageViewerFileName');
+      const imageViewerMeta = document.getElementById('imageViewerMeta');
+      const imageViewerNotes = document.getElementById('imageViewerNotes');
+      const imageViewerGallery = document.getElementById('imageViewerGallery');
+      const imageViewerRemoveBtn = document.getElementById('imageViewerRemoveBtn');
+      const imageViewerZoomOutBtn = document.getElementById('imageViewerZoomOutBtn');
+      const imageViewerZoomInBtn = document.getElementById('imageViewerZoomInBtn');
+      const imageViewerZoomResetBtn = document.getElementById('imageViewerZoomResetBtn');
+      const imageViewerZoomValue = document.getElementById('imageViewerZoomValue');
+      const imageViewerContextLabelEl = document.getElementById('imageViewerContextLabel');
+      const imageViewerStageSurface = imageViewerPanel?.querySelector('.image-viewer-stage-surface') || null;
+      const imageViewerPrevBtn = document.getElementById('imageViewerPrevBtn');
+      const imageViewerNextBtn = document.getElementById('imageViewerNextBtn');
+      const imageViewerNotesDefaultPlaceholder = imageViewerNotes ? imageViewerNotes.getAttribute('placeholder') || '' : '';
+      const imageViewerNotesPreviewPlaceholder = 'Notas disponibles solo para imágenes privadas.';
       const templateToolbar = document.getElementById('templateToolbar');
       const templateBgColorInput = document.getElementById('templateBgColor');
       const templateClearBgBtn = document.getElementById('templateClearBgBtn');
@@ -1921,6 +1969,1056 @@ export async function initializeEditor() {
         }
       }
 
+      function getDefaultImageViewerState() {
+        return {
+          images: [],
+          selectedImageId: null,
+          selectedImageIdByContext: {},
+          notesById: {}
+        };
+      }
+
+      function sanitizeViewerContextKey(rawKey) {
+        if (typeof rawKey !== 'string') {
+          return IMAGE_VIEWER_GLOBAL_CONTEXT;
+        }
+        const trimmed = rawKey.trim();
+        if (!trimmed) {
+          return IMAGE_VIEWER_GLOBAL_CONTEXT;
+        }
+        if (trimmed.startsWith(IMAGE_VIEWER_NOTE_PREFIX) || trimmed === IMAGE_VIEWER_GLOBAL_CONTEXT) {
+          return trimmed;
+        }
+        return trimmed;
+      }
+
+      function sanitizeViewerImages(images) {
+        if (!Array.isArray(images)) {
+          return [];
+        }
+        const unique = new Map();
+        images.forEach(image => {
+          if (!image || typeof image !== 'object') {
+            return;
+          }
+          const id = typeof image.id === 'string' ? image.id : '';
+          const dataUrl = typeof image.dataUrl === 'string' ? image.dataUrl : '';
+          if (!id || !dataUrl) {
+            return;
+          }
+          const contextKey = sanitizeViewerContextKey(image.contextKey);
+          unique.set(id, {
+            id,
+            contextKey,
+            dataUrl,
+            name: typeof image.name === 'string' && image.name ? image.name : 'imagen-sin-nombre',
+            size: Number.isFinite(image.size) ? image.size : 0,
+            type: typeof image.type === 'string' && image.type ? image.type : 'image/*',
+            createdAt: typeof image.createdAt === 'string' ? image.createdAt : new Date().toISOString(),
+            width: Number.isFinite(image.width) ? image.width : null,
+            height: Number.isFinite(image.height) ? image.height : null
+          });
+        });
+        return Array.from(unique.values());
+      }
+
+      function sanitizeImageViewerState(next) {
+        if (!next || typeof next !== 'object') {
+          return getDefaultImageViewerState();
+        }
+        const sanitizedImages = sanitizeViewerImages(next.images);
+        const notesById = {};
+        if (next.notesById && typeof next.notesById === 'object') {
+          Object.entries(next.notesById).forEach(([key, value]) => {
+            if (typeof value === 'string') {
+              notesById[key] = value;
+            }
+          });
+        }
+        const selectedImageIdByContext = {};
+        if (next.selectedImageIdByContext && typeof next.selectedImageIdByContext === 'object') {
+          Object.entries(next.selectedImageIdByContext).forEach(([rawKey, value]) => {
+            const contextKey = sanitizeViewerContextKey(rawKey);
+            if (!contextKey) {
+              return;
+            }
+            const id = typeof value === 'string' ? value : '';
+            if (id && sanitizedImages.some(image => image.id === id && image.contextKey === contextKey)) {
+              selectedImageIdByContext[contextKey] = id;
+            }
+          });
+        }
+        const fallbackSelected = typeof next.selectedImageId === 'string' ? next.selectedImageId : null;
+        if (fallbackSelected) {
+          const fallbackImage = sanitizedImages.find(image => image.id === fallbackSelected);
+          if (fallbackImage && !selectedImageIdByContext[fallbackImage.contextKey]) {
+            selectedImageIdByContext[fallbackImage.contextKey] = fallbackImage.id;
+          }
+        }
+        const defaultContextSelection = selectedImageIdByContext[IMAGE_VIEWER_GLOBAL_CONTEXT] || null;
+        return {
+          images: sanitizedImages,
+          selectedImageId: defaultContextSelection,
+          selectedImageIdByContext,
+          notesById
+        };
+      }
+
+      function loadImageViewerState() {
+        if (!window.localStorage) {
+          return getDefaultImageViewerState();
+        }
+        try {
+          const raw = window.localStorage.getItem(IMAGE_VIEWER_STORAGE_KEY);
+          if (!raw) {
+            return getDefaultImageViewerState();
+          }
+          const parsed = JSON.parse(raw);
+          return sanitizeImageViewerState(parsed);
+        } catch (error) {
+          console.warn('No se pudo cargar el estado del visor de imágenes:', error);
+          return getDefaultImageViewerState();
+        }
+      }
+
+      function persistImageViewerState() {
+        if (!window.localStorage) {
+          return;
+        }
+        try {
+          window.localStorage.setItem(IMAGE_VIEWER_STORAGE_KEY, JSON.stringify(imageViewerState));
+        } catch (error) {
+          console.warn('No se pudo guardar el estado del visor de imágenes:', error);
+        }
+      }
+
+      function setImageViewerState(updater, options = {}) {
+        const current = imageViewerState;
+        let next = typeof updater === 'function' ? updater(current) : updater;
+        if (next === current) {
+          next = { ...current };
+        }
+        imageViewerState = sanitizeImageViewerState({
+          images: next?.images ?? current.images,
+          selectedImageId: next?.selectedImageId ?? current.selectedImageId,
+          selectedImageIdByContext: next?.selectedImageIdByContext ?? current.selectedImageIdByContext,
+          notesById: next?.notesById ?? current.notesById
+        });
+        persistImageViewerState();
+        if (options.rerender !== false) {
+          renderImageViewer();
+        }
+      }
+
+      function getContextSelectedImageId(contextKey = imageViewerContextKey) {
+        const map = imageViewerState.selectedImageIdByContext || {};
+        const targetId = map[contextKey] || null;
+        if (!targetId) {
+          return null;
+        }
+        const hasImage = imageViewerState.images.some(image => image.id === targetId && image.contextKey === contextKey);
+        return hasImage ? targetId : null;
+      }
+
+      function setContextSelectedImageId(contextKey, imageId, options = {}) {
+        if (!contextKey) {
+          return;
+        }
+        setImageViewerState(state => {
+          const map = { ...(state.selectedImageIdByContext || {}) };
+          if (imageId) {
+            map[contextKey] = imageId;
+          } else {
+            delete map[contextKey];
+          }
+          const selectedImageId = contextKey === IMAGE_VIEWER_GLOBAL_CONTEXT
+            ? (imageId || null)
+            : (state.selectedImageId ?? null);
+          return {
+            images: state.images,
+            notesById: state.notesById,
+            selectedImageId,
+            selectedImageIdByContext: map
+          };
+        }, options);
+      }
+
+      function clearImageViewerPreview() {
+        imageViewerPreviewSource = null;
+      }
+
+      function getLibrarySequenceId(imageId) {
+        return imageId ? `library:${imageId}` : '';
+      }
+
+      function getDomSequenceId(domId) {
+        return domId ? `dom:${domId}` : '';
+      }
+
+      function getPreviewSequenceId(token) {
+        return token ? `preview:${token}` : '';
+      }
+
+      function ensureDomImageId(imgElement) {
+        if (!imgElement) {
+          return '';
+        }
+        if (!imgElement.dataset.viewerSourceId) {
+          imgElement.dataset.viewerSourceId = generateUniqueId('note-image');
+        }
+        return imgElement.dataset.viewerSourceId;
+      }
+
+      function collectDomImagesForNote(noteElement) {
+        if (!noteElement) {
+          return [];
+        }
+        const noteId = noteElement.dataset.noteId || '';
+        const contextKey = sanitizeViewerContextKey(noteId ? `${IMAGE_VIEWER_NOTE_PREFIX}${noteId}` : IMAGE_VIEWER_GLOBAL_CONTEXT);
+        const images = Array.from(noteElement.querySelectorAll('img'));
+        const seen = new Set();
+        const collected = images.map((img, index) => {
+          const src = img.currentSrc || img.src || '';
+          if (!src) {
+            return null;
+          }
+          const domId = ensureDomImageId(img);
+          if (!domId || seen.has(domId)) {
+            return null;
+          }
+          seen.add(domId);
+          const alt = (img.getAttribute('alt') || img.getAttribute('title') || '').trim();
+          const label = alt || `Imagen ${index + 1}`;
+          const width = Number.isFinite(img.naturalWidth) && img.naturalWidth > 0 ? img.naturalWidth : null;
+          const height = Number.isFinite(img.naturalHeight) && img.naturalHeight > 0 ? img.naturalHeight : null;
+          const mime = img.dataset?.mimeType ? String(img.dataset.mimeType) : (src.startsWith('data:image/') ? `image/${src.slice(11).split(';')[0]}` : '');
+          return {
+            id: domId,
+            sequenceId: getDomSequenceId(domId),
+            src,
+            dataUrl: src.startsWith('data:') ? src : '',
+            name: label,
+            alt: label,
+            width,
+            height,
+            size: null,
+            type: mime,
+            contextKey,
+            source: 'dom',
+            element: img
+          };
+        }).filter(Boolean);
+        return collected;
+      }
+
+      function deriveNoteContextLabel(noteElement) {
+        if (!noteElement) {
+          return 'Nota flotante';
+        }
+        const titleNode = noteElement.querySelector('.note-label');
+        const title = titleNode ? titleNode.textContent.trim() : '';
+        return title ? `Nota flotante · ${title}` : 'Nota flotante';
+      }
+
+      function activateImageViewerContext({
+        key = IMAGE_VIEWER_GLOBAL_CONTEXT,
+        label = IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL,
+        domImages = [],
+        activeSequenceId = null,
+        previewSource = undefined
+      } = {}) {
+        const sanitizedKey = sanitizeViewerContextKey(key);
+        imageViewerContextKey = sanitizedKey;
+        imageViewerContextLabel = label || (sanitizedKey === IMAGE_VIEWER_GLOBAL_CONTEXT ? IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL : label);
+        imageViewerContextDomImages = Array.isArray(domImages)
+          ? domImages.map(item => ({
+              ...item,
+              sequenceId: item.sequenceId || getDomSequenceId(item.id)
+            }))
+          : [];
+        if (previewSource !== undefined) {
+          imageViewerPreviewSource = previewSource;
+        }
+        if (typeof activeSequenceId === 'string' && activeSequenceId) {
+          imageViewerActiveSequenceId = activeSequenceId;
+        } else {
+          imageViewerActiveSequenceId = null;
+        }
+        imageViewerCurrentToken = null;
+      }
+
+      function getActiveViewerImage() {
+        if (!Array.isArray(imageViewerSequence) || !imageViewerSequence.length) {
+          if (imageViewerPreviewSource && (imageViewerPreviewSource.dataUrl || imageViewerPreviewSource.src)) {
+            return { ...imageViewerPreviewSource };
+          }
+          return null;
+        }
+        const active = imageViewerSequence.find(item => item.sequenceId === imageViewerActiveSequenceId)
+          || imageViewerSequence[0]
+          || null;
+        return active ? { ...active } : null;
+      }
+
+      function clampImageViewerZoom(value) {
+        if (!Number.isFinite(value)) {
+          return imageViewerZoom;
+        }
+        return Math.min(IMAGE_VIEWER_ZOOM_MAX, Math.max(IMAGE_VIEWER_ZOOM_MIN, value));
+      }
+
+      function applyImageViewerZoom() {
+        if (!imageViewerActiveImage) {
+          return;
+        }
+        const active = getActiveViewerImage();
+        if (!active) {
+          imageViewerActiveImage.style.transform = 'scale(1)';
+          return;
+        }
+        imageViewerActiveImage.style.transform = `scale(${imageViewerZoom})`;
+      }
+
+      function updateImageViewerZoomControls() {
+        const active = getActiveViewerImage();
+        const hasImage = !!active;
+        if (imageViewerZoomValue) {
+          if (hasImage) {
+            const percentage = Math.round(imageViewerZoom * 100);
+            imageViewerZoomValue.textContent = `${percentage}%`;
+          } else {
+            imageViewerZoomValue.textContent = '—';
+          }
+        }
+        const canZoomOut = hasImage && imageViewerZoom > IMAGE_VIEWER_ZOOM_MIN + 0.001;
+        const canZoomIn = hasImage && imageViewerZoom < IMAGE_VIEWER_ZOOM_MAX - 0.001;
+        const canReset = hasImage && Math.abs(imageViewerZoom - 1) > 0.001;
+        if (imageViewerZoomOutBtn) {
+          if (canZoomOut) {
+            imageViewerZoomOutBtn.removeAttribute('disabled');
+          } else {
+            imageViewerZoomOutBtn.setAttribute('disabled', 'true');
+          }
+        }
+        if (imageViewerZoomInBtn) {
+          if (canZoomIn) {
+            imageViewerZoomInBtn.removeAttribute('disabled');
+          } else {
+            imageViewerZoomInBtn.setAttribute('disabled', 'true');
+          }
+        }
+        if (imageViewerZoomResetBtn) {
+          if (canReset) {
+            imageViewerZoomResetBtn.removeAttribute('disabled');
+          } else {
+            imageViewerZoomResetBtn.setAttribute('disabled', 'true');
+          }
+        }
+      }
+
+      function setImageViewerZoom(value) {
+        if (!getActiveViewerImage()) {
+          imageViewerZoom = 1;
+          applyImageViewerZoom();
+          updateImageViewerZoomControls();
+          return;
+        }
+        const next = clampImageViewerZoom(value);
+        if (Math.abs(next - imageViewerZoom) < 0.001) {
+          updateImageViewerZoomControls();
+          return;
+        }
+        imageViewerZoom = next;
+        applyImageViewerZoom();
+        updateImageViewerZoomControls();
+      }
+
+      function adjustImageViewerZoom(delta) {
+        setImageViewerZoom(imageViewerZoom + delta);
+      }
+
+      function resetImageViewerZoom() {
+        imageViewerZoom = 1;
+        applyImageViewerZoom();
+        updateImageViewerZoomControls();
+      }
+
+      function computeImageViewerShift() {
+        const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+        if (!viewportWidth) {
+          return 0;
+        }
+        const panelWidth = imageViewerPanel ? imageViewerPanel.getBoundingClientRect().width : 0;
+        const effectiveWidth = panelWidth && Number.isFinite(panelWidth)
+          ? panelWidth
+          : viewportWidth * 0.48;
+        const desired = -Math.round(effectiveWidth * 0.65);
+        return Math.min(DOCUMENT_SHIFT_MAX, Math.max(DOCUMENT_SHIFT_MIN, desired));
+      }
+
+      function enforceImageViewerShift({ force = false } = {}) {
+        if (!imageViewerPanel?.classList.contains('open')) {
+          return;
+        }
+        const desired = computeImageViewerShift();
+        if (!force && imageViewerActiveShift !== null && Math.abs(documentHorizontalShift - imageViewerActiveShift) > 6) {
+          imageViewerActiveShift = documentHorizontalShift;
+          return;
+        }
+        imageViewerActiveShift = desired;
+        documentHorizontalShift = desired;
+        applyDocumentShift();
+        scheduleFloatingNotesViewportRefresh();
+      }
+
+      function openImageViewer() {
+        if (!imageViewerPanel) return;
+        if (imageViewerPanel.classList.contains('open')) {
+          enforceImageViewerShift({ force: true });
+          return;
+        }
+        imageViewerPreviousShift = documentHorizontalShift;
+        hideImageToolbar();
+        imageViewerPanel.classList.add('open');
+        imageViewerPanel.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('image-viewer-open');
+        enforceImageViewerShift({ force: true });
+        renderImageViewer();
+      }
+
+      function closeImageViewer({ restoreShift = true } = {}) {
+        if (!imageViewerPanel) return;
+        if (!imageViewerPanel.classList.contains('open')) {
+          return;
+        }
+        imageViewerPanel.classList.remove('open');
+        imageViewerPanel.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('image-viewer-open');
+        imageViewerActiveShift = null;
+        clearImageViewerPreview();
+        imageViewerCurrentToken = null;
+        resetImageViewerZoom();
+        if (restoreShift && imageViewerPreviousShift !== null) {
+          documentHorizontalShift = imageViewerPreviousShift;
+          applyDocumentShift();
+          scheduleFloatingNotesViewportRefresh();
+        }
+        imageViewerPreviousShift = null;
+      }
+
+      function toggleImageViewer(forceState = null) {
+        const shouldOpen = forceState === null ? !imageViewerPanel?.classList.contains('open') : !!forceState;
+        if (shouldOpen) {
+          openImageViewer();
+        } else {
+          closeImageViewer();
+        }
+      }
+
+      function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          if (!(file instanceof Blob)) {
+            reject(new Error('Archivo inválido'));
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror = () => reject(reader.error || new Error('No se pudo leer el archivo'));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function computeImageDimensions(dataUrl) {
+        return new Promise((resolve, reject) => {
+          if (!dataUrl) {
+            reject(new Error('Sin datos de imagen'));
+            return;
+          }
+          const image = new Image();
+          image.onload = () => {
+            const width = Number.isFinite(image.naturalWidth) ? image.naturalWidth : image.width;
+            const height = Number.isFinite(image.naturalHeight) ? image.naturalHeight : image.height;
+            resolve({
+              width: Number.isFinite(width) ? width : null,
+              height: Number.isFinite(height) ? height : null
+            });
+          };
+          image.onerror = () => reject(new Error('No se pudo calcular dimensiones'));
+          image.src = dataUrl;
+        });
+      }
+
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) {
+          return '';
+        }
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let value = bytes;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+          value /= 1024;
+          unitIndex += 1;
+        }
+        const formatted = unitIndex === 0 ? Math.round(value) : value < 10 ? value.toFixed(1) : Math.round(value);
+        return `${formatted} ${units[unitIndex]}`;
+      }
+
+      function updateImageViewerMetaDisplay(image) {
+        if (!imageViewerMeta) return;
+        if (!image) {
+          imageViewerMeta.textContent = '';
+          return;
+        }
+        const pieces = [];
+        if (Number.isFinite(image.size) && image.size > 0) {
+          pieces.push(formatBytes(image.size));
+        }
+        if (Number.isFinite(image.width) && Number.isFinite(image.height)) {
+          pieces.push(`${image.width} × ${image.height}px`);
+        }
+        imageViewerMeta.textContent = pieces.join(' · ');
+      }
+
+      function renderImageViewer() {
+        if (!imageViewerPanel) return;
+
+        const notesById = imageViewerState.notesById || {};
+        const contextImages = imageViewerState.images.filter(image => image.contextKey === imageViewerContextKey);
+        const selectedLibraryId = getContextSelectedImageId(imageViewerContextKey);
+
+        const libraryItems = contextImages.map(image => ({
+          ...image,
+          displaySrc: image.dataUrl,
+          source: 'library',
+          sequenceId: getLibrarySequenceId(image.id)
+        }));
+
+        const domItems = imageViewerContextDomImages.map(item => ({
+          ...item,
+          displaySrc: item.dataUrl || item.src,
+          source: 'dom',
+          sequenceId: item.sequenceId || getDomSequenceId(item.id)
+        }));
+
+        let previewItem = null;
+        if (imageViewerPreviewSource && (imageViewerPreviewSource.dataUrl || imageViewerPreviewSource.src)) {
+          const fallbackToken = imageViewerPreviewSource.id || imageViewerPreviewSource.src || generateUniqueId('preview');
+          const previewSequenceId = imageViewerPreviewSource.sequenceId || getPreviewSequenceId(fallbackToken);
+          previewItem = {
+            ...imageViewerPreviewSource,
+            displaySrc: imageViewerPreviewSource.dataUrl || imageViewerPreviewSource.src,
+            source: imageViewerPreviewSource.source || 'preview',
+            sequenceId: previewSequenceId
+          };
+          imageViewerPreviewSource = previewItem;
+        }
+
+        const sequence = [];
+        const seen = new Set();
+        const pushSequenceItem = (item) => {
+          if (!item) {
+            return;
+          }
+          if (!item.sequenceId) {
+            if (item.source === 'library' && item.id) {
+              item.sequenceId = getLibrarySequenceId(item.id);
+            } else if (item.source === 'dom' && item.id) {
+              item.sequenceId = getDomSequenceId(item.id);
+            } else {
+              item.sequenceId = getPreviewSequenceId(generateUniqueId('viewer-seq'));
+            }
+          }
+          if (seen.has(item.sequenceId)) {
+            return;
+          }
+          seen.add(item.sequenceId);
+          sequence.push(item);
+        };
+
+        domItems.forEach(pushSequenceItem);
+        libraryItems.forEach(pushSequenceItem);
+        if (previewItem) {
+          pushSequenceItem(previewItem);
+        }
+
+        imageViewerSequence = sequence;
+
+        const availableIds = new Set(sequence.map(item => item.sequenceId));
+        let desiredSequenceId = imageViewerActiveSequenceId;
+        if (desiredSequenceId && !availableIds.has(desiredSequenceId)) {
+          desiredSequenceId = null;
+        }
+        if (!desiredSequenceId) {
+          if (previewItem && availableIds.has(previewItem.sequenceId)) {
+            desiredSequenceId = previewItem.sequenceId;
+          } else if (selectedLibraryId) {
+            const sequenceId = getLibrarySequenceId(selectedLibraryId);
+            if (availableIds.has(sequenceId)) {
+              desiredSequenceId = sequenceId;
+            }
+          }
+        }
+        if (!desiredSequenceId && sequence.length) {
+          desiredSequenceId = sequence[0].sequenceId;
+        }
+        imageViewerActiveSequenceId = desiredSequenceId || null;
+
+        const active = getActiveViewerImage();
+        const isLibrary = active?.source === 'library';
+        const displaySrc = active?.displaySrc || active?.dataUrl || active?.src || '';
+        const displayLabel = active?.name || active?.alt || 'Imagen seleccionada en el visor';
+        const displayToken = active ? active.sequenceId : null;
+
+        if (displayToken !== imageViewerCurrentToken) {
+          imageViewerCurrentToken = displayToken;
+          resetImageViewerZoom();
+        } else {
+          applyImageViewerZoom();
+          updateImageViewerZoomControls();
+        }
+
+        if (imageViewerContextLabelEl) {
+          if (imageViewerContextLabel) {
+            imageViewerContextLabelEl.textContent = imageViewerContextLabel;
+            imageViewerContextLabelEl.hidden = false;
+          } else {
+            imageViewerContextLabelEl.textContent = '';
+            imageViewerContextLabelEl.hidden = true;
+          }
+        }
+
+        imageViewerPanel.classList.toggle('has-image', !!active);
+        imageViewerPanel.classList.toggle('viewer-preview-mode', !!active && !isLibrary);
+
+        if (!active) {
+          if (imageViewerActiveImage) {
+            imageViewerActiveImage.removeAttribute('src');
+            imageViewerActiveImage.alt = 'Imagen seleccionada en el visor';
+            imageViewerActiveImage.style.transform = 'scale(1)';
+          }
+          if (imageViewerFileName) {
+            imageViewerFileName.textContent = '';
+          }
+          updateImageViewerMetaDisplay(null);
+          if (imageViewerNotes) {
+            if (document.activeElement !== imageViewerNotes) {
+              imageViewerNotes.value = '';
+            }
+            imageViewerNotes.dataset.imageId = '';
+            imageViewerNotes.disabled = true;
+            imageViewerNotes.placeholder = imageViewerNotesDefaultPlaceholder;
+          }
+          imageViewerDownloadBtn?.setAttribute('disabled', 'true');
+          imageViewerRemoveBtn?.setAttribute('disabled', 'true');
+        } else {
+          if (imageViewerActiveImage) {
+            if (displaySrc && imageViewerActiveImage.src !== displaySrc) {
+              imageViewerActiveImage.src = displaySrc;
+            }
+            imageViewerActiveImage.alt = displayLabel;
+          }
+          if (imageViewerFileName) {
+            imageViewerFileName.textContent = active.name || 'Imagen sin título';
+          }
+          updateImageViewerMetaDisplay(active);
+
+          if (imageViewerNotes) {
+            if (isLibrary && active.id) {
+              const currentValue = typeof notesById?.[active.id] === 'string' ? notesById[active.id] : '';
+              if (imageViewerNotes.dataset.imageId !== active.id || document.activeElement !== imageViewerNotes) {
+                imageViewerNotes.value = currentValue;
+              }
+              imageViewerNotes.dataset.imageId = active.id;
+              imageViewerNotes.disabled = false;
+              imageViewerNotes.placeholder = imageViewerNotesDefaultPlaceholder;
+            } else {
+              if (document.activeElement !== imageViewerNotes) {
+                imageViewerNotes.value = '';
+              }
+              imageViewerNotes.dataset.imageId = '';
+              imageViewerNotes.disabled = true;
+              imageViewerNotes.placeholder = imageViewerNotesPreviewPlaceholder;
+            }
+          }
+
+          if (displaySrc) {
+            imageViewerDownloadBtn?.removeAttribute('disabled');
+          } else {
+            imageViewerDownloadBtn?.setAttribute('disabled', 'true');
+          }
+
+          if (isLibrary) {
+            imageViewerRemoveBtn?.removeAttribute('disabled');
+          } else {
+            imageViewerRemoveBtn?.setAttribute('disabled', 'true');
+          }
+        }
+
+        if (imageViewerGallery) {
+          imageViewerGallery.innerHTML = '';
+          if (libraryItems.length) {
+            const fragment = document.createDocumentFragment();
+            libraryItems.forEach(item => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'image-viewer-thumb';
+              if (isLibrary && active && item.id === active.id) {
+                button.classList.add('active');
+              }
+              button.dataset.imageId = item.id;
+              button.dataset.sequenceId = item.sequenceId;
+              const thumb = document.createElement('img');
+              thumb.src = item.displaySrc || item.dataUrl;
+              thumb.alt = item.name || 'Imagen';
+              button.appendChild(thumb);
+              fragment.appendChild(button);
+            });
+            imageViewerGallery.appendChild(fragment);
+          }
+        }
+
+        updateImageViewerNavAvailability();
+        updateImageViewerZoomControls();
+      }
+
+      function getActiveSequenceIndex() {
+        if (!Array.isArray(imageViewerSequence) || !imageViewerSequence.length) {
+          return -1;
+        }
+        return imageViewerSequence.findIndex(item => item.sequenceId === imageViewerActiveSequenceId);
+      }
+
+      function updateImageViewerNavAvailability() {
+        if (!imageViewerPrevBtn && !imageViewerNextBtn) {
+          return;
+        }
+        const count = Array.isArray(imageViewerSequence) ? imageViewerSequence.length : 0;
+        const index = getActiveSequenceIndex();
+        const hasPrev = count > 1 && index > 0;
+        const hasNext = count > 1 && index >= 0 && index < count - 1;
+        if (imageViewerPrevBtn) {
+          if (hasPrev) {
+            imageViewerPrevBtn.removeAttribute('disabled');
+          } else {
+            imageViewerPrevBtn.setAttribute('disabled', 'true');
+          }
+        }
+        if (imageViewerNextBtn) {
+          if (hasNext) {
+            imageViewerNextBtn.removeAttribute('disabled');
+          } else {
+            imageViewerNextBtn.setAttribute('disabled', 'true');
+          }
+        }
+      }
+
+      function activateSequenceAt(index) {
+        if (!Array.isArray(imageViewerSequence) || !imageViewerSequence.length) {
+          return;
+        }
+        if (index < 0 || index >= imageViewerSequence.length) {
+          return;
+        }
+        const item = imageViewerSequence[index];
+        if (!item) {
+          return;
+        }
+        imageViewerActiveSequenceId = item.sequenceId;
+        if (item.source === 'library' && item.id) {
+          setContextSelectedImageId(imageViewerContextKey, item.id, { rerender: false });
+          clearImageViewerPreview();
+        } else if (item.source === 'dom' || item.source === 'preview') {
+          imageViewerPreviewSource = { ...item };
+        }
+        imageViewerCurrentToken = null;
+        renderImageViewer();
+      }
+
+      function handleImageViewerPrev() {
+        const index = getActiveSequenceIndex();
+        if (index > 0) {
+          activateSequenceAt(index - 1);
+        }
+      }
+
+      function handleImageViewerNext() {
+        const index = getActiveSequenceIndex();
+        if (index >= 0 && index < imageViewerSequence.length - 1) {
+          activateSequenceAt(index + 1);
+        }
+      }
+
+      async function handleImageViewerFiles(fileList) {
+        const contextKey = imageViewerContextKey;
+        const files = Array.from(fileList || []).filter(file => file && (!file.type || file.type.startsWith('image/')));
+        if (!files.length) {
+          return;
+        }
+        const additions = [];
+        for (const file of files) {
+          try {
+            const dataUrl = await readFileAsDataUrl(file);
+            if (!dataUrl) {
+              continue;
+            }
+            const id = generateUniqueId('viewer-image');
+            const entry = {
+              id,
+              dataUrl,
+              name: file.name || 'imagen',
+              size: Number.isFinite(file.size) ? file.size : 0,
+              type: file.type || 'image/*',
+              createdAt: new Date().toISOString(),
+              width: null,
+              height: null,
+              contextKey
+            };
+            additions.push(entry);
+            computeImageDimensions(dataUrl)
+              .then(dimensions => {
+                if (!dimensions) return;
+                setImageViewerState(state => {
+                  if (!state.images.some(img => img.id === id)) {
+                    return state;
+                  }
+                  const updatedImages = state.images.map(img => img.id === id ? { ...img, ...dimensions } : img);
+                  return {
+                    images: updatedImages,
+                    selectedImageId: state.selectedImageId,
+                    selectedImageIdByContext: state.selectedImageIdByContext,
+                    notesById: state.notesById
+                  };
+                }, { rerender: true });
+              })
+              .catch(() => {});
+          } catch (error) {
+            console.warn('No se pudo procesar la imagen seleccionada:', error);
+          }
+        }
+        if (!additions.length) {
+          return;
+        }
+        const newestId = additions[additions.length - 1].id;
+        clearImageViewerPreview();
+        imageViewerCurrentToken = null;
+        imageViewerActiveSequenceId = getLibrarySequenceId(newestId);
+        setImageViewerState(state => {
+          const nextImages = [...state.images, ...additions];
+          const nextNotes = { ...state.notesById };
+          const nextSelections = { ...(state.selectedImageIdByContext || {}) };
+          nextSelections[contextKey] = newestId;
+          return {
+            images: nextImages,
+            selectedImageId: contextKey === IMAGE_VIEWER_GLOBAL_CONTEXT ? newestId : state.selectedImageId,
+            selectedImageIdByContext: nextSelections,
+            notesById: nextNotes
+          };
+        });
+        if (!imageViewerPanel?.classList.contains('open')) {
+          openImageViewer();
+        }
+      }
+
+      function handleImageViewerDownload() {
+        const active = getActiveViewerImage();
+        if (!active) {
+          return;
+        }
+        const href = active.dataUrl || active.src;
+        if (!href) {
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = href;
+        let extension = 'png';
+        if (active.type && active.type.includes('/')) {
+          extension = active.type.split('/')[1];
+        } else if (href.startsWith('data:image/')) {
+          const match = href.slice(0, 32).match(/^data:image\/([^;]+)/i);
+          if (match && match[1]) {
+            extension = match[1];
+          }
+        } else {
+          const sanitized = href.split('?')[0].split('#')[0];
+          const pathParts = sanitized.split('/');
+          const lastSegment = pathParts[pathParts.length - 1] || '';
+          const extMatch = lastSegment.match(/\.([a-z0-9]{2,5})$/i);
+          if (extMatch && extMatch[1]) {
+            extension = extMatch[1];
+          }
+        }
+        const nameCandidate = (active.name || active.alt || 'imagen').trim();
+        const safeName = nameCandidate ? nameCandidate.replace(/[^a-zA-Z0-9._-]+/g, '_') : 'imagen';
+        link.download = safeName.includes('.') ? safeName : `${safeName}.${extension}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      function handleImageViewerRemove() {
+        const active = getActiveViewerImage();
+        if (!active || active.source !== 'library' || !active.id) {
+          return;
+        }
+        const targetId = active.id;
+        const contextKey = imageViewerContextKey;
+        clearImageViewerPreview();
+        imageViewerCurrentToken = null;
+        setImageViewerState(state => {
+          const nextImages = state.images.filter(image => image.id !== targetId);
+          const nextNotes = { ...state.notesById };
+          delete nextNotes[targetId];
+          const nextSelections = { ...(state.selectedImageIdByContext || {}) };
+          if (nextSelections[contextKey] === targetId) {
+            const remaining = nextImages.filter(image => image.contextKey === contextKey);
+            if (remaining.length) {
+              nextSelections[contextKey] = remaining[remaining.length - 1].id;
+            } else {
+              delete nextSelections[contextKey];
+            }
+          }
+          const resolvedSelectedId = contextKey === IMAGE_VIEWER_GLOBAL_CONTEXT
+            ? (nextSelections[contextKey] || null)
+            : state.selectedImageId;
+          return {
+            images: nextImages,
+            selectedImageId: resolvedSelectedId,
+            selectedImageIdByContext: nextSelections,
+            notesById: nextNotes
+          };
+        });
+      }
+
+      function previewImageFromElement(imgElement) {
+        if (!imgElement) {
+          return;
+        }
+        const src = imgElement.currentSrc || imgElement.src;
+        if (!src) {
+          return;
+        }
+        const alt = (imgElement.getAttribute('alt') || '').trim();
+        const title = (imgElement.getAttribute('title') || '').trim();
+        const label = alt || title || 'Imagen del documento';
+        let type = '';
+        if (src.startsWith('data:image/')) {
+          const match = src.slice(0, 32).match(/^data:image\/([^;]+)/i);
+          if (match && match[1]) {
+            type = `image/${match[1]}`;
+          }
+        } else if (imgElement.dataset && imgElement.dataset.mimeType) {
+          type = imgElement.dataset.mimeType;
+        }
+        const width = Number.isFinite(imgElement.naturalWidth) && imgElement.naturalWidth > 0
+          ? imgElement.naturalWidth
+          : null;
+        const height = Number.isFinite(imgElement.naturalHeight) && imgElement.naturalHeight > 0
+          ? imgElement.naturalHeight
+          : null;
+        const noteElement = imgElement.closest('.floating-note');
+        let contextKey = IMAGE_VIEWER_GLOBAL_CONTEXT;
+        let contextLabel = IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL;
+        let domImages = [];
+        let activeSequenceId = null;
+        let previewSource = undefined;
+
+        if (noteElement) {
+          const noteId = noteElement.dataset.noteId || '';
+          if (noteId) {
+            contextKey = sanitizeViewerContextKey(`${IMAGE_VIEWER_NOTE_PREFIX}${noteId}`);
+          }
+          contextLabel = deriveNoteContextLabel(noteElement);
+          domImages = collectDomImagesForNote(noteElement);
+          const domId = ensureDomImageId(imgElement);
+          const domMatch = domImages.find(item => item.id === domId) || null;
+          if (domMatch) {
+            activeSequenceId = domMatch.sequenceId;
+            previewSource = null;
+          }
+        }
+
+        if (!activeSequenceId) {
+          const previewId = ensureDomImageId(imgElement) || generateUniqueId('preview-image');
+          const previewSequenceId = getPreviewSequenceId(previewId || src);
+          previewSource = {
+            id: previewId,
+            src,
+            dataUrl: src.startsWith('data:') ? src : '',
+            name: label,
+            alt: label,
+            width,
+            height,
+            size: null,
+            type,
+            createdAt: new Date().toISOString(),
+            source: 'preview',
+            sequenceId: previewSequenceId
+          };
+          activeSequenceId = previewSequenceId;
+        }
+
+        hideImageToolbar();
+        const wasOpen = imageViewerPanel?.classList.contains('open');
+        activateImageViewerContext({
+          key: contextKey,
+          label: contextLabel,
+          domImages,
+          activeSequenceId,
+          previewSource
+        });
+        openImageViewer();
+        if (wasOpen) {
+          renderImageViewer();
+        }
+      }
+
+      function handleImageViewerSelect(event) {
+        const button = event.target.closest('.image-viewer-thumb');
+        if (!button || !imageViewerGallery?.contains(button)) {
+          return;
+        }
+        event.preventDefault();
+        const id = button.dataset.imageId || '';
+        const sequenceId = button.dataset.sequenceId || getLibrarySequenceId(id);
+        if (!id) {
+          return;
+        }
+        const contextKey = imageViewerContextKey;
+        const currentSelected = getContextSelectedImageId(contextKey);
+        if (currentSelected === id && imageViewerActiveSequenceId === sequenceId) {
+          return;
+        }
+        clearImageViewerPreview();
+        imageViewerActiveSequenceId = sequenceId;
+        setContextSelectedImageId(contextKey, id, { rerender: false });
+        imageViewerCurrentToken = null;
+        renderImageViewer();
+      }
+
+      function handleImageViewerNotesInput() {
+        if (!imageViewerNotes) {
+          return;
+        }
+        const targetId = imageViewerNotes.dataset.imageId;
+        if (!targetId) {
+          return;
+        }
+        const value = imageViewerNotes.value;
+        if (imageViewerNotesSaveTimer) {
+          clearTimeout(imageViewerNotesSaveTimer);
+        }
+        imageViewerNotesSaveTimer = setTimeout(() => {
+          imageViewerState = {
+            ...imageViewerState,
+            notesById: {
+              ...imageViewerState.notesById,
+              [targetId]: value
+            }
+          };
+          persistImageViewerState();
+        }, 250);
+      }
+
       function updateZoom(delta) {
         applyZoom(currentZoom + delta);
       }
@@ -1931,6 +3029,165 @@ export async function initializeEditor() {
       zoomOutBtn?.addEventListener('click', () => updateZoom(-0.1));
       shiftLeftBtn?.addEventListener('click', () => adjustDocumentShift(-DOCUMENT_SHIFT_STEP));
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
+
+      imageViewerState = loadImageViewerState();
+      renderImageViewer();
+      updateImageViewerZoomControls();
+
+      imageViewerState.images.forEach(image => {
+        if (!image || !image.dataUrl) {
+          return;
+        }
+        if (Number.isFinite(image.width) && Number.isFinite(image.height)) {
+          return;
+        }
+        computeImageDimensions(image.dataUrl)
+          .then(dimensions => {
+            if (!dimensions) {
+              return;
+            }
+            setImageViewerState(state => {
+              if (!state.images.some(img => img.id === image.id)) {
+                return state;
+              }
+              const updatedImages = state.images.map(img => img.id === image.id ? { ...img, ...dimensions } : img);
+              return {
+                images: updatedImages,
+                selectedImageId: state.selectedImageId,
+                selectedImageIdByContext: state.selectedImageIdByContext,
+                notesById: state.notesById
+              };
+            }, { rerender: image.id === imageViewerState.selectedImageId });
+          })
+          .catch(() => {});
+      });
+
+      if (imageViewerActiveImage) {
+        imageViewerActiveImage.addEventListener('load', () => {
+          applyImageViewerZoom();
+          const width = Number.isFinite(imageViewerActiveImage.naturalWidth) ? imageViewerActiveImage.naturalWidth : null;
+          const height = Number.isFinite(imageViewerActiveImage.naturalHeight) ? imageViewerActiveImage.naturalHeight : null;
+          const active = getActiveViewerImage();
+          if (!active) {
+            updateImageViewerMetaDisplay(null);
+            return;
+          }
+          if (active.source === 'library' && active.id) {
+            if (Number.isFinite(width) || Number.isFinite(height)) {
+              setImageViewerState(state => {
+                if (!state.images.some(img => img.id === active.id)) {
+                  return state;
+                }
+                const updatedImages = state.images.map(img => img.id === active.id ? { ...img, width, height } : img);
+                return {
+                  images: updatedImages,
+                  selectedImageId: state.selectedImageId,
+                  selectedImageIdByContext: state.selectedImageIdByContext,
+                  notesById: state.notesById
+                };
+              }, { rerender: false });
+              const refreshed = imageViewerState.images.find(img => img.id === active.id);
+              updateImageViewerMetaDisplay(refreshed ? { ...refreshed, width, height } : { width, height, size: 0 });
+            } else {
+              const existing = imageViewerState.images.find(img => img.id === active.id) || null;
+              updateImageViewerMetaDisplay(existing);
+            }
+          } else if (active.source !== 'library') {
+            const resolvedWidth = Number.isFinite(width) ? width : active.width;
+            const resolvedHeight = Number.isFinite(height) ? height : active.height;
+            if (active.source === 'preview' && imageViewerPreviewSource) {
+              imageViewerPreviewSource = {
+                ...imageViewerPreviewSource,
+                width: resolvedWidth,
+                height: resolvedHeight
+              };
+              updateImageViewerMetaDisplay(imageViewerPreviewSource);
+            } else {
+              updateImageViewerMetaDisplay({ ...active, width: resolvedWidth, height: resolvedHeight });
+            }
+          }
+        });
+      }
+
+      imageViewerBtn?.addEventListener('click', () => {
+        const isOpen = imageViewerPanel?.classList.contains('open');
+        if (!isOpen) {
+          const defaultSelected = getContextSelectedImageId(IMAGE_VIEWER_GLOBAL_CONTEXT);
+          activateImageViewerContext({
+            key: IMAGE_VIEWER_GLOBAL_CONTEXT,
+            label: IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL,
+            domImages: [],
+            activeSequenceId: defaultSelected ? getLibrarySequenceId(defaultSelected) : null,
+            previewSource: null
+          });
+          openImageViewer();
+          return;
+        }
+        if (imageViewerContextKey !== IMAGE_VIEWER_GLOBAL_CONTEXT) {
+          const defaultSelected = getContextSelectedImageId(IMAGE_VIEWER_GLOBAL_CONTEXT);
+          activateImageViewerContext({
+            key: IMAGE_VIEWER_GLOBAL_CONTEXT,
+            label: IMAGE_VIEWER_DEFAULT_CONTEXT_LABEL,
+            domImages: [],
+            activeSequenceId: defaultSelected ? getLibrarySequenceId(defaultSelected) : null,
+            previewSource: null
+          });
+          renderImageViewer();
+          return;
+        }
+        closeImageViewer();
+      });
+      imageViewerCloseBtn?.addEventListener('click', () => closeImageViewer());
+      imageViewerAddImageBtn?.addEventListener('click', () => imageViewerUploadInput?.click());
+      imageViewerDownloadBtn?.addEventListener('click', handleImageViewerDownload);
+      imageViewerRemoveBtn?.addEventListener('click', handleImageViewerRemove);
+      imageViewerGallery?.addEventListener('click', handleImageViewerSelect);
+      imageViewerNotes?.addEventListener('input', handleImageViewerNotesInput);
+      imageViewerUploadInput?.addEventListener('change', async (event) => {
+        try {
+          await handleImageViewerFiles(event.target?.files || []);
+        } catch (error) {
+          console.warn('No se pudieron cargar algunas imágenes:', error);
+        } finally {
+          if (imageViewerUploadInput) {
+            imageViewerUploadInput.value = '';
+          }
+        }
+      });
+      imageViewerPrevBtn?.addEventListener('click', handleImageViewerPrev);
+      imageViewerNextBtn?.addEventListener('click', handleImageViewerNext);
+      imageViewerZoomOutBtn?.addEventListener('click', () => adjustImageViewerZoom(-IMAGE_VIEWER_ZOOM_STEP));
+      imageViewerZoomInBtn?.addEventListener('click', () => adjustImageViewerZoom(IMAGE_VIEWER_ZOOM_STEP));
+      imageViewerZoomResetBtn?.addEventListener('click', () => resetImageViewerZoom());
+
+      if (imageViewerStageSurface) {
+        imageViewerStageSurface.addEventListener('wheel', (event) => {
+          if (!event.metaKey && !event.ctrlKey) {
+            return;
+          }
+          event.preventDefault();
+          const delta = event.deltaY < 0 ? IMAGE_VIEWER_ZOOM_STEP : -IMAGE_VIEWER_ZOOM_STEP;
+          adjustImageViewerZoom(delta);
+        }, { passive: false });
+      }
+
+      window.addEventListener('resize', () => enforceImageViewerShift({ force: false }));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && imageViewerPanel?.classList.contains('open')) {
+          closeImageViewer();
+        }
+      });
+
+      document.addEventListener('dblclick', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLImageElement)) {
+          return;
+        }
+        if (target.closest('#imageViewerPanel') || target.closest('#imageToolbar') || target.closest('.topbar') || target.closest('.edit-toolbar')) {
+          return;
+        }
+        previewImageFromElement(target);
+      });
 
       /* === UTILIDADES === */
       function isNodeInDocument(node) {
@@ -4987,8 +6244,12 @@ export async function initializeEditor() {
 
       document.addEventListener('click', (e) => {
         if (isEditMode && e.target.tagName === 'IMG') {
-          e.preventDefault();
-          showImageToolbar(e.target);
+          if (document.body.classList.contains('image-viewer-open')) {
+            hideImageToolbar();
+          } else {
+            e.preventDefault();
+            showImageToolbar(e.target);
+          }
         } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
           hideImageToolbar();
         }
@@ -5788,6 +7049,57 @@ export async function initializeEditor() {
         });
       }
 
+      function isPointerInNoteLeftCorner(note, clientX, clientY) {
+        if (!note) {
+          return false;
+        }
+        const category = note.querySelector('.note-category');
+        if (!category) {
+          return false;
+        }
+        const rect = category.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      }
+
+      function shouldUseFloatingNoteDragHandle(note, event) {
+        if (!note || !event) {
+          return false;
+        }
+        if (event.button !== 0 || event.detail > 1) {
+          return false;
+        }
+        const target = event.target;
+        if (target.closest('button') || target.closest('.floating-note-style-menu') || target.closest('.floating-note-resize-handle')) {
+          return false;
+        }
+        if (target.closest('.note-category')) {
+          return false;
+        }
+        const noteRect = note.getBoundingClientRect();
+        const pointerY = event.clientY;
+        const pointerX = event.clientX;
+        const topEdgeLimit = note.classList.contains('floating-note-ultra-compact') ? 22 : 32;
+        const isWithinHeader = !!target.closest('.floating-note-header');
+        const isWithinTopEdge = pointerY >= noteRect.top - 2 && pointerY <= noteRect.top + topEdgeLimit;
+        if (!isWithinHeader && !isWithinTopEdge) {
+          return false;
+        }
+        if (isPointerInNoteLeftCorner(note, pointerX, pointerY)) {
+          return false;
+        }
+        return true;
+      }
+
+      function tryBeginFloatingNoteDrag(note, event, menu = null) {
+        if (!shouldUseFloatingNoteDragHandle(note, event)) {
+          return false;
+        }
+        bringNoteToFront(note);
+        closeFloatingNoteStyleMenu(menu || null);
+        startFloatingNoteDrag(note, event);
+        return true;
+      }
+
       function startFloatingNoteDrag(note, event) {
         if (!note || !floatingNotesLayer) return;
         floatingNoteDragState.note = note;
@@ -6510,11 +7822,9 @@ export async function initializeEditor() {
         });
 
         header.addEventListener('pointerdown', (event) => {
-          if (event.button !== 0) return;
-          if (event.detail > 1) return;
-          if (event.target.closest('button') || event.target.closest('.floating-note-style-menu') || event.target.closest('.note-category')) return;
-          closeFloatingNoteStyleMenu(optionsMenu);
-          startFloatingNoteDrag(note, event);
+          if (tryBeginFloatingNoteDrag(note, event, optionsMenu)) {
+            event.stopPropagation();
+          }
         });
 
         header.addEventListener('dblclick', (event) => {
@@ -6531,6 +7841,9 @@ export async function initializeEditor() {
 
         note.addEventListener('pointerdown', (event) => {
           if (event.target.closest('.floating-note-style-menu')) {
+            return;
+          }
+          if (tryBeginFloatingNoteDrag(note, event, optionsMenu)) {
             return;
           }
           bringNoteToFront(note);
