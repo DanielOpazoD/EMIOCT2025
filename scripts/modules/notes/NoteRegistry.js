@@ -6,7 +6,9 @@ import {
   DEFAULT_NOTE_PRIORITY,
   DEFAULT_NOTE_CATEGORY,
   DEFAULT_NOTE_TYPE,
-  DEFAULT_NOTE_STYLE
+  DEFAULT_NOTE_STYLE,
+  SUPER_NOTE_DEFAULT_TAB_COLOR,
+  SUPER_NOTE_TAB_TITLE_MAX_LENGTH
 } from './noteConstants.js';
 import {
   normalizePriority,
@@ -71,9 +73,7 @@ function normalizeNotePages(pagesInput, options = {}) {
   return normalized;
 }
 
-const DEFAULT_SUPER_TAB_COLOR = '#334155';
-
-function normalizeTabColor(value, fallback = DEFAULT_SUPER_TAB_COLOR) {
+function normalizeTabColor(value, fallback = SUPER_NOTE_DEFAULT_TAB_COLOR) {
   if (typeof value !== 'string') {
     return fallback;
   }
@@ -97,13 +97,21 @@ function createNormalizedSuperTab(rawTab = {}, options = {}, seenTabIds = new Se
   currentIndex = Math.min(Math.max(currentIndex, 0), pages.length - 1);
   const activePage = pages[currentIndex] || pages[0];
 
-  const title = typeof base.title === 'string' ? base.title.trim() : '';
+  const rawTitle = typeof base.title === 'string' ? base.title : '';
+  const trimmedTitle = rawTitle.trim();
+  const hasOverflowFlag = base.titleOverflow === true || base.titleOverflow === 'true';
+  const overflow = hasOverflowFlag || trimmedTitle.length > SUPER_NOTE_TAB_TITLE_MAX_LENGTH;
+  const normalizedTitle = overflow
+    ? trimmedTitle.slice(0, Math.max(SUPER_NOTE_TAB_TITLE_MAX_LENGTH, 0))
+    : trimmedTitle.slice(0, Math.max(SUPER_NOTE_TAB_TITLE_MAX_LENGTH, 0));
+  const storedTitle = normalizedTitle.length ? normalizedTitle : null;
   const createdAt = base.createdAt ? String(base.createdAt) : new Date().toISOString();
   const updatedAt = base.updatedAt ? String(base.updatedAt) : createdAt;
 
   return {
     id,
-    title: title.length ? title : null,
+    title: storedTitle,
+    titleOverflow: overflow,
     color: normalizeTabColor(base.color),
     pages,
     currentPageIndex: currentIndex,
@@ -213,7 +221,7 @@ function applySuperNoteState(note, overrides = {}) {
     initialIndex = Math.min(Math.max(initialIndex, 0), Math.max(fallbackPages.length - 1, 0));
     const fallbackTab = createNormalizedSuperTab({
       title: note.title || null,
-      color: DEFAULT_SUPER_TAB_COLOR,
+      color: SUPER_NOTE_DEFAULT_TAB_COLOR,
       pages: fallbackPages,
       currentPageIndex: initialIndex
     }, { fallbackHtml, fallbackContent });

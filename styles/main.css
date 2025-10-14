@@ -4401,6 +4401,11 @@ body.pages-hidden .floating-note-behind:focus-within {
   padding: 0 4px;
 }
 
+.floating-note.super-note.floating-note-compact-header .note-navigation {
+  margin-left: auto;
+  margin-right: 0;
+}
+
 .floating-note-compact-header .note-navigation .note-nav-btn {
   padding: 2px 6px;
   border-radius: 4px;
@@ -4624,12 +4629,30 @@ body.pages-hidden .floating-note-behind:focus-within {
   display: none !important;
 }
 
+
 .super-note-tab-bar {
   display: flex;
   align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 10px;
   padding: 6px 10px 0;
+}
+
+.super-note-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+.super-note-tab-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 24px;
 }
 
 .super-note-tab {
@@ -4638,31 +4661,55 @@ body.pages-hidden .floating-note-behind:focus-within {
   align-items: center;
   gap: 6px;
   border-radius: 10px 10px 0 0;
-  border: 1px solid rgba(51, 65, 85, 0.35);
-  border: 1px solid color-mix(in srgb, var(--super-tab-color-value) 35%, #000000 8%);
-  background: rgba(51, 65, 85, 0.12);
-  background: color-mix(in srgb, var(--super-tab-color-value) 15%, #ffffff);
-  color: #334155;
+  border: 1px solid color-mix(in srgb, var(--super-tab-color-value) 30%, #000000 6%);
+  background: color-mix(in srgb, var(--super-tab-color-value) 14%, #ffffff);
   color: color-mix(in srgb, var(--super-tab-color-value) 80%, #0f172a);
-  padding: 4px 12px;
+  padding: 4px 10px;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  position: relative;
 }
 
 .super-note-tab:hover {
-  background: rgba(51, 65, 85, 0.18);
-  background: color-mix(in srgb, var(--super-tab-color-value) 22%, #ffffff);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+  background: color-mix(in srgb, var(--super-tab-color-value) 20%, #ffffff);
+  border-color: color-mix(in srgb, var(--super-tab-color-value) 38%, #000000 10%);
 }
 
 .super-note-tab.active {
-  background: rgba(51, 65, 85, 0.24);
-  background: color-mix(in srgb, var(--super-tab-color-value) 32%, #ffffff);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
-  color: #1f2937;
+  background: color-mix(in srgb, var(--super-tab-color-value) 30%, #ffffff);
+  border-color: color-mix(in srgb, var(--super-tab-color-value) 45%, #000000 12%);
   color: color-mix(in srgb, var(--super-tab-color-value) 92%, #0f172a);
+}
+
+.super-note-tab[data-editing="true"] {
+  cursor: text;
+  background: color-mix(in srgb, var(--super-tab-color-value) 18%, #ffffff);
+  border-style: dashed;
+}
+
+.super-note-tab.super-note-tab-coloring {
+  border-color: color-mix(in srgb, var(--super-tab-color-value) 50%, #2563eb 35%);
+}
+
+.super-note-tab-title {
+  display: inline-block;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.super-note-tab-title[contenteditable="true"] {
+  cursor: text;
+}
+
+.super-note-tab-title[contenteditable="true"]:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.45);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 1px 2px;
 }
 
 .super-note-tab-color-indicator {
@@ -4671,6 +4718,11 @@ body.pages-hidden .floating-note-behind:focus-within {
   border-radius: 999px;
   background: var(--super-tab-color-value);
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+  cursor: pointer;
+}
+
+.super-note-tab.super-note-tab-coloring .super-note-tab-color-indicator {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.5);
 }
 
 .super-note-tab-remove {
@@ -4692,29 +4744,94 @@ body.pages-hidden .floating-note-behind:focus-within {
 }
 
 .super-note-tab-add {
-  border: 1px dashed rgba(15, 23, 42, 0.25);
+  border: 1px dashed rgba(15, 23, 42, 0.3);
   background: rgba(148, 163, 184, 0.12);
-  border-radius: 8px;
-  width: 28px;
-  height: 26px;
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 .super-note-tab-add:hover,
 .super-note-tab-add:focus-visible {
-  background: rgba(148, 163, 184, 0.22);
-  border-color: rgba(15, 23, 42, 0.35);
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(15, 23, 42, 0.4);
+  transform: translateY(-1px);
 }
 
 .super-note-color-input {
   width: 0;
   height: 0;
+}
+
+.super-note-color-panel {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  padding: 6px;
+  gap: 6px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  z-index: 20;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.super-note-color-panel[data-visible="true"] {
+  display: inline-flex;
+}
+
+.super-note-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: none;
+  background: var(--super-tab-swatch-color);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.super-note-color-swatch:hover,
+.super-note-color-swatch:focus-visible {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.5);
+  transform: translateY(-1px);
+}
+
+.super-note-color-swatch.active {
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.55);
+}
+
+.super-note-color-custom {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px dashed rgba(15, 23, 42, 0.3);
+  background: rgba(148, 163, 184, 0.16);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.super-note-color-custom:hover,
+.super-note-color-custom:focus-visible {
+  background: rgba(148, 163, 184, 0.26);
+  border-color: rgba(15, 23, 42, 0.4);
+  transform: translateY(-1px);
 }
 
 .enhanced-note .note-tags {
