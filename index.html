@@ -592,6 +592,39 @@
   <aside id="magic-view" class="magic-view">
   </aside>
 
+  <div id="imageViewerPanel" class="image-viewer-panel" aria-hidden="true">
+    <div class="image-viewer-backdrop" data-action="close-image-viewer"></div>
+    <div class="image-viewer-shell" role="dialog" aria-modal="false" aria-labelledby="imageViewerTitle" tabindex="-1">
+      <header class="image-viewer-header">
+        <div class="image-viewer-titles">
+          <h2 id="imageViewerTitle">Visor de imágenes</h2>
+          <div class="image-viewer-meta">
+            <span id="imageViewerCounter" class="image-viewer-counter"></span>
+            <span id="imageViewerLocation" class="image-viewer-location"></span>
+          </div>
+        </div>
+        <div class="image-viewer-toolbar">
+          <span id="imageViewerZoomValue" class="image-viewer-zoom">100%</span>
+          <button type="button" id="imageViewerZoomOutBtn" class="image-viewer-icon-btn" title="Reducir zoom">−</button>
+          <button type="button" id="imageViewerZoomResetBtn" class="image-viewer-icon-btn" title="Restablecer zoom">⟲</button>
+          <button type="button" id="imageViewerZoomInBtn" class="image-viewer-icon-btn" title="Aumentar zoom">+</button>
+          <button type="button" id="imageViewerDownloadBtn" class="image-viewer-icon-btn" title="Descargar imagen">⬇️</button>
+          <button type="button" id="imageViewerCloseBtn" class="image-viewer-icon-btn image-viewer-close-btn" title="Cerrar visor">✕</button>
+        </div>
+      </header>
+      <div class="image-viewer-body">
+        <button type="button" id="imageViewerPrevBtn" class="image-viewer-nav image-viewer-nav-prev" aria-label="Imagen anterior">‹</button>
+        <div class="image-viewer-stage">
+          <img id="imageViewerImage" alt="Imagen ampliada" draggable="false" />
+        </div>
+        <button type="button" id="imageViewerNextBtn" class="image-viewer-nav image-viewer-nav-next" aria-label="Imagen siguiente">›</button>
+      </div>
+      <footer class="image-viewer-footer">
+        <p id="imageViewerCaption" class="image-viewer-caption"></p>
+      </footer>
+    </div>
+  </div>
+
   <div id="floatingNotesLayer" class="floating-notes-layer"></div>
 
   <!-- Contenido mágico -->

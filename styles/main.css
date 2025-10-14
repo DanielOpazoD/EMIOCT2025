@@ -3240,6 +3240,313 @@ body.magic-open .magic-view {
   display: flex;
 }
 
+/* ===== Visor de imágenes ===== */
+.image-viewer-panel {
+  position: fixed;
+  top: var(--topbar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: clamp(8px, 2vw, 28px);
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.16) 0%, rgba(15, 23, 42, 0.58) 52%, rgba(15, 23, 42, 0.72) 100%);
+  z-index: 4100;
+  pointer-events: auto;
+}
+
+.image-viewer-panel.open,
+body.image-viewer-open .image-viewer-panel {
+  display: flex;
+}
+
+body.image-viewer-open {
+  overflow: hidden;
+}
+
+.image-viewer-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(15, 23, 42, 0.1) 0%, rgba(15, 23, 42, 0.35) 30%, rgba(30, 64, 175, 0.15) 60%, transparent 100%);
+}
+
+.image-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  cursor: zoom-out;
+  z-index: 0;
+}
+
+.image-viewer-shell {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 76.8rem);
+  max-width: min(76.8rem, calc(100vw - 96px));
+  margin-left: auto;
+  margin-right: clamp(12px, 4vw, 48px);
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  border-radius: 24px 0 0 24px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -24px 36px 60px rgba(15, 23, 42, 0.48);
+  overflow: hidden;
+}
+
+body.pages-hidden .image-viewer-shell {
+  margin-right: clamp(12px, 3vw, 42px);
+}
+
+.image-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 28px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(37, 99, 235, 0.35));
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.image-viewer-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.image-viewer-titles h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.015em;
+}
+
+.image-viewer-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.image-viewer-counter {
+  font-weight: 600;
+}
+
+.image-viewer-location {
+  opacity: 0.8;
+}
+
+.image-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.image-viewer-zoom {
+  font-size: 0.95rem;
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+}
+
+.image-viewer-icon-btn {
+  border: none;
+  background: rgba(51, 65, 85, 0.55);
+  color: #f8fafc;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.image-viewer-icon-btn:hover,
+.image-viewer-icon-btn:focus-visible {
+  background: rgba(59, 130, 246, 0.8);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.32);
+  outline: none;
+}
+
+.image-viewer-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.image-viewer-close-btn {
+  font-size: 1.25rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.image-viewer-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+  background: radial-gradient(circle at center, rgba(241, 245, 249, 0.08), rgba(15, 23, 42, 0.92));
+}
+
+.image-viewer-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: clamp(16px, 3vw, 36px);
+}
+
+.image-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s ease;
+  transform-origin: center center;
+}
+
+.image-viewer-nav {
+  align-self: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(30, 41, 59, 0.65);
+  color: #f8fafc;
+  font-size: 2.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin: 0 clamp(8px, 1.6vw, 16px);
+  transition: background 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+.image-viewer-nav:hover:not(:disabled),
+.image-viewer-nav:focus-visible:not(:disabled) {
+  background: rgba(59, 130, 246, 0.85);
+  transform: scale(1.05);
+  outline: none;
+}
+
+.image-viewer-nav:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.image-viewer-footer {
+  padding: 18px 28px 26px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.96));
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.image-viewer-caption {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #e2e8f0;
+  max-height: 6rem;
+  overflow: auto;
+}
+
+.image-viewer-caption.empty {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+@media (max-width: 1280px) {
+  .image-viewer-shell {
+    border-radius: 22px;
+    max-width: min(72rem, calc(100vw - 64px));
+    margin-right: clamp(12px, 3vw, 32px);
+  }
+}
+
+@media (max-width: 900px) {
+  .image-viewer-shell {
+    margin-right: clamp(8px, 2.4vw, 20px);
+    width: min(100%, calc(100vw - 24px));
+    border-radius: 20px;
+  }
+
+  .image-viewer-header {
+    padding: 18px 22px;
+    gap: 12px;
+  }
+
+  .image-viewer-body {
+    flex-direction: column;
+  }
+
+  .image-viewer-nav {
+    order: -1;
+    align-self: flex-end;
+    margin: 8px 12px 0;
+    width: 48px;
+    height: 48px;
+    font-size: 1.8rem;
+  }
+
+  .image-viewer-stage {
+    width: 100%;
+    padding: clamp(12px, 4vw, 24px);
+  }
+
+  .image-viewer-footer {
+    padding: 16px 22px 22px;
+  }
+}
+
+@media (max-width: 640px) {
+  .image-viewer-panel {
+    justify-content: center;
+    padding: clamp(6px, 2vw, 16px);
+  }
+
+  .image-viewer-shell {
+    margin-right: 0;
+    border-radius: 18px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .image-viewer-header,
+  .image-viewer-footer {
+    padding: 16px;
+  }
+
+  .image-viewer-toolbar {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .image-viewer-meta {
+    gap: 6px;
+    font-size: 0.8rem;
+  }
+
+  .image-viewer-nav {
+    width: 44px;
+    height: 44px;
+    font-size: 1.6rem;
+  }
+}
+
 .magic-back-floating {
   position: fixed;
   top: calc(var(--topbar-height) + 16px);
@@ -3623,10 +3930,59 @@ body.reading-mode .floating-notes-layer {
   cursor: grab;
   user-select: none;
   font-size: 14px;
+  position: relative;
 }
 
 .floating-note-header:active {
   cursor: grabbing;
+}
+
+.floating-note-drag-handle {
+  margin: 4px 10px -4px 26px;
+  padding: 6px 14px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.18) 0%, rgba(30, 41, 59, 0.32) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-bottom: none;
+  color: var(--floating-note-title-color, #1f2937);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.floating-note-drag-handle:active {
+  cursor: grabbing;
+  transform: translateY(1px);
+}
+
+.floating-note:hover .floating-note-drag-handle,
+.floating-note:focus-within .floating-note-drag-handle {
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.24);
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.28) 0%, rgba(14, 116, 144, 0.32) 100%);
+  color: #f8fafc;
+}
+
+.floating-note-drag-label {
+  pointer-events: none;
+}
+
+.floating-note-drag-icon {
+  font-size: 1.2em;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.floating-note-drag-handle:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.55);
+  outline-offset: 3px;
 }
 
 .floating-note-actions {
@@ -3948,8 +4304,15 @@ body.pages-hidden .floating-note-behind:focus-within {
 }
 
 .floating-note-ultra-compact {
-  gap: 0;
-  padding-top: 8px;
+  gap: 2px;
+  padding-top: 6px;
+}
+
+.floating-note-ultra-compact .floating-note-drag-handle {
+  margin: 4px 8px -2px 20px;
+  padding: 4px 12px 3px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
 }
 
 .floating-note-ultra-compact .note-category,
@@ -3960,57 +4323,47 @@ body.pages-hidden .floating-note-behind:focus-within {
 }
 
 .floating-note-ultra-compact .floating-note-header {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  left: auto;
-  padding: 0;
+  position: relative;
+  inset: auto;
+  padding: 0 8px 2px 10px;
   margin: 0;
-  width: 14px;
-  height: 14px;
+  width: 100%;
+  height: auto;
   min-height: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   background: transparent;
-  gap: 0;
-  z-index: 2;
+  gap: 6px;
 }
 
 .floating-note-ultra-compact .note-actions {
-  gap: 0;
+  gap: 6px;
+  align-items: center;
 }
 
 .floating-note-ultra-compact .note-menu {
-  width: 10px;
-  height: 10px;
-  padding: 0;
+  width: auto;
+  height: auto;
+  padding: 2px 8px;
   border: none;
-  background: none;
-  font-size: 0;
-  position: relative;
-  border-radius: 999px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.18);
+  font-size: 1rem;
+  line-height: 1;
+  color: inherit;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 
-.floating-note-ultra-compact .note-menu::after {
-  content: '';
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: currentColor;
-  opacity: 0.65;
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+.floating-note-ultra-compact .note-menu:hover,
+.floating-note-ultra-compact .note-menu:focus-visible {
+  background: rgba(37, 99, 235, 0.28);
+  transform: translateY(-1px);
+  outline: none;
 }
 
-.floating-note-ultra-compact .note-menu:hover::after,
-.floating-note-ultra-compact .note-menu:focus-visible::after {
-  opacity: 1;
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45);
-}
-
-.floating-note-ultra-compact .note-menu:active::after {
-  opacity: 0.9;
+.floating-note-ultra-compact .note-menu:active {
+  transform: translateY(0);
 }
 
 .floating-note-ultra-compact .floating-note-body {
