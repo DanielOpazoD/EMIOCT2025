@@ -3367,6 +3367,36 @@ body.reading-mode .floating-notes-layer {
   --note-category-indicator: var(--floating-note-title-color, currentColor);
 }
 
+.floating-note-resize-handle {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+  cursor: ew-resize;
+  pointer-events: auto;
+  background: transparent;
+  z-index: 15;
+  touch-action: none;
+  transition: background 0.15s ease;
+}
+
+.floating-note-resize-handle:hover,
+.floating-note.resizing .floating-note-resize-handle {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.floating-note-resize-handle-left {
+  left: 0;
+}
+
+.floating-note-resize-handle-right {
+  right: 0;
+}
+
+.floating-note.resizing {
+  cursor: ew-resize;
+}
+
 .floating-note-hover-animated:not(.dragging):hover,
 .floating-note-hover-animated:not(.dragging):focus-within {
   transform: translateY(-4px);
@@ -3767,6 +3797,13 @@ body.reading-mode .floating-notes-layer {
   flex: 1 1 100%;
 }
 
+.note-menu-duplicate {
+  width: 100%;
+  font-weight: 600;
+  display: flex;
+  justify-content: center;
+}
+
 .note-compact-toggle {
   flex: 1 1 100%;
 }
@@ -3864,17 +3901,35 @@ body.pages-hidden .floating-note-behind:focus-within {
   gap: 2px;
 }
 
+.floating-note-ultracompact .note-category,
+.floating-note-ultracompact .note-navigation {
+  display: none !important;
+}
+
+.floating-note-ultracompact .note-header {
+  justify-content: flex-end;
+  padding: 4px 6px;
+}
+
+.floating-note-ultracompact .note-actions {
+  gap: 2px;
+}
+
+.floating-note-ultracompact .floating-note-body {
+  padding-top: 2px;
+}
+
 .floating-note.enhanced-note {
   gap: 0;
   padding: 0;
 }
 
 .enhanced-note .note-header {
-  padding: 8px 10px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .enhanced-note .note-category {
