@@ -199,6 +199,7 @@ export function createEnhancedNote(options = {}) {
     currentPageIndex: 0,
     behindMainContent: !!options.behindMainContent,
     compactHeader: !!options.compactHeader,
+    ultraCompact: !!options.ultraCompact,
     customIcon: normalizeCustomIcon(options.customIcon)
   };
 
@@ -287,6 +288,8 @@ export class NoteRegistry {
             : merged.reviewCount;
         } else if (key === 'compactHeader') {
           merged.compactHeader = !!overrides.compactHeader;
+        } else if (key === 'ultraCompact') {
+          merged.ultraCompact = !!overrides.ultraCompact;
         } else if (key === 'hoverAnimation') {
           merged.hoverAnimation = normalizeBooleanFlag(overrides.hoverAnimation, merged.hoverAnimation);
         } else if (key === 'styleNeutralText') {
