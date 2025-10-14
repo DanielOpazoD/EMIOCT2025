@@ -28,6 +28,7 @@
         </div>
         <button class="topbar-btn" type="button" id="readingModeBtn" title="Modo lectura"><span>📖</span> <span class="topbar-btn-label">Lectura</span></button>
         <button class="topbar-btn" type="button" id="notesViewBtn" title="Vista de notas"><span>📝</span> <span class="topbar-btn-label">Notas</span></button>
+        <button class="topbar-btn" type="button" id="imageViewerBtn" title="Visor de imágenes"><span>🖼️</span> <span class="topbar-btn-label">Imágenes</span></button>
         <button class="topbar-btn" type="button" id="loadHtmlBtn" title="Cargar archivo HTML"><span>📂</span> <span class="topbar-btn-label">Abrir</span></button>
         <button class="topbar-btn" type="button" id="editBtn" title="Modo edición"><span>✏️</span> <span class="topbar-btn-label">Editar</span></button>
         <button class="topbar-btn" type="button" id="printCurrentBtn" title="Imprimir documento"><span>🖨️</span> <span class="topbar-btn-label">Imprimir</span></button>
@@ -66,6 +67,7 @@
 
   <input type="file" id="loadHtmlInput" accept=".html" multiple />
   <input type="file" id="importDataInput" accept="application/json" />
+  <input type="file" id="imageViewerUploadInput" accept="image/*" multiple />
 
   <!-- Barra de herramientas -->
   <div class="edit-toolbar" id="editToolbar">
@@ -586,6 +588,54 @@
       <button id="clearReviewedBtn">✓ Limpiar revisadas</button>
     </div>
   </aside>
+
+  <div id="imageViewerPanel" class="image-viewer-panel" aria-hidden="true">
+    <div class="image-viewer-header">
+      <div class="image-viewer-header-info">
+        <h3>🖼️ Visor de imágenes</h3>
+        <p>Revisión lateral sin modificar el documento principal</p>
+      </div>
+      <div class="image-viewer-header-actions">
+        <button type="button" class="image-viewer-action" id="imageViewerAddImageBtn" title="Agregar imágenes">➕</button>
+        <button type="button" class="image-viewer-action" id="imageViewerDownloadBtn" title="Descargar imagen" disabled>⬇️</button>
+        <button type="button" class="image-viewer-close" id="imageViewerCloseBtn" title="Cerrar visor">×</button>
+      </div>
+    </div>
+    <div class="image-viewer-content">
+      <div class="image-viewer-stage">
+        <div class="image-viewer-stage-surface" id="imageViewerStageSurface">
+          <img id="imageViewerActiveImage" alt="Imagen seleccionada en el visor" />
+          <div class="image-viewer-empty" id="imageViewerEmptyState">
+            <strong>Sin imágenes cargadas</strong>
+            <p>Usa “Añadir” para abrir imágenes privadas visibles solo en este visor.</p>
+          </div>
+          <div class="image-viewer-zoom-controls" id="imageViewerZoomControls" aria-hidden="true">
+            <button type="button" class="image-viewer-zoom-btn" id="imageViewerZoomOutBtn" title="Alejar imagen">−</button>
+            <input type="range" id="imageViewerZoomSlider" min="50" max="300" step="5" value="100" aria-label="Nivel de zoom" />
+            <button type="button" class="image-viewer-zoom-btn" id="imageViewerZoomInBtn" title="Acercar imagen">+</button>
+            <span class="image-viewer-zoom-value" id="imageViewerZoomValue">100%</span>
+          </div>
+        </div>
+        <div class="image-viewer-stage-meta">
+          <span class="image-viewer-filename" id="imageViewerFileName"></span>
+          <span class="image-viewer-meta" id="imageViewerMeta"></span>
+        </div>
+      </div>
+      <div class="image-viewer-footer">
+        <section class="image-viewer-gallery" aria-labelledby="imageViewerGalleryTitle">
+          <div class="image-viewer-gallery-header">
+            <span id="imageViewerGalleryTitle">Galería privada</span>
+            <button type="button" class="image-viewer-remove" id="imageViewerRemoveBtn" title="Eliminar imagen seleccionada">🗑️</button>
+          </div>
+          <div class="image-viewer-gallery-strip" id="imageViewerGallery"></div>
+        </section>
+        <section class="image-viewer-notes">
+          <label for="imageViewerNotes">Notas ocultas</label>
+          <textarea id="imageViewerNotes" placeholder="Escribe recordatorios privados para esta imagen..." spellcheck="false"></textarea>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <div id="panel-backdrop" class="panel-backdrop"></div>
   
