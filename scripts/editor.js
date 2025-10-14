@@ -86,6 +86,9 @@ export async function initializeEditor() {
 
       const ICON_FEATURE_ENABLED = true;
       const IMAGE_VIEWER_STORAGE_KEY = 'emi2025-image-viewer';
+      const IMAGE_VIEWER_ZOOM_MIN = 0.5;
+      const IMAGE_VIEWER_ZOOM_MAX = 3;
+      const IMAGE_VIEWER_ZOOM_STEP = 0.05;
 
       let imageViewerState = {
         images: [],
@@ -95,6 +98,9 @@ export async function initializeEditor() {
       let imageViewerPreviousShift = null;
       let imageViewerActiveShift = null;
       let imageViewerNotesSaveTimer = null;
+      let imageViewerTransientImage = null;
+      let imageViewerActiveSelectionKey = null;
+      let imageViewerZoomLevel = 1;
 
       let floatingNotesHidden = false;
       let mainContentHidden = false;
@@ -394,6 +400,12 @@ export async function initializeEditor() {
       const imageViewerNotes = document.getElementById('imageViewerNotes');
       const imageViewerGallery = document.getElementById('imageViewerGallery');
       const imageViewerRemoveBtn = document.getElementById('imageViewerRemoveBtn');
+      const imageViewerStageSurface = document.getElementById('imageViewerStageSurface');
+      const imageViewerZoomControls = document.getElementById('imageViewerZoomControls');
+      const imageViewerZoomOutBtn = document.getElementById('imageViewerZoomOutBtn');
+      const imageViewerZoomInBtn = document.getElementById('imageViewerZoomInBtn');
+      const imageViewerZoomSlider = document.getElementById('imageViewerZoomSlider');
+      const imageViewerZoomValue = document.getElementById('imageViewerZoomValue');
       const templateToolbar = document.getElementById('templateToolbar');
       const templateBgColorInput = document.getElementById('templateBgColor');
       const templateClearBgBtn = document.getElementById('templateClearBgBtn');
@@ -1980,7 +1992,7 @@ export async function initializeEditor() {
         return Array.from(unique.values());
       }
 
-      function sanitizeImageViewerState(next) {
+      function sanitizeImageViewerState(next, { allowNullSelection = false } = {}) {
         if (!next || typeof next !== 'object') {
           return getDefaultImageViewerState();
         }
@@ -1994,8 +2006,10 @@ export async function initializeEditor() {
           });
         }
         let selectedImageId = typeof next.selectedImageId === 'string' ? next.selectedImageId : null;
-        if (!sanitizedImages.some(image => image.id === selectedImageId)) {
+        if (selectedImageId && !sanitizedImages.some(image => image.id === selectedImageId)) {
           selectedImageId = sanitizedImages.length ? sanitizedImages[sanitizedImages.length - 1].id : null;
+        } else if (!selectedImageId && !allowNullSelection && sanitizedImages.length) {
+          selectedImageId = sanitizedImages[sanitizedImages.length - 1].id;
         }
         return {
           images: sanitizedImages,
@@ -2033,6 +2047,12 @@ export async function initializeEditor() {
       }
 
       function setImageViewerState(updater, options = {}) {
+        const {
+          rerender = true,
+          persist = true,
+          allowNullSelection = false,
+          clearTransientOnSelection = true
+        } = options;
         const current = imageViewerState;
         let next = typeof updater === 'function' ? updater(current) : updater;
         if (next === current) {
@@ -2042,9 +2062,14 @@ export async function initializeEditor() {
           images: next?.images ?? current.images,
           selectedImageId: next?.selectedImageId ?? current.selectedImageId,
           notesById: next?.notesById ?? current.notesById
-        });
-        persistImageViewerState();
-        if (options.rerender !== false) {
+        }, { allowNullSelection });
+        if (clearTransientOnSelection && imageViewerState.selectedImageId) {
+          imageViewerTransientImage = null;
+        }
+        if (persist) {
+          persistImageViewerState();
+        }
+        if (rerender) {
           renderImageViewer();
         }
       }
@@ -2075,8 +2100,10 @@ export async function initializeEditor() {
 
       function openImageViewer() {
         if (!imageViewerPanel) return;
+        hideImageToolbar();
         if (imageViewerPanel.classList.contains('open')) {
           enforceImageViewerShift({ force: true });
+          renderImageViewer();
           return;
         }
         imageViewerPreviousShift = documentHorizontalShift;
@@ -2084,6 +2111,8 @@ export async function initializeEditor() {
         imageViewerPanel.setAttribute('aria-hidden', 'false');
         document.body.classList.add('image-viewer-open');
         enforceImageViewerShift({ force: true });
+        const { image } = getActiveImageViewerSelection();
+        resetImageViewerZoom({ disabled: !image });
         renderImageViewer();
       }
 
@@ -2096,6 +2125,12 @@ export async function initializeEditor() {
         imageViewerPanel.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('image-viewer-open');
         imageViewerActiveShift = null;
+        imageViewerTransientImage = null;
+        imageViewerActiveSelectionKey = null;
+        resetImageViewerZoom({ disabled: true });
+        if (imageViewerActiveImage) {
+          imageViewerActiveImage.style.transform = 'scale(1)';
+        }
         if (restoreShift && imageViewerPreviousShift !== null) {
           documentHorizontalShift = imageViewerPreviousShift;
           applyDocumentShift();
@@ -2161,6 +2196,96 @@ export async function initializeEditor() {
         return `${formatted} ${units[unitIndex]}`;
       }
 
+      function resolveImageSource(image) {
+        if (!image || typeof image !== 'object') {
+          return '';
+        }
+        if (typeof image.dataUrl === 'string' && image.dataUrl) {
+          return image.dataUrl;
+        }
+        if (typeof image.url === 'string' && image.url) {
+          return image.url;
+        }
+        if (typeof image.objectUrl === 'string' && image.objectUrl) {
+          return image.objectUrl;
+        }
+        if (typeof image.src === 'string' && image.src) {
+          return image.src;
+        }
+        if (typeof image.originalSource === 'string' && image.originalSource) {
+          return image.originalSource;
+        }
+        return '';
+      }
+
+      function getActiveImageViewerSelection() {
+        const { images, selectedImageId } = imageViewerState;
+        if (selectedImageId) {
+          const stored = images.find(image => image.id === selectedImageId);
+          if (stored) {
+            return { image: stored, isTransient: false };
+          }
+        }
+        if (imageViewerTransientImage) {
+          return { image: imageViewerTransientImage, isTransient: true };
+        }
+        return { image: null, isTransient: false };
+      }
+
+      function applyImageViewerZoom() {
+        if (!imageViewerActiveImage) {
+          return;
+        }
+        imageViewerActiveImage.style.transform = `scale(${imageViewerZoomLevel})`;
+        if (imageViewerStageSurface) {
+          imageViewerStageSurface.classList.toggle('is-zoomed', imageViewerZoomLevel > 1.0001);
+        }
+      }
+
+      function updateImageViewerZoomUI({ disabled = false } = {}) {
+        const percent = Math.round(imageViewerZoomLevel * 100);
+        if (imageViewerZoomSlider) {
+          imageViewerZoomSlider.value = String(percent);
+          imageViewerZoomSlider.disabled = disabled;
+        }
+        if (imageViewerZoomValue) {
+          imageViewerZoomValue.textContent = `${percent}%`;
+        }
+        if (imageViewerZoomOutBtn) {
+          imageViewerZoomOutBtn.disabled = disabled || imageViewerZoomLevel <= IMAGE_VIEWER_ZOOM_MIN + 0.0001;
+        }
+        if (imageViewerZoomInBtn) {
+          imageViewerZoomInBtn.disabled = disabled || imageViewerZoomLevel >= IMAGE_VIEWER_ZOOM_MAX - 0.0001;
+        }
+        if (imageViewerZoomControls) {
+          imageViewerZoomControls.setAttribute('aria-hidden', disabled ? 'true' : 'false');
+        }
+      }
+
+      function setImageViewerZoom(level, options = {}) {
+        if (!Number.isFinite(level)) {
+          return;
+        }
+        const clamped = Math.min(IMAGE_VIEWER_ZOOM_MAX, Math.max(IMAGE_VIEWER_ZOOM_MIN, level));
+        if (Math.abs(clamped - imageViewerZoomLevel) < 0.0001) {
+          return;
+        }
+        imageViewerZoomLevel = clamped;
+        applyImageViewerZoom();
+        updateImageViewerZoomUI({ disabled: options.disabled ?? false });
+      }
+
+      function resetImageViewerZoom({ disabled = false } = {}) {
+        imageViewerZoomLevel = 1;
+        if (imageViewerActiveImage) {
+          imageViewerActiveImage.style.transform = 'scale(1)';
+        }
+        if (imageViewerStageSurface) {
+          imageViewerStageSurface.classList.remove('is-zoomed');
+        }
+        updateImageViewerZoomUI({ disabled });
+      }
+
       function updateImageViewerMetaDisplay(image) {
         if (!imageViewerMeta) return;
         if (!image) {
@@ -2171,61 +2296,142 @@ export async function initializeEditor() {
         if (Number.isFinite(image.size) && image.size > 0) {
           pieces.push(formatBytes(image.size));
         }
-        if (Number.isFinite(image.width) && Number.isFinite(image.height)) {
-          pieces.push(`${image.width} × ${image.height}px`);
+        const width = Number.isFinite(image.width) ? image.width : null;
+        const height = Number.isFinite(image.height) ? image.height : null;
+        if (Number.isFinite(width) && Number.isFinite(height)) {
+          pieces.push(`${width} × ${height}px`);
         }
         imageViewerMeta.textContent = pieces.join(' · ');
       }
 
       function renderImageViewer() {
         if (!imageViewerPanel) return;
-        const { images, selectedImageId, notesById } = imageViewerState;
-        const hasImages = images.length > 0;
-        const selected = hasImages ? images.find(image => image.id === selectedImageId) || images[images.length - 1] : null;
-        imageViewerPanel.classList.toggle('has-image', !!selected);
+        let { images, selectedImageId, notesById } = imageViewerState;
+        let selected = null;
+        let isTransient = false;
 
-        if (!selected) {
+        if (selectedImageId) {
+          selected = images.find(image => image.id === selectedImageId) || null;
+        }
+
+        if (!selected && imageViewerTransientImage) {
+          selected = imageViewerTransientImage;
+          isTransient = true;
+        }
+
+        if (!selected && images.length) {
+          const fallback = images[images.length - 1];
+          if (fallback) {
+            setImageViewerState(state => ({
+              images: state.images,
+              selectedImageId: fallback.id,
+              notesById: state.notesById
+            }), { rerender: false });
+            images = imageViewerState.images;
+            selectedImageId = imageViewerState.selectedImageId;
+            notesById = imageViewerState.notesById;
+            selected = fallback;
+            isTransient = false;
+          }
+        }
+
+        const selectionKey = selected
+          ? (isTransient ? `transient:${selected.id || 'current'}` : `saved:${selected.id}`)
+          : null;
+        const selectionChanged = selectionKey !== imageViewerActiveSelectionKey;
+        imageViewerActiveSelectionKey = selectionKey;
+
+        const hasSelection = !!selected;
+        imageViewerPanel.classList.toggle('has-image', hasSelection);
+
+        if (!hasSelection) {
           if (imageViewerActiveImage) {
             imageViewerActiveImage.removeAttribute('src');
             imageViewerActiveImage.alt = 'Imagen seleccionada en el visor';
+            imageViewerActiveImage.style.transform = 'scale(1)';
           }
           if (imageViewerFileName) {
             imageViewerFileName.textContent = '';
           }
           updateImageViewerMetaDisplay(null);
           if (imageViewerNotes) {
+            if (document.activeElement === imageViewerNotes) {
+              imageViewerNotes.blur();
+            }
             imageViewerNotes.value = '';
             imageViewerNotes.disabled = true;
             imageViewerNotes.dataset.imageId = '';
           }
           imageViewerDownloadBtn?.setAttribute('disabled', 'true');
           imageViewerRemoveBtn?.setAttribute('disabled', 'true');
+          resetImageViewerZoom({ disabled: true });
         } else {
+          if (selectionChanged) {
+            resetImageViewerZoom({ disabled: false });
+          } else {
+            updateImageViewerZoomUI({ disabled: false });
+            applyImageViewerZoom();
+          }
+
+          const source = resolveImageSource(selected);
           if (imageViewerActiveImage) {
-            if (imageViewerActiveImage.src !== selected.dataUrl) {
-              imageViewerActiveImage.src = selected.dataUrl;
+            if (source) {
+              if (imageViewerActiveImage.src !== source) {
+                imageViewerActiveImage.src = source;
+              } else {
+                applyImageViewerZoom();
+              }
+            } else {
+              imageViewerActiveImage.removeAttribute('src');
             }
             imageViewerActiveImage.alt = `Imagen ${selected.name || ''}`.trim() || 'Imagen seleccionada en el visor';
           }
+
           if (imageViewerFileName) {
             imageViewerFileName.textContent = selected.name || 'Imagen sin título';
           }
+
           updateImageViewerMetaDisplay(selected);
+
           if (imageViewerNotes) {
-            const currentValue = typeof notesById?.[selected.id] === 'string' ? notesById[selected.id] : '';
-            if (imageViewerNotes.dataset.imageId !== selected.id || document.activeElement !== imageViewerNotes) {
-              imageViewerNotes.value = currentValue;
+            if (isTransient) {
+              if (document.activeElement === imageViewerNotes) {
+                imageViewerNotes.blur();
+              }
+              imageViewerNotes.value = '';
+              imageViewerNotes.disabled = true;
+              imageViewerNotes.dataset.imageId = '';
+            } else {
+              const noteId = selected.id;
+              const currentValue = typeof notesById?.[noteId] === 'string' ? notesById[noteId] : '';
+              if (imageViewerNotes.dataset.imageId !== noteId || document.activeElement !== imageViewerNotes) {
+                imageViewerNotes.value = currentValue;
+              }
+              imageViewerNotes.dataset.imageId = noteId;
+              imageViewerNotes.disabled = false;
             }
-            imageViewerNotes.dataset.imageId = selected.id;
-            imageViewerNotes.disabled = false;
           }
-          imageViewerDownloadBtn?.removeAttribute('disabled');
-          imageViewerRemoveBtn?.removeAttribute('disabled');
+
+          if (imageViewerDownloadBtn) {
+            if (source) {
+              imageViewerDownloadBtn.removeAttribute('disabled');
+            } else {
+              imageViewerDownloadBtn.setAttribute('disabled', 'true');
+            }
+          }
+
+          if (imageViewerRemoveBtn) {
+            if (isTransient) {
+              imageViewerRemoveBtn.setAttribute('disabled', 'true');
+            } else {
+              imageViewerRemoveBtn.removeAttribute('disabled');
+            }
+          }
         }
 
         if (imageViewerGallery) {
           imageViewerGallery.innerHTML = '';
-          if (!hasImages) {
+          if (!images.length) {
             return;
           }
           const fragment = document.createDocumentFragment();
@@ -2233,7 +2439,7 @@ export async function initializeEditor() {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'image-viewer-thumb';
-            if (selected && image.id === selected.id) {
+            if (!isTransient && selected && image.id === selected.id) {
               button.classList.add('active');
             }
             button.dataset.imageId = image.id;
@@ -2305,15 +2511,31 @@ export async function initializeEditor() {
       }
 
       function handleImageViewerDownload() {
-        const { images, selectedImageId } = imageViewerState;
-        const selected = images.find(image => image.id === selectedImageId);
+        const { image: selected } = getActiveImageViewerSelection();
         if (!selected) {
           return;
         }
+        const source = resolveImageSource(selected);
+        if (!source) {
+          return;
+        }
         const link = document.createElement('a');
-        link.href = selected.dataUrl;
-        const extension = (selected.type && selected.type.includes('/')) ? selected.type.split('/')[1] : 'png';
-        const safeName = (selected.name || 'imagen').replace(/[^a-zA-Z0-9._-]+/g, '_');
+        link.href = source;
+        let extension = 'png';
+        if (typeof selected.type === 'string' && selected.type.includes('/')) {
+          extension = selected.type.split('/')[1] || extension;
+        } else if (source.startsWith('data:image/')) {
+          const subType = source.slice(11, source.indexOf(';', 11));
+          extension = subType || extension;
+        } else {
+          const match = source.match(/\.([a-zA-Z0-9]{2,8})(?:\?|#|$)/);
+          if (match && match[1]) {
+            extension = match[1];
+          }
+        }
+        extension = (extension || 'png').toLowerCase();
+        const rawName = (selected.name || 'imagen').replace(/[^a-zA-Z0-9._-]+/g, '_');
+        const safeName = rawName.replace(/\.+$/g, '') || 'imagen';
         link.download = safeName.includes('.') ? safeName : `${safeName}.${extension}`;
         document.body.appendChild(link);
         link.click();
@@ -2321,6 +2543,10 @@ export async function initializeEditor() {
       }
 
       function handleImageViewerRemove() {
+        const { image, isTransient } = getActiveImageViewerSelection();
+        if (!image || isTransient) {
+          return;
+        }
         const { selectedImageId } = imageViewerState;
         if (!selectedImageId) {
           return;
@@ -2347,6 +2573,7 @@ export async function initializeEditor() {
         if (!id || imageViewerState.selectedImageId === id) {
           return;
         }
+        imageViewerActiveSelectionKey = null;
         setImageViewerState(state => ({
           images: state.images,
           selectedImageId: id,
@@ -2376,6 +2603,47 @@ export async function initializeEditor() {
           };
           persistImageViewerState();
         }, 250);
+      }
+
+      function openImageViewerForElementImage(img) {
+        if (!img) {
+          return;
+        }
+        const source = typeof img.currentSrc === 'string' && img.currentSrc
+          ? img.currentSrc
+          : (typeof img.src === 'string' ? img.src : '');
+        if (!source) {
+          return;
+        }
+        const rawName = (img.getAttribute('alt') || img.getAttribute('title') || img.dataset?.filename || '').trim();
+        const name = rawName || 'Imagen del documento';
+        const dataType = (img.dataset && (img.dataset.mime || img.dataset.type)) || '';
+        const width = Number.isFinite(img.naturalWidth) ? img.naturalWidth : null;
+        const height = Number.isFinite(img.naturalHeight) ? img.naturalHeight : null;
+        imageViewerTransientImage = {
+          id: `transient-${Date.now()}`,
+          name,
+          dataUrl: source,
+          width,
+          height,
+          size: 0,
+          type: typeof dataType === 'string' && dataType.includes('/') ? dataType : '',
+          createdAt: new Date().toISOString(),
+          originalSource: source,
+          transient: true
+        };
+        imageViewerActiveSelectionKey = null;
+        setImageViewerState(state => ({
+          images: state.images,
+          selectedImageId: null,
+          notesById: state.notesById
+        }), { rerender: false, persist: false, allowNullSelection: true, clearTransientOnSelection: false });
+        hideImageToolbar();
+        if (!imageViewerPanel?.classList.contains('open')) {
+          openImageViewer();
+        } else {
+          renderImageViewer();
+        }
       }
 
       function updateZoom(delta) {
@@ -2421,13 +2689,28 @@ export async function initializeEditor() {
 
       if (imageViewerActiveImage) {
         imageViewerActiveImage.addEventListener('load', () => {
+          const width = Number.isFinite(imageViewerActiveImage.naturalWidth) ? imageViewerActiveImage.naturalWidth : null;
+          const height = Number.isFinite(imageViewerActiveImage.naturalHeight) ? imageViewerActiveImage.naturalHeight : null;
+          applyImageViewerZoom();
+          const { image, isTransient } = getActiveImageViewerSelection();
+          if (!image) {
+            updateImageViewerMetaDisplay(null);
+            return;
+          }
+          if (isTransient) {
+            imageViewerTransientImage = {
+              ...imageViewerTransientImage,
+              width: Number.isFinite(width) ? width : imageViewerTransientImage?.width ?? null,
+              height: Number.isFinite(height) ? height : imageViewerTransientImage?.height ?? null
+            };
+            updateImageViewerMetaDisplay(imageViewerTransientImage);
+            return;
+          }
           const { selectedImageId } = imageViewerState;
           if (!selectedImageId) {
             updateImageViewerMetaDisplay(null);
             return;
           }
-          const width = Number.isFinite(imageViewerActiveImage.naturalWidth) ? imageViewerActiveImage.naturalWidth : null;
-          const height = Number.isFinite(imageViewerActiveImage.naturalHeight) ? imageViewerActiveImage.naturalHeight : null;
           if (Number.isFinite(width) || Number.isFinite(height)) {
             setImageViewerState(state => {
               if (!state.images.some(img => img.id === selectedImageId)) {
@@ -2456,6 +2739,19 @@ export async function initializeEditor() {
       imageViewerRemoveBtn?.addEventListener('click', handleImageViewerRemove);
       imageViewerGallery?.addEventListener('click', handleImageViewerSelect);
       imageViewerNotes?.addEventListener('input', handleImageViewerNotesInput);
+      imageViewerZoomOutBtn?.addEventListener('click', () => {
+        setImageViewerZoom(imageViewerZoomLevel - IMAGE_VIEWER_ZOOM_STEP);
+      });
+      imageViewerZoomInBtn?.addEventListener('click', () => {
+        setImageViewerZoom(imageViewerZoomLevel + IMAGE_VIEWER_ZOOM_STEP);
+      });
+      imageViewerZoomSlider?.addEventListener('input', () => {
+        const percent = Number(imageViewerZoomSlider.value);
+        if (!Number.isFinite(percent)) {
+          return;
+        }
+        setImageViewerZoom(percent / 100);
+      });
       imageViewerUploadInput?.addEventListener('change', async (event) => {
         try {
           await handleImageViewerFiles(event.target?.files || []);
@@ -2474,6 +2770,28 @@ export async function initializeEditor() {
           closeImageViewer();
         }
       });
+
+      document.addEventListener('dblclick', (event) => {
+        const target = event.target instanceof HTMLImageElement
+          ? event.target
+          : (event.target && typeof event.target.closest === 'function' ? event.target.closest('img') : null);
+        if (!target) {
+          return;
+        }
+        if (imageViewerPanel?.contains(target)) {
+          return;
+        }
+        if (target.closest('#imageToolbar') || target.closest('.topbar') || target.closest('.edit-toolbar')) {
+          return;
+        }
+        const validScope = target.closest('.page, .floating-note, .floating-note-content, .notes-view-panel, .notes-list, .magic-view, .magic-page');
+        if (!validScope) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        openImageViewerForElementImage(target);
+      }, true);
 
       /* === UTILIDADES === */
       function isNodeInDocument(node) {
@@ -5506,6 +5824,10 @@ export async function initializeEditor() {
       });
 
       function showImageToolbar(img) {
+        if (document.body.classList.contains('image-viewer-open')) {
+          hideImageToolbar();
+          return;
+        }
         hideTemplateToolbar();
         if (selectedImage && selectedImage !== img) {
           selectedImage.classList.remove('selected-image');
@@ -5530,6 +5852,10 @@ export async function initializeEditor() {
 
       document.addEventListener('click', (e) => {
         if (isEditMode && e.target.tagName === 'IMG') {
+          if (document.body.classList.contains('image-viewer-open')) {
+            hideImageToolbar();
+            return;
+          }
           e.preventDefault();
           showImageToolbar(e.target);
         } else if (!e.target.closest('#imageToolbar') && !e.target.closest('img') && !e.target.closest('.image-figure')) {
