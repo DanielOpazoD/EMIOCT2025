@@ -88,6 +88,10 @@ export async function initializeEditor() {
 
       let floatingNotesHidden = false;
       let mainContentHidden = false;
+      if (printFloatingNotesBtn) {
+        printFloatingNotesBtn.hidden = true;
+        printFloatingNotesBtn.disabled = true;
+      }
       let boldInfiniteMode = false;
       let boldInfiniteApplying = false;
       let autoTableResizeController = null;
@@ -101,6 +105,15 @@ export async function initializeEditor() {
       let floatingNoteZIndex = 10;
       let floatingNoteCreationOffset = 0;
       const floatingNoteDragState = { note: null, pointerId: null, offsetX: 0, offsetY: 0 };
+      const floatingNoteEdgeResizeState = {
+        note: null,
+        pointerId: null,
+        edge: null,
+        startX: 0,
+        startWidth: 0,
+        startLeft: 0,
+        handle: null
+      };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
       const FLOATING_NOTE_MIN_WIDTH = 160;
       const FLOATING_NOTE_MIN_HEIGHT = 140;
@@ -287,6 +300,7 @@ export async function initializeEditor() {
       const addFloatingNoteBtn = document.getElementById('addFloatingNoteBtn');
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
       const toggleMainContentBtn = document.getElementById('toggleMainContentBtn');
+      const printFloatingNotesBtn = document.getElementById('printFloatingNotesBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
       const topbar = document.querySelector('.topbar');
       const topbarToolsToggle = document.getElementById('topbarToolsToggle');
@@ -5011,6 +5025,23 @@ export async function initializeEditor() {
         }
       });
 
+      document.addEventListener('keydown', (event) => {
+        if (!selectedImage) {
+          return;
+        }
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+          return;
+        }
+        const key = event.key;
+        if (key === '+' || key === 'Add') {
+          event.preventDefault();
+          changeSelectedImageWidth(1 + IMAGE_RESIZE_STEP);
+        } else if (key === '-' || key === 'Subtract') {
+          event.preventDefault();
+          changeSelectedImageWidth(1 - IMAGE_RESIZE_STEP);
+        }
+      });
+
       /* === NOTAS FLOTANTES === */
       function getFloatingNoteStyle(styleId) {
         const preset = NOTE_STYLE_PRESETS.find(preset => preset.id === styleId);
@@ -5106,6 +5137,26 @@ export async function initializeEditor() {
         }
 
         return shouldCompact;
+      }
+
+      function applyNoteUltraCompactState(note, ultraCompact, { persist = true } = {}) {
+        if (!note) return false;
+        const shouldUltra = !!ultraCompact;
+        note.classList.toggle('floating-note-ultra-compact', shouldUltra);
+        if (shouldUltra) {
+          note.dataset.ultraCompact = 'true';
+        } else {
+          delete note.dataset.ultraCompact;
+        }
+
+        if (persist) {
+          const noteId = note.dataset.noteId;
+          if (noteId) {
+            updateNoteData(noteId, { ultraCompact: shouldUltra }, { silent: true });
+          }
+        }
+
+        return shouldUltra;
       }
 
       function applyNoteBehindState(note, behind, { persist = true } = {}) {
@@ -5206,6 +5257,13 @@ export async function initializeEditor() {
         if (!note) return false;
         const nextState = !note.classList.contains('floating-note-compact-header');
         applyNoteHeaderCompactState(note, nextState);
+        return nextState;
+      }
+
+      function toggleNoteUltraCompact(note) {
+        if (!note) return false;
+        const nextState = !note.classList.contains('floating-note-ultra-compact');
+        applyNoteUltraCompactState(note, nextState);
         return nextState;
       }
 
@@ -5590,6 +5648,108 @@ export async function initializeEditor() {
         }
       }
 
+      function startFloatingNoteEdgeResize(note, edge, event) {
+        if (!note || (edge !== 'left' && edge !== 'right') || !isEditMode) {
+          return;
+        }
+        floatingNoteEdgeResizeState.note = note;
+        floatingNoteEdgeResizeState.pointerId = event.pointerId;
+        floatingNoteEdgeResizeState.edge = edge;
+        floatingNoteEdgeResizeState.startX = event.clientX;
+        floatingNoteEdgeResizeState.startWidth = note.getBoundingClientRect().width
+          || note.offsetWidth
+          || FLOATING_NOTE_DEFAULT_WIDTH;
+        floatingNoteEdgeResizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0') || 0;
+        floatingNoteEdgeResizeState.handle = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+        if (floatingNoteDragState.note) {
+          endFloatingNoteDrag({ pointerId: floatingNoteDragState.pointerId });
+        }
+        note.classList.add('resizing');
+        bringNoteToFront(note);
+        try {
+          floatingNoteEdgeResizeState.handle?.setPointerCapture(event.pointerId);
+        } catch (err) {
+          // ignore pointer capture issues
+        }
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      function handleFloatingNoteEdgeResizeMove(event) {
+        const state = floatingNoteEdgeResizeState;
+        if (!state.note || state.pointerId !== event.pointerId) {
+          return false;
+        }
+
+        const layerRect = floatingNotesLayer?.getBoundingClientRect();
+        const layerWidth = layerRect?.width || window.innerWidth || (state.startLeft + state.startWidth);
+        const minWidth = FLOATING_NOTE_MIN_WIDTH;
+        const deltaX = event.clientX - state.startX;
+        const maxAvailableWidth = Math.max(layerWidth, minWidth);
+
+        if (state.edge === 'right') {
+          let width = state.startWidth + deltaX;
+          const maxWidth = maxAvailableWidth - state.startLeft - 4;
+          if (Number.isFinite(maxWidth) && maxWidth > minWidth) {
+            width = Math.min(width, maxWidth);
+          }
+          width = Math.max(minWidth, width);
+          state.note.style.width = `${Math.round(width)}px`;
+        } else if (state.edge === 'left') {
+          let newLeft = state.startLeft + deltaX;
+          const maxLeft = Math.max(maxAvailableWidth - minWidth, 0);
+          if (Number.isFinite(maxLeft)) {
+            newLeft = Math.min(newLeft, maxLeft);
+          }
+          newLeft = Math.max(0, newLeft);
+
+          let width = state.startWidth + (state.startLeft - newLeft);
+          const maxWidth = maxAvailableWidth - newLeft - 4;
+          if (Number.isFinite(maxWidth) && maxWidth > minWidth) {
+            width = Math.min(width, maxWidth);
+          }
+          width = Math.max(minWidth, width);
+
+          state.note.style.left = `${Math.round(newLeft)}px`;
+          state.note.style.width = `${Math.round(width)}px`;
+        }
+
+        event.preventDefault();
+        return true;
+      }
+
+      function endFloatingNoteEdgeResize(event) {
+        const state = floatingNoteEdgeResizeState;
+        if (!state.note) {
+          return false;
+        }
+        if (event && state.pointerId !== null && event.pointerId !== state.pointerId) {
+          return false;
+        }
+
+        try {
+          state.handle?.releasePointerCapture(state.pointerId);
+        } catch (err) {
+          // ignore release errors
+        }
+
+        const note = state.note;
+        note.classList.remove('resizing');
+
+        const finalLeft = Number.parseFloat(note.style.left || note.dataset.left || '0') || 0;
+        const finalTop = Number.parseFloat(note.style.top || note.dataset.top || '0') || 0;
+
+        positionFloatingNote(note, finalLeft, finalTop);
+        updateFloatingNoteSizeDataset(note);
+
+        floatingNoteEdgeResizeState.note = null;
+        floatingNoteEdgeResizeState.pointerId = null;
+        floatingNoteEdgeResizeState.edge = null;
+        floatingNoteEdgeResizeState.handle = null;
+
+        return true;
+      }
+
       function refreshToggleNotesButton() {
         if (!toggleNotesBtn) return;
         toggleNotesBtn.classList.toggle('active', !floatingNotesHidden);
@@ -5738,6 +5898,19 @@ export async function initializeEditor() {
           }
           if (typeof data.meta?.compactHeader !== 'undefined') {
             return !!data.meta.compactHeader;
+          }
+          return false;
+        })();
+
+        const resolvedUltraCompact = (() => {
+          if (data.ultraCompact !== undefined) {
+            return !!data.ultraCompact;
+          }
+          if (metaSource.ultraCompact !== undefined) {
+            return !!metaSource.ultraCompact;
+          }
+          if (typeof data.meta?.ultraCompact !== 'undefined') {
+            return !!data.meta.ultraCompact;
           }
           return false;
         })();
@@ -5893,6 +6066,7 @@ export async function initializeEditor() {
           currentPageIndex: incomingPageIndex,
           behindMainContent: resolvedBehindState,
           compactHeader: resolvedCompactHeader,
+          ultraCompact: resolvedUltraCompact,
           hoverAnimation: resolvedHoverAnimation,
           styleNeutralText: resolvedNeutralText,
           customIcon: resolvedCustomIcon
@@ -5900,6 +6074,7 @@ export async function initializeEditor() {
         notesRegistry.set(noteId, noteData);
         applyNoteBehindState(note, resolvedBehindState, { persist: false });
         applyNoteHeaderCompactState(note, resolvedCompactHeader, { persist: false });
+        applyNoteUltraCompactState(note, resolvedUltraCompact, { persist: false });
         applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
         applyFloatingNoteTextNeutralState(note, resolvedNeutralText, { persist: false });
         if (resolvedCustomIcon) {
@@ -6065,6 +6240,22 @@ export async function initializeEditor() {
         footer.append(tagsContainer);
 
         note.append(header, body, footer);
+
+        const leftResizeHandle = document.createElement('div');
+        leftResizeHandle.className = 'floating-note-resize-handle floating-note-resize-handle-left';
+        leftResizeHandle.tabIndex = -1;
+        leftResizeHandle.addEventListener('pointerdown', (event) => {
+          startFloatingNoteEdgeResize(note, 'left', event);
+        });
+
+        const rightResizeHandle = document.createElement('div');
+        rightResizeHandle.className = 'floating-note-resize-handle floating-note-resize-handle-right';
+        rightResizeHandle.tabIndex = -1;
+        rightResizeHandle.addEventListener('pointerdown', (event) => {
+          startFloatingNoteEdgeResize(note, 'right', event);
+        });
+
+        note.append(leftResizeHandle, rightResizeHandle);
         floatingNotesLayer.appendChild(note);
 
         note._ui = {
@@ -6415,6 +6606,18 @@ export async function initializeEditor() {
         const inlineActions = document.createElement('div');
         inlineActions.className = 'note-menu-inline-actions';
 
+        const ultraCompactBtn = document.createElement('button');
+        ultraCompactBtn.type = 'button';
+        ultraCompactBtn.dataset.action = 'toggle-ultra-compact';
+        ultraCompactBtn.classList.add('note-ultra-compact-toggle');
+        ultraCompactBtn.textContent = '🔳 Modo ultracompacto';
+        ultraCompactBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleNoteUltraCompact(note);
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          closeFloatingNoteStyleMenu(menu);
+        });
+
         const compactHeaderBtn = document.createElement('button');
         compactHeaderBtn.type = 'button';
         compactHeaderBtn.dataset.action = 'toggle-compact-header';
@@ -6484,8 +6687,19 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu(menu);
         });
 
-        inlineActions.append(compactHeaderBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
+        inlineActions.append(ultraCompactBtn, compactHeaderBtn, neutralTextBtn, hoverAnimationBtn, tagsBtn, reviewBtn, behindBtn);
         actionsSection.appendChild(inlineActions);
+
+        const duplicateBtn = document.createElement('button');
+        duplicateBtn.type = 'button';
+        duplicateBtn.dataset.action = 'duplicate-note';
+        duplicateBtn.textContent = '📄 Duplicar nota';
+        duplicateBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          duplicateFloatingNote(note);
+          closeFloatingNoteStyleMenu(menu);
+        });
+        actionsSection.appendChild(duplicateBtn);
 
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
@@ -6523,6 +6737,14 @@ export async function initializeEditor() {
         if (reviewBtn) {
           reviewBtn.textContent = noteData.reviewed ? '↺ Reiniciar revisión' : '✓ Marcar revisada';
         }
+        const ultraBtn = menu.querySelector('button[data-action="toggle-ultra-compact"]');
+        if (ultraBtn) {
+          const isUltra = !!noteData.ultraCompact;
+          ultraBtn.textContent = isUltra ? '🔳 Modo normal' : '🔳 Modo ultracompacto';
+          ultraBtn.setAttribute('aria-pressed', isUltra ? 'true' : 'false');
+          ultraBtn.classList.toggle('active', isUltra);
+        }
+
         const compactBtn = menu.querySelector('button[data-action="toggle-compact-header"]');
         if (compactBtn) {
           const isCompact = !!noteData.compactHeader;
@@ -6571,6 +6793,66 @@ export async function initializeEditor() {
         note.remove();
         removeNoteAnchor(noteId);
         removeNoteData(noteId);
+      }
+
+      function duplicateFloatingNote(note) {
+        if (!note) return null;
+        const noteId = note.dataset.noteId;
+        const sourceData = noteId ? notesRegistry.get(noteId) : null;
+        const left = Number.parseFloat(note.dataset.left || note.style.left || '0') || 0;
+        const top = Number.parseFloat(note.dataset.top || note.style.top || '0') || 0;
+        const rect = note.getBoundingClientRect();
+        const width = Math.round(rect.width || Number.parseFloat(note.dataset.width || note.style.width || '') || FLOATING_NOTE_DEFAULT_WIDTH);
+        const heightValue = Math.round(rect.height || Number.parseFloat(note.dataset.height || note.style.height || ''));
+        const offset = 36;
+
+        const bodyHtml = note.querySelector('.floating-note-body')?.innerHTML || '';
+        const htmlContent = typeof sourceData?.html === 'string' && sourceData.html.length
+          ? sourceData.html
+          : bodyHtml;
+
+        const duplicatePages = Array.isArray(sourceData?.pages)
+          ? sourceData.pages.map(page => ({
+              ...page,
+              id: generateUniqueId('note-page')
+            }))
+          : undefined;
+
+        const newNoteData = {
+          style: sourceData?.style,
+          title: sourceData?.title,
+          titleHtml: sourceData?.titleHtml,
+          html: htmlContent,
+          content: sourceData?.content || getNotePlainTextFromHtml(htmlContent),
+          type: sourceData?.type,
+          category: sourceData?.category,
+          priority: sourceData?.priority,
+          tags: Array.isArray(sourceData?.tags) ? [...sourceData.tags] : undefined,
+          topicId: sourceData?.topicId || getCurrentTopicId(),
+          sectionId: sourceData?.sectionId || getCurrentSectionId(),
+          hoverAnimation: sourceData?.hoverAnimation,
+          styleNeutralText: sourceData?.styleNeutralText,
+          behindMainContent: sourceData?.behindMainContent,
+          compactHeader: sourceData?.compactHeader,
+          ultraCompact: sourceData?.ultraCompact,
+          customIcon: sourceData?.customIcon,
+          reviewed: sourceData?.reviewed,
+          reviewCount: sourceData?.reviewCount,
+          lastReviewed: sourceData?.lastReviewed,
+          pages: duplicatePages,
+          currentPageIndex: sourceData?.currentPageIndex,
+          width,
+          height: Number.isFinite(heightValue) && heightValue > 0 ? heightValue : null,
+          left: left + offset,
+          top: top + offset,
+          focus: true
+        };
+
+        const duplicated = createFloatingNote(newNoteData);
+        if (duplicated) {
+          bringNoteToFront(duplicated);
+        }
+        return duplicated;
       }
 
       function setNoteCategory(note, categoryId) {
@@ -6915,6 +7197,7 @@ export async function initializeEditor() {
         }
 
         applyNoteHeaderCompactState(note, !!noteData.compactHeader, { persist: false });
+        applyNoteUltraCompactState(note, !!noteData.ultraCompact, { persist: false });
         updateFloatingNotePageUI(note, noteData);
         applyFloatingNoteTopicVisibility(note);
       }
@@ -7540,14 +7823,22 @@ export async function initializeEditor() {
         }
       });
 
-      window.addEventListener('pointermove', handleFloatingNotePointerMove);
+      window.addEventListener('pointermove', (event) => {
+        if (!handleFloatingNoteEdgeResizeMove(event)) {
+          handleFloatingNotePointerMove(event);
+        }
+      });
       window.addEventListener('pointerup', (event) => {
+        const wasResizing = endFloatingNoteEdgeResize(event);
         endFloatingNoteDrag(event);
-        if (!floatingNoteResizeObserver && floatingNotesLayer) {
+        if ((!floatingNoteResizeObserver || wasResizing) && floatingNotesLayer) {
           floatingNotesLayer.querySelectorAll('.floating-note').forEach(updateFloatingNoteSizeDataset);
         }
       });
-      window.addEventListener('pointercancel', endFloatingNoteDrag);
+      window.addEventListener('pointercancel', (event) => {
+        endFloatingNoteEdgeResize(event);
+        endFloatingNoteDrag(event);
+      });
       window.addEventListener('resize', requestFloatingNotesViewportSync);
       if (window.visualViewport) {
         const handleVisualViewportChange = () => {
@@ -7578,6 +7869,10 @@ export async function initializeEditor() {
 
       toggleNotesBtn?.addEventListener('click', () => {
         setFloatingNotesVisibility(!floatingNotesHidden);
+      });
+
+      printFloatingNotesBtn?.addEventListener('click', () => {
+        printVisibleFloatingNotes();
       });
 
       imageWidthIncreaseBtn?.addEventListener('click', () => {
@@ -9825,6 +10120,7 @@ export async function initializeEditor() {
         isEditMode = !isEditMode;
         hideTopicMenu();
         hideIconPicker();
+        document.body.classList.toggle('edit-mode', isEditMode);
 
         if (isEditMode) {
           pages.forEach(page => page.contentEditable = 'true');
@@ -10471,6 +10767,90 @@ export async function initializeEditor() {
         }
       }
 
+      function printVisibleFloatingNotes() {
+        if (!floatingNotesLayer) return;
+        const visibleNotes = Array.from(floatingNotesLayer.querySelectorAll('.floating-note.floating-note-visible'))
+          .filter(note => !note.hidden && window.getComputedStyle(note).display !== 'none');
+        if (visibleNotes.length === 0) {
+          alert('No hay notas visibles para imprimir.');
+          return;
+        }
+
+        const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+        if (!printWindow) {
+          alert('No se pudo abrir la ventana de impresión.');
+          return;
+        }
+
+        const stylesheetHref = document.querySelector('link[rel="stylesheet"][href]')?.href || '';
+        const layerRect = floatingNotesLayer.getBoundingClientRect();
+        const initialRight = Number.isFinite(layerRect.width) ? layerRect.left + layerRect.width : layerRect.left;
+        const initialBottom = Number.isFinite(layerRect.height) ? layerRect.top + layerRect.height : layerRect.top;
+        const maxRight = visibleNotes.reduce((acc, note) => {
+          const rect = note.getBoundingClientRect();
+          return Math.max(acc, rect.right);
+        }, initialRight);
+        const maxBottom = visibleNotes.reduce((acc, note) => {
+          const rect = note.getBoundingClientRect();
+          return Math.max(acc, rect.bottom);
+        }, initialBottom);
+        const width = Math.max(Math.round(layerRect.width || 0), Math.round(maxRight - layerRect.left));
+        const height = Math.max(Math.round(layerRect.height || 0), Math.round(maxBottom - layerRect.top));
+        const finalWidth = Math.max(width, 320);
+        const finalHeight = Math.max(height, 240);
+        const bodyBackground = window.getComputedStyle(document.body).backgroundColor || '#ffffff';
+
+        printWindow.document.open();
+        printWindow.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Notas flotantes</title>${stylesheetHref ? `<link rel="stylesheet" href="${stylesheetHref}">` : ''}<style>
+          body { margin: 0; background: ${bodyBackground}; }
+          .print-floating-notes-wrapper { position: relative; margin: 0 auto; width: ${finalWidth}px; height: ${finalHeight}px; }
+          .print-floating-notes-layer { position: relative; top: 0; left: 0; right: auto; bottom: auto; width: 100%; height: 100%; pointer-events: none; }
+          .print-floating-notes-layer .floating-note { position: absolute; pointer-events: none; transform: none !important; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18); }
+          .print-floating-notes-layer .floating-note-resize-handle { display: none !important; }
+          @media print { body { margin: 0; } }
+        </style></head><body></body></html>`);
+        printWindow.document.close();
+
+        const doc = printWindow.document;
+        const wrapper = doc.createElement('div');
+        wrapper.className = 'print-floating-notes-wrapper';
+        const layerClone = doc.createElement('div');
+        layerClone.className = 'floating-notes-layer print-floating-notes-layer';
+        wrapper.appendChild(layerClone);
+        doc.body.appendChild(wrapper);
+
+        visibleNotes.forEach(original => {
+          const rect = original.getBoundingClientRect();
+          const clone = original.cloneNode(true);
+          const left = Math.round(rect.left - layerRect.left);
+          const top = Math.round(rect.top - layerRect.top);
+          clone.style.left = `${left}px`;
+          clone.style.top = `${top}px`;
+          clone.style.width = `${Math.round(rect.width)}px`;
+          clone.style.height = `${Math.round(rect.height)}px`;
+          clone.style.margin = '0';
+          clone.style.transform = 'none';
+          clone.classList.remove('dragging', 'resizing');
+          clone.classList.remove('floating-note-ultra-compact');
+          clone.classList.add('floating-note-compact-header');
+          clone.hidden = false;
+          clone.style.display = '';
+          clone.setAttribute('aria-hidden', 'false');
+          clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));
+          clone.querySelectorAll('.floating-note-style-menu').forEach(menu => menu.remove());
+          layerClone.appendChild(clone);
+        });
+
+        printWindow.addEventListener('afterprint', () => {
+          printWindow.close();
+        }, { once: true });
+
+        printWindow.requestAnimationFrame(() => {
+          printWindow.focus();
+          printWindow.print();
+        });
+      }
+
       function setMainContentVisibility(hidden) {
         mainContentHidden = !!hidden;
         document.body.classList.toggle('pages-hidden', mainContentHidden);
@@ -10479,6 +10859,13 @@ export async function initializeEditor() {
           toggleMainContentBtn.setAttribute('aria-pressed', mainContentHidden ? 'true' : 'false');
           toggleMainContentBtn.title = mainContentHidden ? 'Mostrar contenido principal' : 'Ocultar contenido principal';
           toggleMainContentBtn.textContent = mainContentHidden ? '📄' : '🗂️';
+        }
+        if (printFloatingNotesBtn) {
+          printFloatingNotesBtn.hidden = !mainContentHidden;
+          printFloatingNotesBtn.disabled = !mainContentHidden;
+          if (!mainContentHidden) {
+            printFloatingNotesBtn.blur();
+          }
         }
       }
 
@@ -11092,6 +11479,7 @@ ${inlineStyles}
           noteExport.createdAt = noteData.createdAt || null;
           noteExport.updatedAt = noteData.updatedAt || null;
           noteExport.compactHeader = !!noteData.compactHeader;
+          noteExport.ultraCompact = !!noteData.ultraCompact;
           noteExport.customIcon = noteData.customIcon || null;
           noteExport.hoverAnimation = noteData.hoverAnimation === true;
           noteExport.styleNeutralText = noteData.styleNeutralText === true;

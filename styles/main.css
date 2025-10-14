@@ -3356,7 +3356,7 @@ body.reading-mode .floating-notes-layer {
   border: 1px solid rgba(15, 23, 42, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   pointer-events: auto;
   backdrop-filter: saturate(120%);
   transition: box-shadow 0.2s ease, transform 0.2s ease;
@@ -3365,6 +3365,51 @@ body.reading-mode .floating-notes-layer {
   font-size: 14px;
   --floating-note-title-color: currentColor;
   --note-category-indicator: var(--floating-note-title-color, currentColor);
+}
+
+.floating-note-resize-handle {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.floating-note-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 2px;
+  right: 2px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.floating-note-resize-handle:hover::after,
+.floating-note-resize-handle:focus::after,
+.floating-note-resize-handle:active::after {
+  opacity: 1;
+}
+
+.floating-note-resize-handle-left {
+  left: -4px;
+}
+
+.floating-note-resize-handle-right {
+  right: -4px;
+}
+
+.floating-note.resizing {
+  user-select: none;
+}
+
+body:not(.edit-mode) .floating-note-resize-handle {
+  display: none;
 }
 
 .floating-note-hover-animated:not(.dragging):hover,
@@ -3809,6 +3854,7 @@ body.reading-mode .floating-notes-layer {
   outline: none;
   border-radius: 6px;
   padding: 4px;
+  padding-top: 2px;
   cursor: text;
   user-select: text;
   min-height: 80px;
@@ -3867,6 +3913,25 @@ body.pages-hidden .floating-note-behind:focus-within {
 .floating-note.enhanced-note {
   gap: 0;
   padding: 0;
+}
+
+.floating-note-ultra-compact .note-category,
+.floating-note-ultra-compact .note-navigation {
+  display: none !important;
+}
+
+.floating-note-ultra-compact .note-header {
+  justify-content: flex-end;
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.floating-note-ultra-compact .floating-note-body {
+  padding-top: 2px;
+}
+
+.floating-note-ultra-compact .note-footer {
+  margin-top: 0;
 }
 
 .enhanced-note .note-header {
