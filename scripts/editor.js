@@ -23,7 +23,7 @@ export async function initializeEditor() {
       let isEditMode = false;
       let isPanelEditMode = false;
       let isReadingMode = false;
-      let pages = [...document.querySelectorAll('.page')];
+      let pages = [...pagesContainerElement.querySelectorAll('.page')];
       let globalTopicCounter = 1;
       let selectedImage = null;
       let selectedTemplateBlock = null;
@@ -130,6 +130,12 @@ export async function initializeEditor() {
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
+      const imageViewerState = {
+        open: false,
+        items: [],
+        activeId: null,
+        notesVisible: false
+      };
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -304,6 +310,22 @@ export async function initializeEditor() {
       const toggleMainContentBtn = document.getElementById('toggleMainContentBtn');
       const printFloatingNotesViewBtn = document.getElementById('printFloatingNotesViewBtn');
       const notesViewBtn = document.getElementById('notesViewBtn');
+      const workspaceLayout = document.getElementById('workspaceLayout');
+      const documentWorkspace = document.getElementById('documentWorkspace');
+      const documentPagesContainer = document.getElementById('documentPagesContainer');
+      const imageViewerPanel = document.getElementById('imageViewerPanel');
+      const imageViewerBtn = document.getElementById('imageViewerBtn');
+      const imageViewerAddBtn = document.getElementById('imageViewerAddBtn');
+      const imageViewerDownloadBtn = document.getElementById('imageViewerDownloadBtn');
+      const imageViewerNotesBtn = document.getElementById('imageViewerNotesBtn');
+      const imageViewerCloseBtn = document.getElementById('imageViewerCloseBtn');
+      const imageViewerNotesContainer = document.getElementById('imageViewerNotes');
+      const imageViewerNotesInput = document.getElementById('imageViewerNotesInput');
+      const imageViewerThumbs = document.getElementById('imageViewerThumbs');
+      const imageViewerMainImage = document.getElementById('imageViewerMainImage');
+      const imageViewerPlaceholder = document.getElementById('imageViewerPlaceholder');
+      const imageViewerFileInput = document.getElementById('imageViewerFileInput');
+      const pagesContainerElement = documentPagesContainer || document.body;
       const topbar = document.querySelector('.topbar');
       const topbarToolsToggle = document.getElementById('topbarToolsToggle');
       const topbarToolsDropdown = document.getElementById('topbarToolsDropdown');
@@ -1921,16 +1943,324 @@ export async function initializeEditor() {
         }
       }
 
+      function syncImageViewerLayout() {
+        const shouldDisplay = !!(imageViewerPanel && imageViewerState.open);
+        if (workspaceLayout) {
+          workspaceLayout.classList.toggle('workspace-dual', shouldDisplay);
+          workspaceLayout.classList.toggle('workspace-single', !shouldDisplay);
+        }
+        if (imageViewerPanel) {
+          imageViewerPanel.setAttribute('aria-hidden', shouldDisplay ? 'false' : 'true');
+          if (!shouldDisplay) {
+            imageViewerPanel.setAttribute('hidden', 'hidden');
+          } else {
+            imageViewerPanel.removeAttribute('hidden');
+          }
+        }
+        document.body.classList.toggle('image-viewer-open', shouldDisplay);
+        if (imageViewerBtn) {
+          imageViewerBtn.classList.toggle('active', shouldDisplay);
+          imageViewerBtn.setAttribute('aria-pressed', shouldDisplay ? 'true' : 'false');
+          imageViewerBtn.title = shouldDisplay ? 'Ocultar visor de imágenes' : 'Visor de imágenes';
+        }
+      }
+
+      function getActiveImageViewerItem() {
+        if (!imageViewerState.activeId) {
+          return null;
+        }
+        return imageViewerState.items.find(item => item.id === imageViewerState.activeId) || null;
+      }
+
+      function setActiveImageViewerItem(id) {
+        if (!id) return;
+        const target = imageViewerState.items.find(item => item.id === id);
+        if (!target) return;
+        imageViewerState.activeId = target.id;
+        renderImageViewer();
+      }
+
+      function renderImageViewer() {
+        if (!imageViewerPanel) {
+          return;
+        }
+
+        if (imageViewerState.items.length === 0) {
+          imageViewerState.activeId = null;
+          imageViewerState.notesVisible = false;
+        } else if (!imageViewerState.items.some(item => item.id === imageViewerState.activeId)) {
+          imageViewerState.activeId = imageViewerState.items[0].id;
+        }
+
+        const activeItem = getActiveImageViewerItem();
+        const hasActive = !!activeItem;
+
+        if (imageViewerMainImage) {
+          if (hasActive) {
+            imageViewerMainImage.src = activeItem.src;
+            imageViewerMainImage.alt = activeItem.name
+              ? `Imagen: ${activeItem.name}`
+              : 'Imagen agregada al visor';
+            imageViewerMainImage.hidden = false;
+          } else {
+            imageViewerMainImage.hidden = true;
+            imageViewerMainImage.removeAttribute('src');
+            imageViewerMainImage.alt = '';
+          }
+        }
+
+        if (imageViewerPlaceholder) {
+          imageViewerPlaceholder.hidden = hasActive;
+        }
+
+        if (imageViewerNotesContainer) {
+          const showNotes = hasActive && imageViewerState.notesVisible;
+          imageViewerNotesContainer.hidden = !showNotes;
+        }
+
+        if (imageViewerNotesInput) {
+          if (hasActive) {
+            const noteValue = typeof activeItem.notes === 'string' ? activeItem.notes : '';
+            if (imageViewerNotesInput.value !== noteValue) {
+              imageViewerNotesInput.value = noteValue;
+            }
+            imageViewerNotesInput.disabled = false;
+          } else {
+            imageViewerNotesInput.value = '';
+            imageViewerNotesInput.disabled = true;
+          }
+        }
+
+        if (imageViewerDownloadBtn) {
+          imageViewerDownloadBtn.disabled = !hasActive;
+        }
+
+        if (imageViewerNotesBtn) {
+          const hasImages = imageViewerState.items.length > 0;
+          imageViewerNotesBtn.disabled = !hasImages;
+          const notesActive = hasImages && imageViewerState.notesVisible;
+          imageViewerNotesBtn.classList.toggle('active', notesActive);
+          imageViewerNotesBtn.setAttribute('aria-pressed', notesActive ? 'true' : 'false');
+          imageViewerNotesBtn.title = hasImages
+            ? (notesActive ? 'Ocultar notas ocultas' : 'Mostrar notas ocultas')
+            : 'Notas ocultas';
+        }
+
+        if (imageViewerThumbs) {
+          imageViewerThumbs.innerHTML = '';
+          if (!imageViewerState.items.length) {
+            imageViewerThumbs.dataset.empty = 'true';
+          } else {
+            imageViewerThumbs.dataset.empty = 'false';
+            const frag = document.createDocumentFragment();
+            imageViewerState.items.forEach(item => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'image-viewer-thumb' + (item.id === imageViewerState.activeId ? ' active' : '');
+              button.setAttribute('role', 'listitem');
+              button.title = item.name || 'Imagen';
+              const thumbImg = document.createElement('img');
+              thumbImg.src = item.src;
+              thumbImg.alt = item.name ? `Miniatura de ${item.name}` : 'Miniatura de imagen';
+              const caption = document.createElement('span');
+              caption.textContent = item.name || 'Imagen';
+              button.append(thumbImg, caption);
+              button.addEventListener('click', () => setActiveImageViewerItem(item.id));
+              frag.appendChild(button);
+            });
+            imageViewerThumbs.appendChild(frag);
+          }
+        }
+      }
+
+      function openImageViewer() {
+        if (!imageViewerPanel) {
+          return;
+        }
+        if (!imageViewerState.items.length) {
+          imageViewerState.activeId = null;
+          imageViewerState.notesVisible = false;
+        }
+        imageViewerState.open = true;
+        syncImageViewerLayout();
+        renderImageViewer();
+      }
+
+      function closeImageViewer() {
+        if (!imageViewerPanel) {
+          return;
+        }
+        imageViewerState.open = false;
+        syncImageViewerLayout();
+      }
+
+      function toggleImageViewer() {
+        if (imageViewerState.open) {
+          closeImageViewer();
+        } else {
+          openImageViewer();
+        }
+      }
+
+      function toggleImageViewerNotes() {
+        if (!imageViewerState.items.length) {
+          imageViewerState.notesVisible = false;
+          renderImageViewer();
+          return;
+        }
+        imageViewerState.notesVisible = !imageViewerState.notesVisible;
+        renderImageViewer();
+      }
+
+      function addImagesToViewerFromFiles(fileList) {
+        if (!fileList || typeof fileList.length !== 'number' || fileList.length === 0) {
+          return;
+        }
+
+        const files = Array.from(fileList).filter(file => {
+          if (!file) return false;
+          if (typeof file.type === 'string' && file.type.startsWith('image/')) {
+            return true;
+          }
+          const name = typeof file.name === 'string' ? file.name : '';
+          return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(name);
+        });
+
+        if (!files.length) {
+          return;
+        }
+
+        let processed = 0;
+        const total = files.length;
+
+        files.forEach(file => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            if (result) {
+              const rawName = typeof file.name === 'string' ? file.name.trim() : '';
+              const baseName = rawName.replace(/[\r\n]+/g, ' ').slice(0, 140);
+              const item = {
+                id: generateUniqueId('viewer-image'),
+                name: baseName || 'Imagen',
+                src: result,
+                notes: '',
+                addedAt: new Date().toISOString()
+              };
+              imageViewerState.items.push(item);
+              imageViewerState.activeId = item.id;
+              if (!imageViewerState.open) {
+                imageViewerState.open = true;
+                syncImageViewerLayout();
+              }
+            }
+            processed += 1;
+            renderImageViewer();
+            if (processed === total && imageViewerState.items.length) {
+              syncImageViewerLayout();
+            }
+          };
+          reader.onerror = () => {
+            processed += 1;
+            if (processed === total) {
+              if (imageViewerState.items.length && !imageViewerState.open) {
+                imageViewerState.open = true;
+              }
+              if (imageViewerState.items.length) {
+                syncImageViewerLayout();
+              }
+              renderImageViewer();
+            }
+          };
+          try {
+            reader.readAsDataURL(file);
+          } catch (error) {
+            processed += 1;
+          }
+        });
+      }
+
+      function updateActiveImageViewerNotes(value) {
+        const activeItem = getActiveImageViewerItem();
+        if (!activeItem) {
+          return;
+        }
+        activeItem.notes = typeof value === 'string' ? value : '';
+      }
+
+      function downloadActiveImageFromViewer() {
+        const activeItem = getActiveImageViewerItem();
+        if (!activeItem || !activeItem.src) {
+          return;
+        }
+        const rawName = typeof activeItem.name === 'string' ? activeItem.name : '';
+        const nameWithoutExt = rawName.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[\/:*?"<>|]+/g, '-').trim() || 'imagen';
+        let extension = 'png';
+        const dataMatch = activeItem.src.match(/^data:image\/([a-zA-Z0-9+]+);/);
+        if (dataMatch && dataMatch[1]) {
+          extension = dataMatch[1].toLowerCase();
+          if (extension === 'jpeg') {
+            extension = 'jpg';
+          }
+        } else {
+          const extMatch = rawName.match(/\.([a-z0-9]{2,5})$/i);
+          if (extMatch && extMatch[1]) {
+            extension = extMatch[1].toLowerCase();
+          }
+        }
+        const downloadLink = document.createElement('a');
+        downloadLink.href = activeItem.src;
+        downloadLink.download = `${nameWithoutExt}.${extension}`;
+        downloadLink.rel = 'noopener';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+      }
+
       function updateZoom(delta) {
         applyZoom(currentZoom + delta);
       }
 
       applyDocumentShift();
+      syncImageViewerLayout();
+      renderImageViewer();
 
       zoomInBtn?.addEventListener('click', () => updateZoom(0.1));
       zoomOutBtn?.addEventListener('click', () => updateZoom(-0.1));
       shiftLeftBtn?.addEventListener('click', () => adjustDocumentShift(-DOCUMENT_SHIFT_STEP));
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
+
+      imageViewerBtn?.addEventListener('click', () => {
+        toggleImageViewer();
+      });
+
+      imageViewerCloseBtn?.addEventListener('click', () => {
+        closeImageViewer();
+      });
+
+      imageViewerAddBtn?.addEventListener('click', () => {
+        imageViewerFileInput?.click();
+      });
+
+      imageViewerFileInput?.addEventListener('change', (event) => {
+        const files = event.target?.files;
+        if (files && files.length) {
+          addImagesToViewerFromFiles(files);
+        }
+        event.target.value = '';
+      });
+
+      imageViewerDownloadBtn?.addEventListener('click', () => {
+        downloadActiveImageFromViewer();
+      });
+
+      imageViewerNotesBtn?.addEventListener('click', () => {
+        toggleImageViewerNotes();
+      });
+
+      imageViewerNotesInput?.addEventListener('input', (event) => {
+        updateActiveImageViewerNotes(event.target.value);
+      });
 
       /* === UTILIDADES === */
       function isNodeInDocument(node) {
@@ -5788,6 +6118,36 @@ export async function initializeEditor() {
         });
       }
 
+      function shouldStartFloatingNoteDrag(note, event) {
+        if (!note || !event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') {
+          return false;
+        }
+        const rect = note.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) {
+          return false;
+        }
+        const pointerX = event.clientX - rect.left;
+        const pointerY = event.clientY - rect.top;
+        const topBand = Math.min(26, Math.max(16, rect.height * 0.25));
+        if (pointerY < 0 || pointerY > topBand) {
+          return false;
+        }
+        const leftGuard = Math.min(48, rect.width * 0.3);
+        if (pointerX <= leftGuard) {
+          return false;
+        }
+        if (event.target.closest('.note-category')) {
+          return false;
+        }
+        if (event.target.closest('.floating-note-style-menu')) {
+          return false;
+        }
+        if (event.target.closest('.floating-note-resize-handle')) {
+          return false;
+        }
+        return true;
+      }
+
       function startFloatingNoteDrag(note, event) {
         if (!note || !floatingNotesLayer) return;
         floatingNoteDragState.note = note;
@@ -6512,7 +6872,8 @@ export async function initializeEditor() {
         header.addEventListener('pointerdown', (event) => {
           if (event.button !== 0) return;
           if (event.detail > 1) return;
-          if (event.target.closest('button') || event.target.closest('.floating-note-style-menu') || event.target.closest('.note-category')) return;
+          if (!shouldStartFloatingNoteDrag(note, event)) return;
+          event.stopPropagation();
           closeFloatingNoteStyleMenu(optionsMenu);
           startFloatingNoteDrag(note, event);
         });
@@ -6533,8 +6894,15 @@ export async function initializeEditor() {
           if (event.target.closest('.floating-note-style-menu')) {
             return;
           }
+          const initiateDrag = event.button === 0 && event.detail <= 1 && shouldStartFloatingNoteDrag(note, event);
+          if (initiateDrag) {
+            event.stopPropagation();
+          }
           bringNoteToFront(note);
           closeFloatingNoteStyleMenu();
+          if (initiateDrag) {
+            startFloatingNoteDrag(note, event);
+          }
         });
 
         if (floatingNoteResizeObserver) {
@@ -9855,6 +10223,7 @@ export async function initializeEditor() {
         clearFloatingNotes();
         setFloatingNotesVisibility(false);
         setFloatingNotesEditable(isEditMode);
+        restoreImageViewerFromData(null);
         buildSectionsPanel();
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
@@ -9932,12 +10301,13 @@ export async function initializeEditor() {
           newPage.dataset.magicAnchorId = magicId;
         }
 
+        const pagesContainer = pagesContainerElement || document.body;
         let insertBefore = null;
         if (section.temas.length > 0) {
           const lastTopic = section.temas[section.temas.length - 1];
-          if (lastTopic?.page?.parentNode) {
+          if (lastTopic?.page?.parentNode === pagesContainer) {
             insertBefore = lastTopic.page.nextSibling;
-            lastTopic.page.parentNode.insertBefore(newPage, insertBefore);
+            pagesContainer.insertBefore(newPage, insertBefore);
           }
         }
 
@@ -9952,15 +10322,16 @@ export async function initializeEditor() {
               break;
             }
           }
-          if (siblingPage?.parentNode) {
+          if (siblingPage?.parentNode === pagesContainer) {
+            pagesContainer.insertBefore(newPage, siblingPage);
+          } else if (siblingPage?.parentNode) {
             siblingPage.parentNode.insertBefore(newPage, siblingPage);
           } else {
-            const anchorParent = pages[pages.length - 1]?.parentNode || document.body;
-            anchorParent.appendChild(newPage);
+            pagesContainer.appendChild(newPage);
           }
         }
 
-        pages = [...document.querySelectorAll('.page')];
+        pages = [...pagesContainer.querySelectorAll('.page')];
         setupMagicIcons();
         if (io) {
           io.observe(newPage);
@@ -10236,6 +10607,7 @@ export async function initializeEditor() {
           hideModal();
           hideImageToolbar();
           hideTemplateToolbar();
+          closeImageViewer();
           closeMagicView();
           closeImageCropModal();
           highlightPalette.classList.remove('show');
@@ -11363,6 +11735,65 @@ ${inlineStyles}
   });
 
   /* === IMPORTAR / EXPORTAR SECCIONES === */
+  function getImageViewerDataSnapshot() {
+    return {
+      open: !!(imageViewerState.open && imageViewerState.items.length),
+      activeId: imageViewerState.items.length ? imageViewerState.activeId : null,
+      notesVisible: !!(imageViewerState.notesVisible && imageViewerState.items.length),
+      items: imageViewerState.items.map(item => ({
+        id: item.id,
+        name: item.name || '',
+        src: item.src,
+        notes: typeof item.notes === 'string' ? item.notes : '',
+        addedAt: item.addedAt || null
+      }))
+    };
+  }
+
+  function restoreImageViewerFromData(data) {
+    imageViewerState.items = [];
+    imageViewerState.activeId = null;
+    imageViewerState.notesVisible = false;
+    imageViewerState.open = false;
+
+    if (data && Array.isArray(data.items)) {
+      data.items.forEach(rawItem => {
+        const src = typeof rawItem?.src === 'string' ? rawItem.src : '';
+        if (!src) {
+          return;
+        }
+        const id = typeof rawItem?.id === 'string' && rawItem.id.trim()
+          ? rawItem.id.trim()
+          : generateUniqueId('viewer-image');
+        const name = typeof rawItem?.name === 'string' ? rawItem.name.trim().slice(0, 160) : '';
+        const notes = typeof rawItem?.notes === 'string' ? rawItem.notes : '';
+        const addedAt = typeof rawItem?.addedAt === 'string' ? rawItem.addedAt : null;
+        imageViewerState.items.push({
+          id,
+          name,
+          src,
+          notes,
+          addedAt
+        });
+      });
+    }
+
+    if (imageViewerState.items.length) {
+      const desiredId = typeof data?.activeId === 'string' ? data.activeId : '';
+      const match = desiredId ? imageViewerState.items.find(item => item.id === desiredId) : null;
+      imageViewerState.activeId = match ? match.id : imageViewerState.items[0].id;
+      imageViewerState.notesVisible = !!data?.notesVisible;
+      imageViewerState.open = !!data?.open;
+    } else {
+      imageViewerState.activeId = null;
+      imageViewerState.notesVisible = false;
+      imageViewerState.open = false;
+    }
+
+    syncImageViewerLayout();
+    renderImageViewer();
+  }
+
   function collectDocumentData() {
     persistMagicEdits();
     const magicContainer = document.querySelector('.magic-content-container');
@@ -11588,7 +12019,8 @@ ${inlineStyles}
       magicTopics: exportedMagicTopics,
       floatingNotes: exportedNotes,
       notesHidden: floatingNotesHidden,
-      documentShift: documentHorizontalShift
+      documentShift: documentHorizontalShift,
+      imageViewer: getImageViewerDataSnapshot()
     };
   }
 
@@ -11785,14 +12217,15 @@ ${inlineStyles}
     }
     applyDocumentShift();
 
-    const mainContainer = document.body;
-    const scriptTag = document.querySelector('script');
-    if (!scriptTag) {
-      throw new Error('No se encontró el contenedor principal.');
+    const mainContainer = pagesContainerElement;
+    if (!mainContainer) {
+      throw new Error('No se encontró el contenedor principal de páginas.');
     }
 
     io.disconnect();
     pages.forEach(page => page.remove());
+    mainContainer.innerHTML = '';
+    pages = [];
 
     if (specialtySpan && typeof data.specialty === 'string') {
       setDocumentTitle(data.specialty);
@@ -11868,7 +12301,7 @@ ${inlineStyles}
         page.dataset.sectionName = topicSectionName;
         page.dataset.topicId = topicId;
         page.innerHTML = typeof topicData?.html === 'string' ? topicData.html : '';
-        mainContainer.insertBefore(page, scriptTag);
+        mainContainer.appendChild(page);
         afterContentSanitize(page);
         if (Array.isArray(topicData?.templateBlocks)) {
           restoreTemplateBlocks(page, topicData.templateBlocks);
@@ -11967,6 +12400,7 @@ ${inlineStyles}
 
     restoreFloatingNotes(Array.isArray(data.floatingNotes) ? data.floatingNotes : [], !!data.notesHidden);
     setFloatingNotesEditable(isEditMode);
+    restoreImageViewerFromData(data?.imageViewer || null);
 
     pages.forEach(page => io.observe(page));
     setupMagicIcons();
@@ -12144,8 +12578,10 @@ ${inlineStyles}
             setDocumentTitle(loadedSpecialty.textContent.trim());
           }
 
-          const mainContainer = document.querySelector('body');
-          const scriptTag = mainContainer.querySelector('script');
+          const mainContainer = pagesContainerElement;
+          if (!mainContainer) {
+            throw new Error('No se encontró el contenedor principal de páginas.');
+          }
           const loadedPages = loadedDoc.querySelectorAll('.page');
 
           if (loadedPages.length === 0) {
@@ -12180,7 +12616,7 @@ ${inlineStyles}
             existingTopicIds.add(topicId);
 
             clonedPage.contentEditable = isEditMode ? 'true' : 'false';
-            mainContainer.insertBefore(clonedPage, scriptTag);
+            mainContainer.appendChild(clonedPage);
           });
 
           const magicContainer = document.querySelector('.magic-content-container');
@@ -12240,7 +12676,8 @@ ${inlineStyles}
         await importHtmlFile(file, existingTopicIds);
       }
 
-      pages = [...document.querySelectorAll('.page')];
+      const pageRoot = pagesContainerElement || document.body;
+      pages = [...pageRoot.querySelectorAll('.page')];
       pages.forEach(p => {
         afterContentSanitize(p);
         if (!p.dataset.topicId) {
