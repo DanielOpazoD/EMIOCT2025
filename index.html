@@ -592,6 +592,30 @@
   <aside id="magic-view" class="magic-view">
   </aside>
 
+  <div id="imageViewerPanel" class="image-viewer-panel" aria-hidden="true">
+    <div id="imageViewerShell" class="image-viewer-shell" role="dialog" aria-modal="true" aria-label="Visor de imágenes">
+      <div class="image-viewer-top">
+        <button type="button" id="imageViewerCloseBtn" class="image-viewer-close" aria-label="Cerrar visor">&times;</button>
+        <div id="imageViewerCounter" class="image-viewer-counter" aria-live="polite"></div>
+        <div class="image-viewer-controls">
+          <button type="button" id="imageViewerZoomOutBtn" title="Alejar imagen" aria-label="Alejar">−</button>
+          <button type="button" id="imageViewerZoomInBtn" title="Acercar imagen" aria-label="Acercar">+</button>
+          <button type="button" id="imageViewerDownloadBtn" title="Descargar imagen" aria-label="Descargar">⬇️</button>
+        </div>
+      </div>
+      <div class="image-viewer-stage">
+        <button type="button" id="imageViewerPrevBtn" class="image-viewer-nav" aria-label="Imagen anterior">&#10094;</button>
+        <div class="image-viewer-canvas">
+          <img id="imageViewerImage" src="" alt="Vista de imagen" />
+          <div id="imageViewerCaption" class="image-viewer-caption" data-empty="true">
+            <span id="imageViewerCaptionText">Sin descripción</span>
+          </div>
+        </div>
+        <button type="button" id="imageViewerNextBtn" class="image-viewer-nav" aria-label="Imagen siguiente">&#10095;</button>
+      </div>
+    </div>
+  </div>
+
   <div id="floatingNotesLayer" class="floating-notes-layer"></div>
 
   <!-- Contenido mágico -->
