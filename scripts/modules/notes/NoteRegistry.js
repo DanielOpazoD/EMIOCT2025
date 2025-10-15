@@ -375,6 +375,19 @@ export function createEnhancedNote(options = {}) {
     titleHtml = escapeHtml(title);
   }
 
+  const normalizedBorderWidth = (() => {
+    if (Number.isFinite(options.borderWidth)) {
+      return Math.max(Number(options.borderWidth), 0);
+    }
+    if (typeof options.borderWidth === 'string') {
+      const parsed = Number.parseFloat(options.borderWidth);
+      if (Number.isFinite(parsed)) {
+        return Math.max(parsed, 0);
+      }
+    }
+    return null;
+  })();
+
   const base = {
     id,
     type,
@@ -382,6 +395,11 @@ export function createEnhancedNote(options = {}) {
     style: (options.style && String(options.style)) || DEFAULT_NOTE_STYLE,
     hoverAnimation: normalizeBooleanFlag(options.hoverAnimation, false),
     styleNeutralText: normalizeBooleanFlag(options.styleNeutralText, false),
+    borderEnabled: normalizeBooleanFlag(options.borderEnabled, true),
+    borderWidth: normalizedBorderWidth,
+    borderColor: typeof options.borderColor === 'string' && options.borderColor.trim()
+      ? options.borderColor.trim()
+      : null,
     title,
     titleHtml,
     content: typeof options.content === 'string' ? options.content : '',
@@ -511,6 +529,26 @@ export class NoteRegistry {
           merged.hoverAnimation = normalizeBooleanFlag(overrides.hoverAnimation, merged.hoverAnimation);
         } else if (key === 'styleNeutralText') {
           merged.styleNeutralText = normalizeBooleanFlag(overrides.styleNeutralText, merged.styleNeutralText);
+        } else if (key === 'borderEnabled') {
+          merged.borderEnabled = normalizeBooleanFlag(overrides.borderEnabled, merged.borderEnabled);
+        } else if (key === 'borderWidth') {
+          if (overrides.borderWidth === null) {
+            merged.borderWidth = null;
+          } else if (Number.isFinite(overrides.borderWidth)) {
+            merged.borderWidth = Math.max(Number(overrides.borderWidth), 0);
+          } else if (typeof overrides.borderWidth === 'string') {
+            const parsed = Number.parseFloat(overrides.borderWidth);
+            if (Number.isFinite(parsed)) {
+              merged.borderWidth = Math.max(parsed, 0);
+            }
+          }
+        } else if (key === 'borderColor') {
+          if (typeof overrides.borderColor === 'string') {
+            const trimmed = overrides.borderColor.trim();
+            merged.borderColor = trimmed || null;
+          } else if (overrides.borderColor === null) {
+            merged.borderColor = null;
+          }
         } else if (key === 'customIcon') {
           merged.customIcon = normalizeCustomIcon(overrides.customIcon);
         } else if (key === 'superNote') {
@@ -557,8 +595,6 @@ export class NoteRegistry {
           key === 'relativeTop'
         ) {
           merged[key] = Number.isFinite(overrides[key]) ? Number(overrides[key]) : merged[key];
-        } else if (key === 'borderColor') {
-          return;
         } else if (overrides[key] !== undefined) {
           merged[key] = overrides[key];
         }

@@ -81,12 +81,24 @@ export async function initializeEditor() {
         { id: 'spring', name: 'Primavera', className: 'floating-note-style-spring' }
       ];
 
+      const FLOATING_NOTE_BORDER_DEFAULT_COLOR = '#94a3b8';
+      const FLOATING_NOTE_BORDER_DEFAULT_WIDTH = 1;
+      const FLOATING_NOTE_BORDER_COLORS = [
+        '#000000',
+        '#1f2937',
+        '#475569',
+        '#94a3b8',
+        '#fecaca',
+        '#fde68a',
+        '#bbf7d0',
+        '#bae6fd',
+        '#ddd6fe',
+        '#fbcfe8',
+        '#fef3c7'
+      ];
+
       const NOTE_ICON_SYMBOLS = [
-        '▪︎', '▪️', '▫️', '□', '●', '○', '◉', '◆', '◇', '◈', '🔹', '🔸', '📌', '📍', '📂', '📄',
-        '📝', '📋', '📎', '🔑', '📚', '📑', '📊', '🔎', '💡', '⚠️', '✅', '☑️', '✔️', '❌', '✖️',
-        '❔', '⭐', '🩺', '💉', '💊', '🩸', '🧪', '🔬', '🩻', '🦠', '➕', '➖', 'o', '±', '~', '≈',
-        '•', '‣', '↑', '↓', '→', '←', '↔', '⇧', '⇩', '⇨', '⇦', '↗', '↘', '↙', '↖', '➡️', '⬅️',
-        '➔', '↳', '➤', '⇒', '⮕', '▸', '▹'
+        '📌', '🔑', '⭐', '✔️', '💊', '📝', '📂', '🩻', '🩺', '📍', '📊', '⚠️', '✍️'
       ];
 
       const ICON_FEATURE_ENABLED = true;
@@ -138,8 +150,8 @@ export async function initializeEditor() {
         startY: 0
       };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
-      const FLOATING_NOTE_MIN_WIDTH = 160;
-      const FLOATING_NOTE_MIN_HEIGHT = 140;
+      const FLOATING_NOTE_MIN_WIDTH = 0;
+      const FLOATING_NOTE_MIN_HEIGHT = 0;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let floatingNotesViewportRelaxedMatching = false;
@@ -806,6 +818,11 @@ export async function initializeEditor() {
       const tableBorderColorCustom = document.getElementById('tableBorderColorCustom');
       const tableBorderWidthInput = document.getElementById('tableBorderWidth');
       const tableBorderWidthValue = document.getElementById('tableBorderWidthValue');
+      const tableOuterBorderToggle = document.getElementById('toggleOuterBorder');
+      const tableOuterBorderWidthInput = document.getElementById('tableOuterBorderWidth');
+      const tableOuterBorderWidthValue = document.getElementById('tableOuterBorderWidthValue');
+      const tableOuterBorderColorButtons = Array.from(document.querySelectorAll('.table-outer-border-color-btn'));
+      const tableOuterBorderColorCustom = document.getElementById('tableOuterBorderColorCustom');
       const toggleVerticalBorders = document.getElementById('toggleVerticalBorders');
       const toggleHorizontalBorders = document.getElementById('toggleHorizontalBorders');
       const tableBorderResetBtn = document.querySelector('[data-border-reset]');
@@ -4774,6 +4791,22 @@ export async function initializeEditor() {
 
         const actionButtons = Array.from(tableMenu.querySelectorAll('[data-action]'));
 
+        function isCellInTopRow(cell, table) {
+          if (!cell || !table) return false;
+          const row = cell.closest('tr');
+          if (!row) return false;
+          if (row.closest('table') !== table) return false;
+          const rowIndex = typeof row.rowIndex === 'number' ? row.rowIndex : -1;
+          return rowIndex === 0;
+        }
+
+        function getTopRowFirstCell(table) {
+          if (!table) return null;
+          const firstRow = table.rows && table.rows.length ? table.rows[0] : null;
+          if (!firstRow) return null;
+          return firstRow.cells && firstRow.cells.length ? firstRow.cells[0] : firstRow.querySelector('td,th');
+        }
+
         function hideMenu(options = {}) {
           tableMenu.classList.remove('show');
           tableMenu.setAttribute('aria-hidden', 'true');
@@ -4790,6 +4823,10 @@ export async function initializeEditor() {
         function showMenu(table, cell) {
           if (!isEditMode || !table) return;
           if (!table.closest('[contenteditable="true"]')) return;
+          if (cell && !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           if (selectedTable && selectedTable !== table) {
             selectedTable.classList.remove('table-menu-selected');
             clearColumnHighlight();
@@ -4797,8 +4834,12 @@ export async function initializeEditor() {
           selectedTable = table;
           if (cell) {
             selectedCell = cell;
-          } else if (!selectedCell || !selectedTable.contains(selectedCell)) {
-            selectedCell = selectedTable.querySelector('td,th');
+          } else if (!selectedCell || !selectedTable.contains(selectedCell) || !isCellInTopRow(selectedCell, selectedTable)) {
+            selectedCell = getTopRowFirstCell(selectedTable);
+          }
+          if (!selectedCell || !isCellInTopRow(selectedCell, selectedTable)) {
+            hideMenu();
+            return;
           }
 
           if (selectedTable) {
@@ -4838,6 +4879,9 @@ export async function initializeEditor() {
           if (!table.dataset.borderWidth) table.dataset.borderWidth = '1';
           if (!table.dataset.hideVerticalBorders) table.dataset.hideVerticalBorders = 'false';
           if (!table.dataset.hideHorizontalBorders) table.dataset.hideHorizontalBorders = 'false';
+          if (!table.dataset.outerBorderEnabled) table.dataset.outerBorderEnabled = 'true';
+          if (!table.dataset.outerBorderColor) table.dataset.outerBorderColor = table.dataset.borderColor || '#dee2e6';
+          if (!table.dataset.outerBorderWidth) table.dataset.outerBorderWidth = table.dataset.borderWidth || '1';
           if (!table.dataset.tableOffsetX) table.dataset.tableOffsetX = '0';
         }
 
@@ -4989,11 +5033,20 @@ export async function initializeEditor() {
           const width = parseFloat(selectedTable.dataset.borderWidth || '1');
           const hideVertical = selectedTable.dataset.hideVerticalBorders === 'true';
           const hideHorizontal = selectedTable.dataset.hideHorizontalBorders === 'true';
+          const outerEnabled = selectedTable.dataset.outerBorderEnabled !== 'false';
+          const outerColor = selectedTable.dataset.outerBorderColor || color;
+          const outerWidth = parseFloat(selectedTable.dataset.outerBorderWidth || String(width));
           const cells = selectedTable.querySelectorAll('th,td');
 
-          selectedTable.style.borderColor = color;
-          selectedTable.style.borderWidth = width + 'px';
-          selectedTable.style.borderStyle = 'solid';
+          if (outerEnabled && outerWidth > 0) {
+            selectedTable.style.borderStyle = 'solid';
+            selectedTable.style.borderWidth = `${outerWidth}px`;
+            selectedTable.style.borderColor = outerColor;
+          } else {
+            selectedTable.style.borderStyle = 'none';
+            selectedTable.style.borderWidth = '0';
+            selectedTable.style.borderColor = outerColor;
+          }
 
           cells.forEach(cell => {
             cell.style.borderColor = color;
@@ -5012,17 +5065,39 @@ export async function initializeEditor() {
           const width = selectedTable.dataset.borderWidth || '1';
           const hideVertical = selectedTable.dataset.hideVerticalBorders === 'true';
           const hideHorizontal = selectedTable.dataset.hideHorizontalBorders === 'true';
+          const outerEnabled = selectedTable.dataset.outerBorderEnabled !== 'false';
+          const outerColor = selectedTable.dataset.outerBorderColor || color;
+          const outerWidth = selectedTable.dataset.outerBorderWidth || width;
 
           tableBorderColorButtons.forEach(btn => {
             btn.classList.toggle('active', btn.dataset.borderColor === color);
           });
           if (tableBorderColorCustom) {
-            tableBorderColorCustom.value = color;
+            tableBorderColorCustom.value = normalizeColorToHex(color, color);
           }
           tableBorderWidthInput.value = width;
           tableBorderWidthValue.textContent = `${width}px`;
           toggleVerticalBorders.checked = hideVertical;
           toggleHorizontalBorders.checked = hideHorizontal;
+          if (tableOuterBorderToggle) {
+            tableOuterBorderToggle.checked = outerEnabled;
+          }
+          if (tableOuterBorderWidthInput) {
+            tableOuterBorderWidthInput.value = outerWidth;
+            tableOuterBorderWidthInput.disabled = !outerEnabled;
+          }
+          if (tableOuterBorderWidthValue) {
+            tableOuterBorderWidthValue.textContent = `${outerWidth}px`;
+          }
+          tableOuterBorderColorButtons.forEach(btn => {
+            const btnColor = btn.dataset.borderColor || '';
+            btn.classList.toggle('active', normalizeColorToHex(btnColor, btnColor).toLowerCase() === normalizeColorToHex(outerColor, outerColor).toLowerCase());
+            btn.disabled = !outerEnabled;
+          });
+          if (tableOuterBorderColorCustom) {
+            tableOuterBorderColorCustom.value = normalizeColorToHex(outerColor, outerColor);
+            tableOuterBorderColorCustom.disabled = !outerEnabled;
+          }
         }
 
         function updateStatefulButtons() {
@@ -5337,6 +5412,37 @@ export async function initializeEditor() {
           applyBorderStyles();
         });
 
+        tableOuterBorderToggle?.addEventListener('change', () => {
+          if (!selectedTable) return;
+          selectedTable.dataset.outerBorderEnabled = tableOuterBorderToggle.checked ? 'true' : 'false';
+          applyBorderStyles();
+          updateBorderControls();
+        });
+
+        tableOuterBorderWidthInput?.addEventListener('input', () => {
+          if (!selectedTable) return;
+          selectedTable.dataset.outerBorderWidth = tableOuterBorderWidthInput.value;
+          tableOuterBorderWidthValue.textContent = `${tableOuterBorderWidthInput.value}px`;
+          applyBorderStyles();
+        });
+
+        tableOuterBorderColorButtons.forEach(btn => {
+          btn.addEventListener('click', () => {
+            if (!selectedTable || tableOuterBorderToggle?.checked === false) return;
+            const normalized = normalizeColorToHex(btn.dataset.borderColor || '', '#dee2e6');
+            selectedTable.dataset.outerBorderColor = normalized;
+            updateBorderControls();
+            applyBorderStyles();
+          });
+        });
+
+        tableOuterBorderColorCustom?.addEventListener('input', () => {
+          if (!selectedTable || tableOuterBorderToggle?.checked === false) return;
+          selectedTable.dataset.outerBorderColor = tableOuterBorderColorCustom.value;
+          updateBorderControls();
+          applyBorderStyles();
+        });
+
         toggleVerticalBorders?.addEventListener('change', () => {
           if (!selectedTable) return;
           selectedTable.dataset.hideVerticalBorders = toggleVerticalBorders.checked ? 'true' : 'false';
@@ -5355,6 +5461,9 @@ export async function initializeEditor() {
           selectedTable.dataset.borderWidth = '1';
           selectedTable.dataset.hideVerticalBorders = 'false';
           selectedTable.dataset.hideHorizontalBorders = 'false';
+          selectedTable.dataset.outerBorderEnabled = 'true';
+          selectedTable.dataset.outerBorderColor = '#dee2e6';
+          selectedTable.dataset.outerBorderWidth = '1';
           updateBorderControls();
           applyBorderStyles();
         });
@@ -5396,8 +5505,11 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = event.target.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = event.target.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -5416,8 +5528,11 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = element.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = element.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -6322,6 +6437,86 @@ export async function initializeEditor() {
         return NOTE_STYLE_PRESETS.find(preset => preset.id === DEFAULT_NOTE_STYLE) || NOTE_STYLE_PRESETS[0];
       }
 
+      function resolveFloatingNoteBorderBase(note) {
+        if (!note) {
+          return {
+            color: FLOATING_NOTE_BORDER_DEFAULT_COLOR,
+            width: FLOATING_NOTE_BORDER_DEFAULT_WIDTH
+          };
+        }
+        const computed = window.getComputedStyle(note);
+        const widthValue = parseFloat(computed.borderTopWidth);
+        return {
+          color: normalizeColorToHex(computed.borderTopColor, FLOATING_NOTE_BORDER_DEFAULT_COLOR),
+          width: Number.isFinite(widthValue) ? widthValue : FLOATING_NOTE_BORDER_DEFAULT_WIDTH
+        };
+      }
+
+      function applyFloatingNoteBorderState(note, options = {}, { persist = true } = {}) {
+        if (!note) return null;
+        const { color, width, enabled } = options || {};
+        const noteId = note.dataset.noteId || null;
+        const currentData = noteId ? notesRegistry.get(noteId) : null;
+        const base = resolveFloatingNoteBorderBase(note);
+
+        const requestedColor = typeof color === 'string' && color.trim()
+          ? normalizeColorToHex(color.trim(), color.trim())
+          : null;
+        const requestedWidth = Number.isFinite(width) ? Math.max(Number(width), 0) : null;
+        const requestedEnabled = enabled === undefined ? null : !!enabled;
+
+        const datasetColor = typeof note.dataset.borderColor === 'string' && note.dataset.borderColor.trim()
+          ? note.dataset.borderColor.trim()
+          : null;
+        const datasetWidth = Number.isFinite(parseFloat(note.dataset.borderWidth))
+          ? Math.max(parseFloat(note.dataset.borderWidth), 0)
+          : null;
+        const datasetEnabled = note.dataset.borderEnabled === 'false' ? false : (note.dataset.borderEnabled === 'true' ? true : null);
+
+        const currentColor = requestedColor
+          || (datasetColor ? normalizeColorToHex(datasetColor, datasetColor) : null)
+          || (typeof currentData?.borderColor === 'string' && currentData.borderColor ? normalizeColorToHex(currentData.borderColor, currentData.borderColor) : null)
+          || base.color;
+        const currentWidth = requestedWidth
+          ?? (datasetWidth ?? (Number.isFinite(currentData?.borderWidth) ? Math.max(Number(currentData.borderWidth), 0) : base.width));
+        const currentEnabled = requestedEnabled
+          ?? (datasetEnabled ?? (currentData?.borderEnabled === false ? false : true));
+
+        const finalWidth = currentEnabled
+          ? (currentWidth > 0 ? currentWidth : FLOATING_NOTE_BORDER_DEFAULT_WIDTH)
+          : currentWidth;
+        const finalColor = normalizeColorToHex(currentColor, base.color).toLowerCase();
+
+        note.dataset.borderEnabled = currentEnabled ? 'true' : 'false';
+        note.dataset.borderWidth = String(Math.max(finalWidth, 0));
+        note.dataset.borderColor = finalColor;
+
+        if (currentEnabled && Math.max(finalWidth, 0) > 0) {
+          note.style.borderStyle = 'solid';
+          note.style.borderWidth = `${Math.max(finalWidth, 0)}px`;
+          note.style.borderColor = finalColor;
+        } else {
+          note.style.borderStyle = 'none';
+          note.style.borderWidth = '0';
+          note.style.borderColor = finalColor;
+        }
+
+        if (persist && noteId) {
+          const updates = {
+            borderEnabled: currentEnabled,
+            borderColor: finalColor,
+            borderWidth: Math.max(finalWidth, 0)
+          };
+          updateNoteData(noteId, updates, { silent: true });
+        }
+
+        return {
+          enabled: currentEnabled,
+          color: finalColor,
+          width: Math.max(finalWidth, 0)
+        };
+      }
+
       function applyFloatingNoteStyle(note, styleId) {
         if (!note) return;
         const preset = getFloatingNoteStyle(styleId);
@@ -6346,6 +6541,7 @@ export async function initializeEditor() {
             syncNoteOptionsMenu(menu, noteData);
           }
         }
+        applyFloatingNoteBorderState(note, {}, { persist: false });
       }
 
       function sanitizeFloatingNotePasteHtml(rawHtml) {
@@ -7486,13 +7682,15 @@ export async function initializeEditor() {
 
       function applyFloatingNoteSize(note, width, height) {
         if (!note) return;
-        if (Number.isFinite(width) && width > 0) {
-          note.style.width = `${Math.max(width, FLOATING_NOTE_MIN_WIDTH)}px`;
+        if (Number.isFinite(width)) {
+          const safeWidth = Math.max(width, FLOATING_NOTE_MIN_WIDTH);
+          note.style.width = `${safeWidth}px`;
         } else {
           note.style.width = `${FLOATING_NOTE_DEFAULT_WIDTH}px`;
         }
-        if (Number.isFinite(height) && height > 0) {
-          note.style.height = `${Math.max(height, FLOATING_NOTE_MIN_HEIGHT)}px`;
+        if (Number.isFinite(height)) {
+          const safeHeight = Math.max(height, FLOATING_NOTE_MIN_HEIGHT);
+          note.style.height = `${safeHeight}px`;
         } else {
           note.style.height = '';
         }
@@ -7590,9 +7788,8 @@ export async function initializeEditor() {
         const noteWidth = note.offsetWidth || noteRect.width || FLOATING_NOTE_DEFAULT_WIDTH;
         const noteHeight = note.offsetHeight || noteRect.height || FLOATING_NOTE_MIN_HEIGHT;
         const maxLeft = Math.max(0, layerWidth - noteWidth);
-        const maxTop = Math.max(0, layerHeight - noteHeight);
         const clampedLeft = Math.min(Math.max(Number.isFinite(left) ? left : 0, 0), maxLeft);
-        const clampedTop = Math.min(Math.max(Number.isFinite(top) ? top : 0, 0), maxTop);
+        const clampedTop = Math.max(Number.isFinite(top) ? top : 0, 0);
         return { left: clampedLeft, top: clampedTop };
       }
 
@@ -8105,6 +8302,27 @@ export async function initializeEditor() {
           return false;
         })();
 
+        const resolvedBorderEnabled = resolveBooleanFlag(
+          data.borderEnabled !== undefined ? data.borderEnabled : metaSource.borderEnabled,
+          true
+        );
+        const resolvedBorderWidth = (() => {
+          const candidate = Number.parseFloat(data.borderWidth ?? metaSource.borderWidth);
+          if (Number.isFinite(candidate)) {
+            return Math.max(candidate, 0);
+          }
+          return null;
+        })();
+        const resolvedBorderColor = (() => {
+          const candidate = typeof data.borderColor === 'string'
+            ? data.borderColor
+            : (typeof metaSource.borderColor === 'string' ? metaSource.borderColor : null);
+          if (candidate && candidate.trim()) {
+            return normalizeColorToHex(candidate.trim(), candidate.trim());
+          }
+          return null;
+        })();
+
         const resolvedSuperNote = resolveBooleanFlag(
           data.superNote !== undefined ? data.superNote : metaSource.superNote,
           false
@@ -8230,6 +8448,9 @@ export async function initializeEditor() {
           ultraCompact: resolvedUltraCompact,
           hoverAnimation: resolvedHoverAnimation,
           styleNeutralText: resolvedNeutralText,
+          borderEnabled: resolvedBorderEnabled,
+          borderWidth: Number.isFinite(resolvedBorderWidth) ? resolvedBorderWidth : null,
+          borderColor: resolvedBorderColor,
           customIcon: resolvedCustomIcon,
           superNote: resolvedSuperNote,
           superTabs: incomingSuperTabs,
@@ -8241,6 +8462,11 @@ export async function initializeEditor() {
         applyNoteUltraCompactState(note, resolvedUltraCompact, { persist: false });
         applyNoteHoverAnimationState(note, resolvedHoverAnimation, { persist: false });
         applyFloatingNoteTextNeutralState(note, resolvedNeutralText, { persist: false });
+        applyFloatingNoteBorderState(note, {
+          enabled: resolvedBorderEnabled,
+          width: Number.isFinite(resolvedBorderWidth) ? resolvedBorderWidth : undefined,
+          color: resolvedBorderColor || undefined
+        }, { persist: false });
         if (resolvedCustomIcon) {
           note.dataset.customIcon = resolvedCustomIcon;
         } else {
@@ -8299,11 +8525,6 @@ export async function initializeEditor() {
         const actions = document.createElement('div');
         actions.className = 'note-actions floating-note-actions';
 
-        const priorityBtn = document.createElement('button');
-        priorityBtn.type = 'button';
-        priorityBtn.className = 'note-priority';
-        priorityBtn.title = 'Prioridad';
-
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
         menuBtn.className = 'note-menu';
@@ -8318,7 +8539,7 @@ export async function initializeEditor() {
           }
         }
 
-        actions.append(priorityBtn, menuBtn);
+        actions.append(menuBtn);
         header.append(categoryWrap, navigation, actions);
 
         const body = document.createElement('div');
@@ -8435,7 +8656,6 @@ export async function initializeEditor() {
           categoryIcon,
           categoryLabel,
           categoryWrap,
-          priorityBtn,
           tagsContainer,
           optionsMenu,
           pageIndicator,
@@ -8451,11 +8671,6 @@ export async function initializeEditor() {
           tabAddButton: null,
           tabColorInput: null
         };
-
-        priorityBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          cycleNotePriority(note);
-        });
 
         prevPageBtn.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -8723,6 +8938,37 @@ export async function initializeEditor() {
         categorySection.appendChild(categoryGrid);
         quickWrapper.appendChild(categorySection);
 
+        const prioritySection = document.createElement('div');
+        prioritySection.className = 'note-menu-section note-menu-priority';
+        const priorityTitle = document.createElement('div');
+        priorityTitle.className = 'note-menu-title';
+        priorityTitle.textContent = '⚑';
+        prioritySection.appendChild(priorityTitle);
+        const priorityOptions = document.createElement('div');
+        priorityOptions.className = 'note-menu-priority-options';
+        const priorityDefinitions = [
+          { id: 'high', label: 'Alta', icon: '⭐' },
+          { id: 'normal', label: 'Normal', icon: '⚑' },
+          { id: 'low', label: 'Baja', icon: '⬇️' }
+        ];
+        priorityDefinitions.forEach(({ id, label, icon }) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'note-priority-option';
+          button.dataset.priorityId = id;
+          button.textContent = `${icon} ${label}`;
+          button.setAttribute('aria-pressed', 'false');
+          button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setNotePriority(note, id);
+            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+            closeFloatingNoteStyleMenu(menu);
+          });
+          priorityOptions.appendChild(button);
+        });
+        prioritySection.appendChild(priorityOptions);
+        quickWrapper.appendChild(prioritySection);
+
         const iconSection = document.createElement('div');
         iconSection.className = 'note-menu-section note-menu-icons';
         const iconTitle = document.createElement('div');
@@ -8814,6 +9060,94 @@ export async function initializeEditor() {
         styleSection.appendChild(resetSizeBtn);
 
         quickWrapper.appendChild(styleSection);
+
+        const borderSection = document.createElement('div');
+        borderSection.className = 'note-menu-section note-menu-border';
+        const borderTitle = document.createElement('div');
+        borderTitle.className = 'note-menu-title';
+        borderTitle.textContent = '🖊️ Borde';
+        borderSection.appendChild(borderTitle);
+
+        const borderToggle = document.createElement('button');
+        borderToggle.type = 'button';
+        borderToggle.className = 'note-border-toggle';
+        borderToggle.textContent = 'Borde visible';
+        borderToggle.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const noteId = note.dataset.noteId;
+          const currentData = noteId ? notesRegistry.get(noteId) : null;
+          const isEnabled = currentData?.borderEnabled === false ? false : note.dataset.borderEnabled !== 'false';
+          applyFloatingNoteBorderState(note, { enabled: !isEnabled });
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+        });
+        borderSection.appendChild(borderToggle);
+
+        const borderPalette = document.createElement('div');
+        borderPalette.className = 'note-border-colors';
+        const borderColorButtons = [];
+        FLOATING_NOTE_BORDER_COLORS.forEach(colorValue => {
+          const colorBtn = document.createElement('button');
+          colorBtn.type = 'button';
+          colorBtn.className = 'note-border-color-btn';
+          colorBtn.style.setProperty('--note-border-color', colorValue);
+          colorBtn.dataset.borderColor = colorValue;
+          colorBtn.title = `Color ${colorValue}`;
+          colorBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            applyFloatingNoteBorderState(note, { color: colorValue });
+            syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+          });
+          borderColorButtons.push(colorBtn);
+          borderPalette.appendChild(colorBtn);
+        });
+        borderSection.appendChild(borderPalette);
+
+        const borderColorInput = document.createElement('input');
+        borderColorInput.type = 'color';
+        borderColorInput.className = 'note-border-color-input';
+        borderColorInput.value = FLOATING_NOTE_BORDER_DEFAULT_COLOR;
+        borderColorInput.title = 'Color personalizado';
+        borderColorInput.addEventListener('input', (event) => {
+          event.stopPropagation();
+          applyFloatingNoteBorderState(note, { color: borderColorInput.value });
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+        });
+        borderSection.appendChild(borderColorInput);
+
+        const borderWidthRow = document.createElement('div');
+        borderWidthRow.className = 'note-border-width-row';
+        const borderWidthLabel = document.createElement('span');
+        borderWidthLabel.textContent = 'Grosor';
+        borderWidthLabel.className = 'note-border-width-label';
+        const borderWidthInput = document.createElement('input');
+        borderWidthInput.type = 'range';
+        borderWidthInput.min = '0';
+        borderWidthInput.max = '12';
+        borderWidthInput.step = '0.5';
+        borderWidthInput.value = String(FLOATING_NOTE_BORDER_DEFAULT_WIDTH);
+        borderWidthInput.className = 'note-border-width-input';
+        const borderWidthValue = document.createElement('span');
+        borderWidthValue.className = 'note-border-width-value';
+        borderWidthValue.textContent = `${FLOATING_NOTE_BORDER_DEFAULT_WIDTH}px`;
+        borderWidthInput.addEventListener('input', (event) => {
+          event.stopPropagation();
+          const numeric = Number.parseFloat(borderWidthInput.value);
+          borderWidthValue.textContent = `${borderWidthInput.value}px`;
+          applyFloatingNoteBorderState(note, { width: numeric });
+          syncNoteOptionsMenu(menu, notesRegistry.get(note.dataset.noteId));
+        });
+        borderWidthRow.append(borderWidthLabel, borderWidthInput, borderWidthValue);
+        borderSection.appendChild(borderWidthRow);
+
+        quickWrapper.appendChild(borderSection);
+        menu._borderControls = {
+          toggleBtn: borderToggle,
+          colorButtons: borderColorButtons,
+          colorInput: borderColorInput,
+          widthInput: borderWidthInput,
+          widthValue: borderWidthValue
+        };
+
         menu.appendChild(quickWrapper);
 
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'note-menu-divider' }));
@@ -8967,6 +9301,12 @@ export async function initializeEditor() {
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
+        const activePriority = noteData.priority || DEFAULT_NOTE_PRIORITY;
+        menu.querySelectorAll('button[data-priority-id]').forEach(button => {
+          const isActive = button.dataset.priorityId === activePriority;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
         const currentIcon = typeof noteData.customIcon === 'string' && noteData.customIcon.length
           ? noteData.customIcon
           : '';
@@ -9021,6 +9361,51 @@ export async function initializeEditor() {
           behindBtn.textContent = isBehind ? '📄 Traer al frente' : '🗂️ Usar espacio oculto';
           behindBtn.setAttribute('aria-pressed', isBehind ? 'true' : 'false');
           behindBtn.classList.toggle('active', isBehind);
+        }
+        const borderControls = menu._borderControls;
+        if (borderControls) {
+          const { toggleBtn, colorButtons = [], colorInput, widthInput, widthValue } = borderControls;
+          const noteId = noteData.id || menu.dataset.noteId;
+          const noteElement = noteId
+            ? floatingNotesLayer?.querySelector(`.floating-note[data-note-id="${safeCssEscape(noteId)}"]`)
+            : null;
+          const base = noteElement ? resolveFloatingNoteBorderBase(noteElement) : {
+            color: FLOATING_NOTE_BORDER_DEFAULT_COLOR,
+            width: FLOATING_NOTE_BORDER_DEFAULT_WIDTH
+          };
+          const enabled = noteData.borderEnabled === false ? false : noteElement?.dataset.borderEnabled === 'false' ? false : true;
+          const rawWidth = Number.isFinite(noteData.borderWidth)
+            ? Math.max(Number(noteData.borderWidth), 0)
+            : (Number.isFinite(parseFloat(noteElement?.dataset.borderWidth)) ? Math.max(parseFloat(noteElement.dataset.borderWidth), 0) : base.width);
+          const finalWidth = enabled ? (rawWidth > 0 ? rawWidth : FLOATING_NOTE_BORDER_DEFAULT_WIDTH) : rawWidth;
+          const storedColor = noteData.borderColor
+            || noteElement?.dataset.borderColor
+            || base.color;
+          const finalColor = normalizeColorToHex(storedColor || base.color, base.color);
+
+          if (toggleBtn) {
+            toggleBtn.textContent = enabled ? 'Borde visible' : 'Sin borde';
+            toggleBtn.classList.toggle('active', enabled);
+            toggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+          }
+          if (widthInput) {
+            widthInput.value = String(enabled ? finalWidth : Math.max(finalWidth, 0));
+            widthInput.disabled = !enabled;
+          }
+          if (widthValue) {
+            const displayWidth = enabled ? (finalWidth || FLOATING_NOTE_BORDER_DEFAULT_WIDTH) : Math.max(finalWidth || 0, 0);
+            widthValue.textContent = `${displayWidth}px`;
+          }
+          colorButtons.forEach(btn => {
+            const btnColor = btn?.dataset?.borderColor || '';
+            const normalizedBtnColor = normalizeColorToHex(btnColor || '', btnColor || finalColor).toLowerCase();
+            btn.classList.toggle('active', normalizedBtnColor === finalColor.toLowerCase());
+            btn.disabled = !enabled;
+          });
+          if (colorInput) {
+            colorInput.value = finalColor;
+            colorInput.disabled = !enabled;
+          }
         }
       }
 
@@ -9134,6 +9519,17 @@ export async function initializeEditor() {
         setNoteTags(note, tags);
       }
 
+      function setNotePriority(note, priority) {
+        if (!note) return;
+        const noteId = note.dataset.noteId;
+        if (!noteId) return;
+        const normalized = NOTE_PRIORITY_SEQUENCE.includes(priority)
+          ? priority
+          : DEFAULT_NOTE_PRIORITY;
+        const updated = updateNoteData(noteId, { priority: normalized });
+        syncNoteElementMeta(note, updated);
+      }
+
       function cycleNotePriority(note) {
         if (!note) return;
         const noteId = note.dataset.noteId;
@@ -9141,8 +9537,7 @@ export async function initializeEditor() {
         const current = notesRegistry.get(noteId) || ensureNoteData(noteId);
         const currentIndex = NOTE_PRIORITY_SEQUENCE.indexOf(current.priority || DEFAULT_NOTE_PRIORITY);
         const nextPriority = NOTE_PRIORITY_SEQUENCE[(currentIndex + 1) % NOTE_PRIORITY_SEQUENCE.length];
-        const updated = updateNoteData(noteId, { priority: nextPriority });
-        syncNoteElementMeta(note, updated);
+        setNotePriority(note, nextPriority);
       }
 
       function toggleNoteReviewed(note, forceValue = null) {
@@ -9416,23 +9811,6 @@ export async function initializeEditor() {
             ui.categoryWrap.setAttribute('aria-label', tooltip);
             ui.categoryWrap.dataset.editableTitle = ui.categoryLabel?.contentEditable === 'true' ? 'true' : 'false';
           }
-        }
-        if (ui.priorityBtn) {
-          const btn = ui.priorityBtn;
-          btn.classList.remove('high', 'low');
-          let symbol = '⬤';
-          let title = 'Prioridad normal';
-          if (noteData.priority === 'high') {
-            symbol = '⭐';
-            title = 'Prioridad alta';
-            btn.classList.add('high');
-          } else if (noteData.priority === 'low') {
-            symbol = '⚪';
-            title = 'Prioridad baja';
-            btn.classList.add('low');
-          }
-          btn.textContent = symbol;
-          btn.title = title;
         }
         if (ui.tagsContainer) {
           ui.tagsContainer.innerHTML = '';
