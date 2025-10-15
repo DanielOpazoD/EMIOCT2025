@@ -138,8 +138,8 @@ export async function initializeEditor() {
         startY: 0
       };
       const FLOATING_NOTE_DEFAULT_WIDTH = 240;
-      const FLOATING_NOTE_MIN_WIDTH = 160;
-      const FLOATING_NOTE_MIN_HEIGHT = 140;
+      const FLOATING_NOTE_MIN_WIDTH = 0;
+      const FLOATING_NOTE_MIN_HEIGHT = 0;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let floatingNotesViewportRelaxedMatching = false;
@@ -4774,6 +4774,27 @@ export async function initializeEditor() {
 
         const actionButtons = Array.from(tableMenu.querySelectorAll('[data-action]'));
 
+        function getTopRow(table) {
+          if (!table) return null;
+          const rows = Array.from(table.rows || []);
+          return rows.find(row => row.cells && row.cells.length > 0) || null;
+        }
+
+        function getTopRowFirstCell(table) {
+          const topRow = getTopRow(table);
+          return topRow ? (topRow.cells[0] || null) : null;
+        }
+
+        function isCellInTopRow(cell, tableContext = null) {
+          if (!(cell instanceof HTMLElement)) return false;
+          const tableRef = tableContext || cell.closest('table');
+          if (!tableRef) return false;
+          const row = cell.closest('tr');
+          if (!row) return false;
+          const topRow = getTopRow(tableRef);
+          return !!topRow && topRow === row;
+        }
+
         function hideMenu(options = {}) {
           tableMenu.classList.remove('show');
           tableMenu.setAttribute('aria-hidden', 'true');
@@ -4790,15 +4811,17 @@ export async function initializeEditor() {
         function showMenu(table, cell) {
           if (!isEditMode || !table) return;
           if (!table.closest('[contenteditable="true"]')) return;
+          const referenceCell = getTopRowFirstCell(table);
+          if (!referenceCell) return;
           if (selectedTable && selectedTable !== table) {
             selectedTable.classList.remove('table-menu-selected');
             clearColumnHighlight();
           }
           selectedTable = table;
-          if (cell) {
+          if (cell && isCellInTopRow(cell, table)) {
             selectedCell = cell;
-          } else if (!selectedCell || !selectedTable.contains(selectedCell)) {
-            selectedCell = selectedTable.querySelector('td,th');
+          } else {
+            selectedCell = referenceCell;
           }
 
           if (selectedTable) {
@@ -5060,7 +5083,7 @@ export async function initializeEditor() {
 
         function ensureCellContext() {
           if (!selectedCell || !selectedTable || !selectedTable.contains(selectedCell)) {
-            selectedCell = selectedTable?.querySelector('td,th') || null;
+            selectedCell = getTopRowFirstCell(selectedTable) || null;
           }
           return selectedCell;
         }
@@ -5111,7 +5134,7 @@ export async function initializeEditor() {
           } else {
             row.remove();
           }
-          selectedCell = selectedTable.querySelector('td,th');
+          selectedCell = getTopRowFirstCell(selectedTable);
         }
 
         function insertColumn(position) {
@@ -5146,7 +5169,7 @@ export async function initializeEditor() {
             const target = row.cells[index];
             if (target) target.remove();
           });
-          selectedCell = selectedTable.querySelector('td,th');
+          selectedCell = getTopRowFirstCell(selectedTable);
           clearColumnHighlight();
         }
 
@@ -5396,8 +5419,11 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = event.target.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = event.target.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            hideMenu();
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -5416,8 +5442,13 @@ export async function initializeEditor() {
             }
             return;
           }
-          const cell = element.closest('td,th') || table.querySelector('td,th');
-          if (!cell) return;
+          const cell = element.closest('td,th');
+          if (!cell || !isCellInTopRow(cell, table)) {
+            if (tableMenu.classList.contains('show')) {
+              hideMenu();
+            }
+            return;
+          }
           showMenu(table, cell);
         });
 
@@ -8299,11 +8330,6 @@ export async function initializeEditor() {
         const actions = document.createElement('div');
         actions.className = 'note-actions floating-note-actions';
 
-        const priorityBtn = document.createElement('button');
-        priorityBtn.type = 'button';
-        priorityBtn.className = 'note-priority';
-        priorityBtn.title = 'Prioridad';
-
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
         menuBtn.className = 'note-menu';
@@ -8318,7 +8344,7 @@ export async function initializeEditor() {
           }
         }
 
-        actions.append(priorityBtn, menuBtn);
+        actions.append(menuBtn);
         header.append(categoryWrap, navigation, actions);
 
         const body = document.createElement('div');
@@ -8435,7 +8461,6 @@ export async function initializeEditor() {
           categoryIcon,
           categoryLabel,
           categoryWrap,
-          priorityBtn,
           tagsContainer,
           optionsMenu,
           pageIndicator,
@@ -8451,11 +8476,6 @@ export async function initializeEditor() {
           tabAddButton: null,
           tabColorInput: null
         };
-
-        priorityBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          cycleNotePriority(note);
-        });
 
         prevPageBtn.addEventListener('click', (event) => {
           event.stopPropagation();
