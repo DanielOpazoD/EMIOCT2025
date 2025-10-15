@@ -374,6 +374,27 @@
             <button type="button" data-border-reset="true">Restablecer</button>
           </div>
         </div>
+        <div class="table-menu-section table-outer-border">
+          <h4>Borde exterior</h4>
+          <label class="table-outer-border-toggle"><input type="checkbox" id="toggleOuterBorder" checked> Mostrar borde exterior</label>
+          <div class="table-border-colors table-outer-border-colors">
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#000000;" data-border-color="#000000"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#475569;" data-border-color="#475569"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#9ca3af;" data-border-color="#9ca3af"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#fecaca;" data-border-color="#fecaca"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#fef08a;" data-border-color="#fef08a"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#bbf7d0;" data-border-color="#bbf7d0"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#bfdbfe;" data-border-color="#bfdbfe"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#ddd6fe;" data-border-color="#ddd6fe"></button>
+            <button type="button" class="table-border-color-btn table-outer-border-color-btn" style="background:#fbcfe8;" data-border-color="#fbcfe8"></button>
+            <input type="color" id="tableOuterBorderColorCustom" value="#94a3b8" title="Color personalizado borde exterior">
+          </div>
+          <div class="table-slider-row">
+            <label for="tableOuterBorderWidth">Grosor</label>
+            <input type="range" id="tableOuterBorderWidth" min="0" max="12" step="0.5" value="1">
+            <span class="table-slider-value" id="tableOuterBorderWidthValue">1px</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
