@@ -25,6 +25,7 @@ import {
 } from './modules/notes/noteUtils.js';
 
 export async function initializeEditor() {
+      const APP_NAME = 'Cora Notes';
       let isEditMode = false;
       let isPanelEditMode = false;
       let isReadingMode = false;
@@ -685,9 +686,11 @@ export async function initializeEditor() {
       }
 
       function setDocumentTitle(value) {
-        if (!specialtySpan) return;
         const trimmed = (value || '').trim();
-        specialtySpan.dataset.documentTitle = trimmed;
+        if (specialtySpan) {
+          specialtySpan.dataset.documentTitle = trimmed;
+        }
+        document.title = trimmed ? `${APP_NAME} – ${trimmed}` : APP_NAME;
       }
 
       function measureToolbarHeight() {
