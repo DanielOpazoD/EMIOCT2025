@@ -165,13 +165,23 @@ export async function initializeEditor() {
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
       const FLOATING_NOTES_PRINT_SETTINGS_STORAGE_KEY = 'emi2025-floating-notes-print-settings';
+      const FLOATING_NOTES_PRINT_SETTINGS_VERSION = 2;
+      const FLOATING_NOTES_PRINT_BROWSER_OPTION = 'browser';
       const FLOATING_NOTES_PRINT_DEFAULTS = {
         scalePercent: 100,
-        pageSize: 'A4',
-        orientation: 'landscape'
+        pageSize: FLOATING_NOTES_PRINT_BROWSER_OPTION,
+        orientation: FLOATING_NOTES_PRINT_BROWSER_OPTION,
+        version: FLOATING_NOTES_PRINT_SETTINGS_VERSION
       };
       const FLOATING_NOTES_PRINT_ALLOWED_SIZES = ['A3', 'A4', 'A5', 'Letter', 'Legal'];
       const FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS = ['portrait', 'landscape'];
+      const FLOATING_NOTES_PRINT_PAGE_DIMENSIONS_MM = {
+        A3: { width: 297, height: 420 },
+        A4: { width: 210, height: 297 },
+        A5: { width: 148, height: 210 },
+        Letter: { width: 215.9, height: 279.4 },
+        Legal: { width: 215.9, height: 355.6 }
+      };
       let floatingNotesPrintSettings = loadFloatingNotesPrintSettings();
       let floatingNotesPrintSettingsOpen = false;
 
@@ -7942,14 +7952,41 @@ export async function initializeEditor() {
         if (Number.isFinite(scale)) {
           sanitized.scalePercent = Math.min(Math.max(Math.round(scale), 10), 400);
         }
-        const pageSize = typeof candidate.pageSize === 'string' ? candidate.pageSize.trim() : '';
-        if (pageSize && FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(pageSize)) {
-          sanitized.pageSize = pageSize;
+
+        const candidateVersion = Number.parseInt(candidate.version, 10);
+        sanitized.version = FLOATING_NOTES_PRINT_SETTINGS_VERSION;
+
+        const rawPageSize = typeof candidate.pageSize === 'string' ? candidate.pageSize.trim() : '';
+        if (rawPageSize) {
+          if (rawPageSize.toLowerCase() === FLOATING_NOTES_PRINT_BROWSER_OPTION) {
+            sanitized.pageSize = FLOATING_NOTES_PRINT_BROWSER_OPTION;
+          } else if (FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(rawPageSize)) {
+            sanitized.pageSize = rawPageSize;
+          }
         }
-        const orientation = typeof candidate.orientation === 'string' ? candidate.orientation.trim().toLowerCase() : '';
-        if (FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(orientation)) {
-          sanitized.orientation = orientation;
+
+        const rawOrientation = typeof candidate.orientation === 'string'
+          ? candidate.orientation.trim().toLowerCase()
+          : '';
+        if (rawOrientation) {
+          if (rawOrientation === FLOATING_NOTES_PRINT_BROWSER_OPTION) {
+            sanitized.orientation = FLOATING_NOTES_PRINT_BROWSER_OPTION;
+          } else if (FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(rawOrientation)) {
+            sanitized.orientation = rawOrientation;
+          }
         }
+
+        if (!Number.isFinite(candidateVersion) || candidateVersion < FLOATING_NOTES_PRINT_SETTINGS_VERSION) {
+          const legacyPageSize = typeof candidate.pageSize === 'string' ? candidate.pageSize.trim() : '';
+          const legacyOrientation = typeof candidate.orientation === 'string'
+            ? candidate.orientation.trim().toLowerCase()
+            : '';
+          if (legacyPageSize === 'A4' && legacyOrientation === 'landscape') {
+            sanitized.pageSize = FLOATING_NOTES_PRINT_BROWSER_OPTION;
+            sanitized.orientation = FLOATING_NOTES_PRINT_BROWSER_OPTION;
+          }
+        }
+
         return sanitized;
       }
 
@@ -7958,6 +7995,7 @@ export async function initializeEditor() {
           return;
         }
         try {
+          floatingNotesPrintSettings = sanitizeFloatingNotesPrintSettings(floatingNotesPrintSettings);
           localStorage.setItem(
             FLOATING_NOTES_PRINT_SETTINGS_STORAGE_KEY,
             JSON.stringify(floatingNotesPrintSettings)
@@ -8105,34 +8143,63 @@ export async function initializeEditor() {
         printContainer.appendChild(wrapper);
 
         const pxPerMillimetre = 96 / 25.4;
-        const pageWidthPx = 297 * pxPerMillimetre;
-        const pageHeightPx = 210 * pxPerMillimetre;
-        const scaleX = pageWidthPx / layerRect.width;
-        const scaleY = pageHeightPx / layerRect.height;
+        const pageSizeSetting = FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(floatingNotesPrintSettings.pageSize)
+          ? floatingNotesPrintSettings.pageSize
+          : FLOATING_NOTES_PRINT_BROWSER_OPTION;
+        const orientationSetting = FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(floatingNotesPrintSettings.orientation)
+          ? floatingNotesPrintSettings.orientation
+          : FLOATING_NOTES_PRINT_BROWSER_OPTION;
+
+        const hasCustomPageSetup = pageSizeSetting !== FLOATING_NOTES_PRINT_BROWSER_OPTION
+          && orientationSetting !== FLOATING_NOTES_PRINT_BROWSER_OPTION;
+        const pageSpec = hasCustomPageSetup
+          ? FLOATING_NOTES_PRINT_PAGE_DIMENSIONS_MM[pageSizeSetting]
+          : null;
+
+        let pageWidthPx = null;
+        let pageHeightPx = null;
+        if (pageSpec) {
+          const shortSide = Math.min(pageSpec.width, pageSpec.height);
+          const longSide = Math.max(pageSpec.width, pageSpec.height);
+          const isLandscape = orientationSetting === 'landscape';
+          const widthMillimetres = isLandscape ? longSide : shortSide;
+          const heightMillimetres = isLandscape ? shortSide : longSide;
+          pageWidthPx = widthMillimetres * pxPerMillimetre;
+          pageHeightPx = heightMillimetres * pxPerMillimetre;
+        }
+
+        let autoScale = 1;
+        if (
+          Number.isFinite(pageWidthPx)
+          && Number.isFinite(pageHeightPx)
+          && pageWidthPx > 0
+          && pageHeightPx > 0
+        ) {
+          const scaleX = pageWidthPx / layerRect.width;
+          const scaleY = pageHeightPx / layerRect.height;
+          if (Number.isFinite(scaleX) && Number.isFinite(scaleY) && scaleX > 0 && scaleY > 0) {
+            autoScale = Math.min(1, scaleX, scaleY);
+          }
+        }
+
         const manualScale = Math.min(
           Math.max(floatingNotesPrintSettings.scalePercent / 100, 0.1),
           4
         );
-        const autoScale = Number.isFinite(scaleX) && Number.isFinite(scaleY)
-          ? Math.min(1, scaleX, scaleY)
-          : 1;
         const targetScale = Math.min(autoScale, manualScale);
 
         printContainer.style.setProperty('--floating-notes-print-width', `${Math.round(layerRect.width)}px`);
         printContainer.style.setProperty('--floating-notes-print-height', `${Math.round(layerRect.height)}px`);
         printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
 
-        const landscapeStyle = document.createElement('style');
-        landscapeStyle.dataset.floatingNotesPrint = 'orientation';
-        landscapeStyle.media = 'print';
-        const pageSizeSetting = FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(floatingNotesPrintSettings.pageSize)
-          ? floatingNotesPrintSettings.pageSize
-          : FLOATING_NOTES_PRINT_DEFAULTS.pageSize;
-        const orientationSetting = FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(floatingNotesPrintSettings.orientation)
-          ? floatingNotesPrintSettings.orientation
-          : FLOATING_NOTES_PRINT_DEFAULTS.orientation;
-        landscapeStyle.textContent = `@page { size: ${pageSizeSetting} ${orientationSetting}; margin: 0; }`;
-        document.head.appendChild(landscapeStyle);
+        let pageSetupStyle = null;
+        if (pageSpec) {
+          pageSetupStyle = document.createElement('style');
+          pageSetupStyle.dataset.floatingNotesPrint = 'orientation';
+          pageSetupStyle.media = 'print';
+          pageSetupStyle.textContent = `@page { size: ${pageSizeSetting} ${orientationSetting}; margin: 0; }`;
+          document.head.appendChild(pageSetupStyle);
+        }
 
         visibleNotes.forEach(({ note, rect }) => {
           const clone = note.cloneNode(true);
@@ -8182,8 +8249,8 @@ export async function initializeEditor() {
           if (printContainer.isConnected) {
             printContainer.remove();
           }
-          if (landscapeStyle.isConnected) {
-            landscapeStyle.remove();
+          if (pageSetupStyle && pageSetupStyle.isConnected) {
+            pageSetupStyle.remove();
           }
           if (previousSectionId) {
             sectionThemes.set(previousSectionId, previousTheme);
@@ -13778,11 +13845,17 @@ export async function initializeEditor() {
       if (floatingNotesPrintPageSizeSelect) {
         floatingNotesPrintPageSizeSelect.addEventListener('change', () => {
           const value = floatingNotesPrintPageSizeSelect.value;
-          if (FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(value)) {
-            floatingNotesPrintSettings.pageSize = value;
+          if (
+            value === FLOATING_NOTES_PRINT_BROWSER_OPTION
+            || FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(value)
+          ) {
+            floatingNotesPrintSettings.pageSize = value === FLOATING_NOTES_PRINT_BROWSER_OPTION
+              ? FLOATING_NOTES_PRINT_BROWSER_OPTION
+              : value;
             persistFloatingNotesPrintSettings();
+            applyFloatingNotesPrintSettingsToUI();
           } else {
-            floatingNotesPrintPageSizeSelect.value = floatingNotesPrintSettings.pageSize;
+            applyFloatingNotesPrintSettingsToUI();
           }
         });
       }
@@ -13790,12 +13863,17 @@ export async function initializeEditor() {
       if (floatingNotesPrintOrientationSelect) {
         floatingNotesPrintOrientationSelect.addEventListener('change', () => {
           const value = (floatingNotesPrintOrientationSelect.value || '').toLowerCase();
-          if (FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(value)) {
-            floatingNotesPrintSettings.orientation = value;
-            floatingNotesPrintOrientationSelect.value = floatingNotesPrintSettings.orientation;
+          if (
+            value === FLOATING_NOTES_PRINT_BROWSER_OPTION
+            || FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(value)
+          ) {
+            floatingNotesPrintSettings.orientation = value === FLOATING_NOTES_PRINT_BROWSER_OPTION
+              ? FLOATING_NOTES_PRINT_BROWSER_OPTION
+              : value;
             persistFloatingNotesPrintSettings();
+            applyFloatingNotesPrintSettingsToUI();
           } else {
-            floatingNotesPrintOrientationSelect.value = floatingNotesPrintSettings.orientation;
+            applyFloatingNotesPrintSettingsToUI();
           }
         });
       }
