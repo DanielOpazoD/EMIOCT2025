@@ -7895,9 +7895,8 @@ export async function initializeEditor() {
 
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           if (!note.isConnected) return;
-          if (note.classList.contains('floating-note-behind')) return;
-          const style = window.getComputedStyle(note);
-          if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
+          const computedStyle = window.getComputedStyle(note);
+          if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || Number.parseFloat(computedStyle.opacity || '1') === 0) {
             return;
           }
           if ((note.offsetWidth || 0) === 0 || (note.offsetHeight || 0) === 0) {
@@ -7914,7 +7913,7 @@ export async function initializeEditor() {
           if (rect.right < layerRect.left || rect.left > layerRect.right) {
             return;
           }
-          visibleNotes.push({ note, rect });
+          visibleNotes.push({ note, rect, computedStyle });
         });
 
         if (!visibleNotes.length) {
@@ -7963,7 +7962,7 @@ export async function initializeEditor() {
         landscapeStyle.textContent = '@page { size: A4 landscape; margin: 0; }';
         document.head.appendChild(landscapeStyle);
 
-        visibleNotes.forEach(({ note, rect }) => {
+        visibleNotes.forEach(({ note, rect, computedStyle }) => {
           const clone = note.cloneNode(true);
           clone.classList.remove('dragging', 'resizing');
           clone.removeAttribute('id');
@@ -7975,9 +7974,14 @@ export async function initializeEditor() {
           clone.style.top = `${Math.round(rect.top - layerRect.top)}px`;
           clone.style.width = `${Math.round(rect.width)}px`;
           clone.style.height = `${Math.round(rect.height)}px`;
-          const computed = window.getComputedStyle(note);
-          if (computed.zIndex) {
-            clone.style.zIndex = computed.zIndex;
+          if (computedStyle && computedStyle.zIndex && computedStyle.zIndex !== 'auto') {
+            clone.style.zIndex = computedStyle.zIndex;
+          }
+          if (computedStyle && computedStyle.opacity) {
+            clone.style.opacity = computedStyle.opacity;
+          }
+          if (computedStyle && computedStyle.visibility) {
+            clone.style.visibility = computedStyle.visibility;
           }
           clone.removeAttribute('data-note-id');
           clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));

@@ -5333,6 +5333,11 @@ body.printing-floating-notes .magic-page {
     position: absolute;
   }
 
+  body.printing-floating-notes .floating-notes-print-stage .floating-note-behind {
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
   .page, .magic-page {
     box-shadow: none;
     page-break-after: always;
