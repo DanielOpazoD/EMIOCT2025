@@ -8195,12 +8195,19 @@ export async function initializeEditor() {
         printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
 
         let pageSetupStyle = null;
+        let pageMarginStyle = null;
         if (pageSpec) {
           pageSetupStyle = document.createElement('style');
           pageSetupStyle.dataset.floatingNotesPrint = 'orientation';
           pageSetupStyle.media = 'print';
           pageSetupStyle.textContent = `@page { size: ${pageSizeSetting} ${orientationSetting}; margin: 0; }`;
           document.head.appendChild(pageSetupStyle);
+        } else {
+          pageMarginStyle = document.createElement('style');
+          pageMarginStyle.dataset.floatingNotesPrint = 'margins';
+          pageMarginStyle.media = 'print';
+          pageMarginStyle.textContent = '@page { margin: 0; }';
+          document.head.appendChild(pageMarginStyle);
         }
 
         visibleNotes.forEach(({ note, rect }) => {
@@ -8253,6 +8260,9 @@ export async function initializeEditor() {
           }
           if (pageSetupStyle && pageSetupStyle.isConnected) {
             pageSetupStyle.remove();
+          }
+          if (pageMarginStyle && pageMarginStyle.isConnected) {
+            pageMarginStyle.remove();
           }
           if (previousSectionId) {
             sectionThemes.set(previousSectionId, previousTheme);
