@@ -7879,17 +7879,33 @@ export async function initializeEditor() {
       function printVisibleFloatingNotes() {
         if (!floatingNotesLayer) return;
         closeFloatingNoteStyleMenu();
+
         const layerRect = floatingNotesLayer.getBoundingClientRect();
+        if (!layerRect || layerRect.width <= 0 || layerRect.height <= 0) {
+          alert('No hay notas visibles para imprimir en este tema.');
+          return;
+        }
+
         const topicId = getCurrentTopicId();
+        const previousPage = getCurrentPage();
+        const previousTheme = getPageTheme(previousPage);
+        const previousSectionId = getCurrentSectionId();
+        const layerStyles = window.getComputedStyle(floatingNotesLayer);
         const visibleNotes = [];
+
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           if (!note.isConnected) return;
-          if (note.classList.contains('floating-note-behind')) return;
+          const isBehind = note.classList.contains('floating-note-behind');
           const style = window.getComputedStyle(note);
-          if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
+          const isDisplayNone = style.display === 'none';
+          const isVisibilityHidden = style.visibility === 'hidden';
+          const isFullyTransparent = Number.parseFloat(style.opacity || '1') === 0;
+          const hasZeroSize = (note.offsetWidth || 0) === 0 || (note.offsetHeight || 0) === 0;
+
+          if (!isBehind && (isDisplayNone || isVisibilityHidden || isFullyTransparent || hasZeroSize)) {
             return;
           }
-          if ((note.offsetWidth || 0) === 0 || (note.offsetHeight || 0) === 0) {
+          if (isBehind && (isDisplayNone || hasZeroSize)) {
             return;
           }
           const noteTopicId = resolveNoteTopicId(note);
@@ -7913,36 +7929,107 @@ export async function initializeEditor() {
 
         const printContainer = document.createElement('div');
         printContainer.className = 'floating-notes-print-area';
-        printContainer.style.width = `${Math.round(layerRect.width)}px`;
-        printContainer.style.height = `${Math.round(layerRect.height)}px`;
+
+        const stage = document.createElement('div');
+        stage.className = 'floating-notes-print-stage';
+        stage.style.width = `${Math.round(layerRect.width)}px`;
+        stage.style.height = `${Math.round(layerRect.height)}px`;
+        stage.style.position = 'relative';
+        stage.style.backgroundColor = layerStyles.backgroundColor || '#ffffff';
+        stage.style.backgroundImage = layerStyles.backgroundImage || 'none';
+        stage.style.backgroundPosition = layerStyles.backgroundPosition || '0 0';
+        stage.style.backgroundRepeat = layerStyles.backgroundRepeat || 'no-repeat';
+        stage.style.backgroundSize = layerStyles.backgroundSize || 'auto';
+        stage.style.flex = '0 0 auto';
+
+        printContainer.style.backgroundColor = stage.style.backgroundColor;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'floating-notes-print-wrapper';
+        wrapper.style.flex = '0 0 auto';
+        wrapper.appendChild(stage);
+        printContainer.appendChild(wrapper);
+
+        const pxPerMillimetre = 96 / 25.4;
+        const pageWidthPx = 297 * pxPerMillimetre;
+        const pageHeightPx = 210 * pxPerMillimetre;
+        const scaleX = pageWidthPx / layerRect.width;
+        const scaleY = pageHeightPx / layerRect.height;
+        const targetScale = Number.isFinite(scaleX) && Number.isFinite(scaleY)
+          ? Math.min(1, scaleX, scaleY)
+          : 1;
+
+        printContainer.style.setProperty('--floating-notes-print-width', `${Math.round(layerRect.width)}px`);
+        printContainer.style.setProperty('--floating-notes-print-height', `${Math.round(layerRect.height)}px`);
+        printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
 
         const landscapeStyle = document.createElement('style');
         landscapeStyle.dataset.floatingNotesPrint = 'orientation';
-        landscapeStyle.textContent = '@page { size: landscape; margin: 10mm; }';
+        landscapeStyle.media = 'print';
+        landscapeStyle.textContent = '@page { size: A4 landscape; margin: 0; }';
         document.head.appendChild(landscapeStyle);
 
         visibleNotes.forEach(({ note, rect }) => {
           const clone = note.cloneNode(true);
           clone.classList.remove('dragging', 'resizing');
+          clone.classList.remove('floating-note-behind');
+          clone.removeAttribute('id');
+          clone.hidden = false;
+          clone.setAttribute('aria-hidden', 'false');
+          clone.style.visibility = 'visible';
+          clone.style.opacity = '1';
+          clone.removeAttribute('data-behind-main-content');
           clone.querySelectorAll('.floating-note-resize-handle').forEach(handle => handle.remove());
+          clone.querySelectorAll('.floating-note-style-menu').forEach(menu => menu.remove());
           clone.classList.add('floating-note-compact-header');
           clone.style.position = 'absolute';
           clone.style.left = `${Math.round(rect.left - layerRect.left)}px`;
           clone.style.top = `${Math.round(rect.top - layerRect.top)}px`;
           clone.style.width = `${Math.round(rect.width)}px`;
           clone.style.height = `${Math.round(rect.height)}px`;
+          const computed = window.getComputedStyle(note);
+          if (computed.zIndex) {
+            clone.style.zIndex = computed.zIndex;
+          }
           clone.removeAttribute('data-note-id');
           clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));
-          printContainer.appendChild(clone);
+          const originalBody = note.querySelector('.floating-note-body');
+          const cloneBody = clone.querySelector('.floating-note-body');
+          if (originalBody && cloneBody) {
+            cloneBody.scrollTop = originalBody.scrollTop;
+            cloneBody.scrollLeft = originalBody.scrollLeft;
+          }
+          stage.appendChild(clone);
         });
 
+        let fallbackTimer = null;
+        let didCleanup = false;
         const cleanup = () => {
+          if (didCleanup) {
+            return;
+          }
+          didCleanup = true;
+          if (fallbackTimer) {
+            window.clearTimeout(fallbackTimer);
+            fallbackTimer = null;
+          }
           document.body.classList.remove('printing-floating-notes');
           if (printContainer.isConnected) {
             printContainer.remove();
           }
           if (landscapeStyle.isConnected) {
             landscapeStyle.remove();
+          }
+          if (previousSectionId) {
+            sectionThemes.set(previousSectionId, previousTheme);
+          }
+          if (previousTheme) {
+            syncBodyTheme(previousTheme);
+            updateThemeSelectControl(previousTheme);
+          }
+          if (previousPage && previousPage.isConnected) {
+            setActivePage(previousPage);
+          } else {
+            ensureVisibleSection({ force: true });
           }
           window.removeEventListener('afterprint', cleanup);
         };
@@ -7951,9 +8038,13 @@ export async function initializeEditor() {
         document.body.appendChild(printContainer);
         document.body.classList.add('printing-floating-notes');
 
+        fallbackTimer = window.setTimeout(() => {
+          fallbackTimer = null;
+          cleanup();
+        }, 2000);
+
         requestAnimationFrame(() => {
           window.print();
-          setTimeout(cleanup, 1000);
         });
       }
 
