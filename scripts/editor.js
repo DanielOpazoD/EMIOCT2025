@@ -690,7 +690,7 @@ export async function initializeEditor() {
         if (specialtySpan) {
           specialtySpan.dataset.documentTitle = trimmed;
         }
-        document.title = trimmed ? `${APP_NAME} – ${trimmed}` : APP_NAME;
+        document.title = APP_NAME;
       }
 
       function measureToolbarHeight() {
