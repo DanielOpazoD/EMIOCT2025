@@ -8120,25 +8120,93 @@ export async function initializeEditor() {
           return;
         }
 
+        let minRelativeLeft = Infinity;
+        let minRelativeTop = Infinity;
+        let maxRelativeRight = -Infinity;
+        let maxRelativeBottom = -Infinity;
+
+        visibleNotes.forEach(({ rect }) => {
+          const relativeLeft = rect.left - layerRect.left;
+          const relativeTop = rect.top - layerRect.top;
+          const relativeRight = rect.right - layerRect.left;
+          const relativeBottom = rect.bottom - layerRect.top;
+
+          if (relativeLeft < minRelativeLeft) {
+            minRelativeLeft = relativeLeft;
+          }
+          if (relativeTop < minRelativeTop) {
+            minRelativeTop = relativeTop;
+          }
+          if (relativeRight > maxRelativeRight) {
+            maxRelativeRight = relativeRight;
+          }
+          if (relativeBottom > maxRelativeBottom) {
+            maxRelativeBottom = relativeBottom;
+          }
+        });
+
+        if (!Number.isFinite(minRelativeLeft)) {
+          minRelativeLeft = 0;
+        }
+        if (!Number.isFinite(minRelativeTop)) {
+          minRelativeTop = 0;
+        }
+        if (!Number.isFinite(maxRelativeRight)) {
+          maxRelativeRight = layerRect.width;
+        }
+        if (!Number.isFinite(maxRelativeBottom)) {
+          maxRelativeBottom = layerRect.height;
+        }
+
+        const safeMinRelativeLeft = Math.floor(minRelativeLeft);
+        const safeMinRelativeTop = Math.floor(minRelativeTop);
+        const safeMaxRelativeRight = Math.ceil(maxRelativeRight);
+        const safeMaxRelativeBottom = Math.ceil(maxRelativeBottom);
+
+        const offsetX = Math.min(0, safeMinRelativeLeft);
+        const offsetY = Math.min(0, safeMinRelativeTop);
+
+        const stageWidth = Math.max(Math.ceil(layerRect.width), safeMaxRelativeRight) - offsetX;
+        const stageHeight = Math.max(Math.ceil(layerRect.height), safeMaxRelativeBottom) - offsetY;
+        const roundedStageWidth = Math.max(1, Math.round(stageWidth));
+        const roundedStageHeight = Math.max(1, Math.round(stageHeight));
+
+        const adjustBackgroundPositionAxis = (value, offset) => {
+          const trimmed = (value || '').trim();
+          if (!trimmed) {
+            return offset !== 0 ? `${-offset}px` : '0px';
+          }
+          if (trimmed.endsWith('px')) {
+            const numeric = Number.parseFloat(trimmed);
+            if (Number.isFinite(numeric)) {
+              return `${numeric - offset}px`;
+            }
+          }
+          return trimmed;
+        };
+
         const printContainer = document.createElement('div');
         printContainer.className = 'floating-notes-print-area';
 
         const stage = document.createElement('div');
         stage.className = 'floating-notes-print-stage';
-        stage.style.width = `${Math.round(layerRect.width)}px`;
-        stage.style.height = `${Math.round(layerRect.height)}px`;
+        stage.style.width = `${roundedStageWidth}px`;
+        stage.style.height = `${roundedStageHeight}px`;
         stage.style.position = 'relative';
         stage.style.backgroundColor = layerStyles.backgroundColor || '#ffffff';
         stage.style.backgroundImage = layerStyles.backgroundImage || 'none';
-        stage.style.backgroundPosition = layerStyles.backgroundPosition || '0 0';
         stage.style.backgroundRepeat = layerStyles.backgroundRepeat || 'no-repeat';
         stage.style.backgroundSize = layerStyles.backgroundSize || 'auto';
+        stage.style.backgroundPositionX = adjustBackgroundPositionAxis(layerStyles.backgroundPositionX, offsetX);
+        stage.style.backgroundPositionY = adjustBackgroundPositionAxis(layerStyles.backgroundPositionY, offsetY);
         stage.style.flex = '0 0 auto';
 
         printContainer.style.backgroundColor = stage.style.backgroundColor;
         const wrapper = document.createElement('div');
         wrapper.className = 'floating-notes-print-wrapper';
         wrapper.style.flex = '0 0 auto';
+        wrapper.style.width = `${roundedStageWidth}px`;
+        wrapper.style.height = `${roundedStageHeight}px`;
         wrapper.appendChild(stage);
         printContainer.appendChild(wrapper);
 
@@ -8175,8 +8243,8 @@ export async function initializeEditor() {
           && pageWidthPx > 0
           && pageHeightPx > 0
         ) {
-          const scaleX = pageWidthPx / layerRect.width;
-          const scaleY = pageHeightPx / layerRect.height;
+          const scaleX = pageWidthPx / stageWidth;
+          const scaleY = pageHeightPx / stageHeight;
           if (Number.isFinite(scaleX) && Number.isFinite(scaleY) && scaleX > 0 && scaleY > 0) {
             autoScale = Math.min(1, scaleX, scaleY);
           }
@@ -8188,8 +8256,8 @@ export async function initializeEditor() {
         );
         const targetScale = Math.min(autoScale, manualScale);
 
-        printContainer.style.setProperty('--floating-notes-print-width', `${Math.round(layerRect.width)}px`);
-        printContainer.style.setProperty('--floating-notes-print-height', `${Math.round(layerRect.height)}px`);
+        printContainer.style.setProperty('--floating-notes-print-width', `${roundedStageWidth}px`);
+        printContainer.style.setProperty('--floating-notes-print-height', `${roundedStageHeight}px`);
         printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
 
         let pageSetupStyle = null;
@@ -8215,8 +8283,10 @@ export async function initializeEditor() {
           clone.querySelectorAll('.floating-note-style-menu').forEach(menu => menu.remove());
           clone.classList.add('floating-note-compact-header');
           clone.style.position = 'absolute';
-          clone.style.left = `${Math.round(rect.left - layerRect.left)}px`;
-          clone.style.top = `${Math.round(rect.top - layerRect.top)}px`;
+          const relativeLeft = rect.left - layerRect.left;
+          const relativeTop = rect.top - layerRect.top;
+          clone.style.left = `${Math.round(relativeLeft - offsetX)}px`;
+          clone.style.top = `${Math.round(relativeTop - offsetY)}px`;
           clone.style.width = `${Math.round(rect.width)}px`;
           clone.style.height = `${Math.round(rect.height)}px`;
           const computed = window.getComputedStyle(note);
