@@ -164,6 +164,24 @@ export async function initializeEditor() {
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
+      const FLOATING_NOTES_PRINT_SETTINGS_KEY = 'emi2025-floating-notes-print-settings';
+      const FLOATING_NOTES_PRINT_DEFAULTS = {
+        pageSize: 'A4',
+        orientation: 'landscape',
+        scale: 100
+      };
+      const FLOATING_NOTES_PRINT_SCALE_BOUNDS = {
+        min: 10,
+        max: 400
+      };
+      const FLOATING_NOTES_PRINT_PAGE_SIZES_MM = {
+        A3: { width: 297, height: 420 },
+        A4: { width: 210, height: 297 },
+        A5: { width: 148, height: 210 },
+        LETTER: { width: 216, height: 279 },
+        LEGAL: { width: 216, height: 356 },
+        TABLOID: { width: 279, height: 432 }
+      };
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -7876,6 +7894,149 @@ export async function initializeEditor() {
         printFloatingNotesViewBtn.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
       }
 
+      const sanitizeFloatingNotesPageSize = (value) => {
+        if (!value && value !== 0) {
+          return '';
+        }
+        return String(value).trim().toUpperCase().replace(/\s+/g, '');
+      };
+
+      const normalizeFloatingNotesOrientation = (value) => {
+        if (!value && value !== 0) {
+          return '';
+        }
+        const normalized = String(value).trim().toLowerCase();
+        if (normalized === 'portrait' || normalized === 'vertical') {
+          return 'portrait';
+        }
+        if (normalized === 'landscape' || normalized === 'horizontal') {
+          return 'landscape';
+        }
+        return '';
+      };
+
+      const clampFloatingNotesPrintScale = (value) => {
+        if (!value && value !== 0) {
+          return null;
+        }
+        const numeric = Number.parseFloat(String(value).replace(',', '.'));
+        if (!Number.isFinite(numeric)) {
+          return null;
+        }
+        const { min, max } = FLOATING_NOTES_PRINT_SCALE_BOUNDS;
+        return Math.min(max, Math.max(min, numeric));
+      };
+
+      const getFloatingNotesPageSizeDimensions = (pageSize) => {
+        const normalized = sanitizeFloatingNotesPageSize(pageSize);
+        return FLOATING_NOTES_PRINT_PAGE_SIZES_MM[normalized] || null;
+      };
+
+      function computeFloatingNotesRecommendedScale(layerRect, pageSize, orientation) {
+        if (!layerRect || layerRect.width <= 0 || layerRect.height <= 0) {
+          return FLOATING_NOTES_PRINT_DEFAULTS.scale / 100;
+        }
+        const fallbackDimensions = FLOATING_NOTES_PRINT_PAGE_SIZES_MM[FLOATING_NOTES_PRINT_DEFAULTS.pageSize];
+        const dimensions = getFloatingNotesPageSizeDimensions(pageSize) || fallbackDimensions;
+        const normalizedOrientation = orientation === 'portrait' ? 'portrait' : 'landscape';
+        const isLandscape = normalizedOrientation === 'landscape';
+        const widthMillimetres = isLandscape ? dimensions.height : dimensions.width;
+        const heightMillimetres = isLandscape ? dimensions.width : dimensions.height;
+        const pxPerMillimetre = 96 / 25.4;
+        const pageWidthPx = widthMillimetres * pxPerMillimetre;
+        const pageHeightPx = heightMillimetres * pxPerMillimetre;
+        const scaleX = pageWidthPx / layerRect.width;
+        const scaleY = pageHeightPx / layerRect.height;
+        const recommended = Math.min(1, scaleX, scaleY);
+        if (!Number.isFinite(recommended) || recommended <= 0) {
+          return FLOATING_NOTES_PRINT_DEFAULTS.scale / 100;
+        }
+        return recommended;
+      }
+
+      function loadFloatingNotesPrintSettings() {
+        if (typeof window === 'undefined' || !window.localStorage) {
+          return null;
+        }
+        try {
+          const raw = window.localStorage.getItem(FLOATING_NOTES_PRINT_SETTINGS_KEY);
+          if (!raw) {
+            return null;
+          }
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') {
+            return null;
+          }
+          const scale = clampFloatingNotesPrintScale(parsed.scale);
+          const orientation = normalizeFloatingNotesOrientation(parsed.orientation) || '';
+          const pageSize = sanitizeFloatingNotesPageSize(parsed.pageSize) || '';
+          return {
+            scale: scale ?? FLOATING_NOTES_PRINT_DEFAULTS.scale,
+            orientation: orientation || FLOATING_NOTES_PRINT_DEFAULTS.orientation,
+            pageSize: pageSize || FLOATING_NOTES_PRINT_DEFAULTS.pageSize
+          };
+        } catch (error) {
+          console.warn('No se pudieron cargar los ajustes de impresión de notas flotantes.', error);
+          return null;
+        }
+      }
+
+      function saveFloatingNotesPrintSettings(settings) {
+        if (typeof window === 'undefined' || !window.localStorage || !settings) {
+          return;
+        }
+        try {
+          const payload = {
+            scale: clampFloatingNotesPrintScale(settings.scale) ?? FLOATING_NOTES_PRINT_DEFAULTS.scale,
+            orientation: normalizeFloatingNotesOrientation(settings.orientation) || FLOATING_NOTES_PRINT_DEFAULTS.orientation,
+            pageSize: sanitizeFloatingNotesPageSize(settings.pageSize) || FLOATING_NOTES_PRINT_DEFAULTS.pageSize
+          };
+          window.localStorage.setItem(FLOATING_NOTES_PRINT_SETTINGS_KEY, JSON.stringify(payload));
+        } catch (error) {
+          console.warn('No se pudieron guardar los ajustes de impresión de notas flotantes.', error);
+        }
+      }
+
+      function requestFloatingNotesPrintSettings(layerRect) {
+        const saved = loadFloatingNotesPrintSettings() || FLOATING_NOTES_PRINT_DEFAULTS;
+        let pageSize = window.prompt('Tamaño de página (ej: A4, Letter, Legal).', saved.pageSize);
+        if (pageSize === null) {
+          return null;
+        }
+        pageSize = sanitizeFloatingNotesPageSize(pageSize) || saved.pageSize || FLOATING_NOTES_PRINT_DEFAULTS.pageSize;
+
+        let orientation = window.prompt('Orientación (portrait/landscape).', saved.orientation);
+        if (orientation === null) {
+          return null;
+        }
+        orientation = normalizeFloatingNotesOrientation(orientation) || saved.orientation || FLOATING_NOTES_PRINT_DEFAULTS.orientation;
+
+        const recommendedScale = computeFloatingNotesRecommendedScale(layerRect, pageSize, orientation);
+        const recommendedPercent = Math.min(
+          FLOATING_NOTES_PRINT_SCALE_BOUNDS.max,
+          Math.max(
+            FLOATING_NOTES_PRINT_SCALE_BOUNDS.min,
+            Math.round(recommendedScale * 100)
+          )
+        );
+        const savedScale = clampFloatingNotesPrintScale(saved.scale);
+        const defaultScale = savedScale ?? recommendedPercent;
+        const scaleMessage = `Escala de impresión (%). Recomendado: ${recommendedPercent}%`;
+        let scaleInput = window.prompt(scaleMessage, String(defaultScale));
+        if (scaleInput === null) {
+          return null;
+        }
+        const finalScale = clampFloatingNotesPrintScale(scaleInput) ?? defaultScale;
+
+        const settings = {
+          pageSize,
+          orientation,
+          scale: finalScale
+        };
+        saveFloatingNotesPrintSettings(settings);
+        return settings;
+      }
+
       function printVisibleFloatingNotes() {
         if (!floatingNotesLayer) return;
         closeFloatingNoteStyleMenu();
@@ -7949,23 +8110,23 @@ export async function initializeEditor() {
         wrapper.appendChild(stage);
         printContainer.appendChild(wrapper);
 
-        const pxPerMillimetre = 96 / 25.4;
-        const pageWidthPx = 297 * pxPerMillimetre;
-        const pageHeightPx = 210 * pxPerMillimetre;
-        const scaleX = pageWidthPx / layerRect.width;
-        const scaleY = pageHeightPx / layerRect.height;
-        const targetScale = Number.isFinite(scaleX) && Number.isFinite(scaleY)
-          ? Math.min(1, scaleX, scaleY)
-          : 1;
+        const printSettings = requestFloatingNotesPrintSettings(layerRect);
+        if (!printSettings) {
+          return;
+        }
+        const pageSizeForPrint = sanitizeFloatingNotesPageSize(printSettings.pageSize) || FLOATING_NOTES_PRINT_DEFAULTS.pageSize;
+        const orientationForPrint = normalizeFloatingNotesOrientation(printSettings.orientation) || FLOATING_NOTES_PRINT_DEFAULTS.orientation;
+        const scalePercentage = clampFloatingNotesPrintScale(printSettings.scale) ?? FLOATING_NOTES_PRINT_DEFAULTS.scale;
+        const scaleRatio = scalePercentage / 100;
 
         printContainer.style.setProperty('--floating-notes-print-width', `${Math.round(layerRect.width)}px`);
         printContainer.style.setProperty('--floating-notes-print-height', `${Math.round(layerRect.height)}px`);
-        printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
+        printContainer.style.setProperty('--floating-notes-print-scale', `${scaleRatio}`);
 
         const landscapeStyle = document.createElement('style');
         landscapeStyle.dataset.floatingNotesPrint = 'orientation';
         landscapeStyle.media = 'print';
-        landscapeStyle.textContent = '@page { size: A4 landscape; margin: 0; }';
+        landscapeStyle.textContent = `@page { size: ${pageSizeForPrint} ${orientationForPrint}; margin: 0; }`;
         document.head.appendChild(landscapeStyle);
 
         visibleNotes.forEach(({ note, rect }) => {
@@ -8003,6 +8164,13 @@ export async function initializeEditor() {
 
         let fallbackTimer = null;
         let didCleanup = false;
+        const previousTopicId = getCurrentTopicId();
+        const previousVisibleSectionId = getVisibleSectionId();
+        const previousScrollPosition = {
+          left: window.scrollX,
+          top: window.scrollY
+        };
+
         const cleanup = () => {
           if (didCleanup) {
             return;
@@ -8028,8 +8196,29 @@ export async function initializeEditor() {
           }
           if (previousPage && previousPage.isConnected) {
             setActivePage(previousPage);
+          } else if (previousTopicId) {
+            const fallbackPage = findPageByTopicId(previousTopicId);
+            if (fallbackPage) {
+              setActivePage(fallbackPage);
+            } else {
+              ensureVisibleSection({ force: true });
+            }
           } else {
             ensureVisibleSection({ force: true });
+          }
+          if (previousVisibleSectionId) {
+            setVisibleSection(previousVisibleSectionId, { force: true });
+          } else if (visibleSectionId) {
+            visibleSectionId = '';
+            refreshSectionVisibility({ force: true });
+            updateSectionsPanelActiveState();
+          }
+          if (Number.isFinite(previousScrollPosition.left) && Number.isFinite(previousScrollPosition.top)) {
+            window.scrollTo({
+              left: previousScrollPosition.left,
+              top: previousScrollPosition.top,
+              behavior: 'auto'
+            });
           }
           window.removeEventListener('afterprint', cleanup);
         };
