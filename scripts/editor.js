@@ -164,6 +164,16 @@ export async function initializeEditor() {
       const DOCUMENT_SHIFT_STEP = 80;
       const DOCUMENT_SHIFT_MIN = -1500;
       const DOCUMENT_SHIFT_MAX = 1500;
+      const FLOATING_NOTES_PRINT_SETTINGS_STORAGE_KEY = 'emi2025-floating-notes-print-settings';
+      const FLOATING_NOTES_PRINT_DEFAULTS = {
+        scalePercent: 100,
+        pageSize: 'A4',
+        orientation: 'landscape'
+      };
+      const FLOATING_NOTES_PRINT_ALLOWED_SIZES = ['A3', 'A4', 'A5', 'Letter', 'Legal'];
+      const FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS = ['portrait', 'landscape'];
+      let floatingNotesPrintSettings = loadFloatingNotesPrintSettings();
+      let floatingNotesPrintSettingsOpen = false;
 
       const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
       let cachedStylesheetForExport = null;
@@ -337,6 +347,11 @@ export async function initializeEditor() {
       const toggleNotesBtn = document.getElementById('toggleNotesBtn');
       const toggleMainContentBtn = document.getElementById('toggleMainContentBtn');
       const printFloatingNotesViewBtn = document.getElementById('printFloatingNotesViewBtn');
+      const floatingNotesPrintSettingsBtn = document.getElementById('floatingNotesPrintSettingsBtn');
+      const floatingNotesPrintSettingsPanel = document.getElementById('floatingNotesPrintSettingsPanel');
+      const floatingNotesPrintScaleInput = document.getElementById('floatingNotesPrintScale');
+      const floatingNotesPrintPageSizeSelect = document.getElementById('floatingNotesPrintPageSize');
+      const floatingNotesPrintOrientationSelect = document.getElementById('floatingNotesPrintOrientation');
       const notesViewBtn = document.getElementById('notesViewBtn');
       const topbar = document.querySelector('.topbar');
       const topbarToolsToggle = document.getElementById('topbarToolsToggle');
@@ -7516,6 +7531,42 @@ export async function initializeEditor() {
         };
       }
 
+      function restoreTopicViewportContext(context) {
+        if (!context) {
+          return;
+        }
+        const page = getCurrentPage();
+        if (!page) {
+          return;
+        }
+        const scrollY = window.scrollY
+          || window.pageYOffset
+          || document.documentElement.scrollTop
+          || document.body.scrollTop
+          || 0;
+        const rect = page.getBoundingClientRect();
+        const pageTop = scrollY + rect.top;
+        const pageHeight = Math.max(page.scrollHeight || rect.height || 0, 1);
+        const viewportHeight = Number.isFinite(context.viewportHeight)
+          ? context.viewportHeight
+          : (window.innerHeight || document.documentElement.clientHeight || 0);
+        let targetOffset = null;
+        if (Number.isFinite(context.pageOffsetTop)) {
+          targetOffset = context.pageOffsetTop;
+        } else if (Number.isFinite(context.relativeTop)) {
+          targetOffset = (context.relativeTop || 0) * pageHeight - viewportHeight * 0.5;
+        }
+        if (!Number.isFinite(targetOffset)) {
+          return;
+        }
+        const maxOffset = Math.max(pageHeight - viewportHeight, 0);
+        const clampedOffset = Math.min(Math.max(targetOffset, 0), maxOffset);
+        window.scrollTo({
+          top: pageTop + clampedOffset,
+          behavior: 'auto'
+        });
+      }
+
       const FLOATING_NOTE_VIEWPORT_REANCHOR_OFFSET_EPSILON = 2;
       const FLOATING_NOTE_VIEWPORT_REANCHOR_RATIO_EPSILON = 0.002;
 
@@ -7868,6 +7919,88 @@ export async function initializeEditor() {
         });
       }
 
+      function loadFloatingNotesPrintSettings() {
+        if (typeof localStorage === 'undefined') {
+          return { ...FLOATING_NOTES_PRINT_DEFAULTS };
+        }
+        try {
+          const raw = localStorage.getItem(FLOATING_NOTES_PRINT_SETTINGS_STORAGE_KEY);
+          if (!raw) {
+            return { ...FLOATING_NOTES_PRINT_DEFAULTS };
+          }
+          const parsed = JSON.parse(raw);
+          return sanitizeFloatingNotesPrintSettings(parsed);
+        } catch (error) {
+          console.warn('No se pudieron cargar preferencias de impresión de notas flotantes:', error);
+          return { ...FLOATING_NOTES_PRINT_DEFAULTS };
+        }
+      }
+
+      function sanitizeFloatingNotesPrintSettings(candidate = {}) {
+        const sanitized = { ...FLOATING_NOTES_PRINT_DEFAULTS };
+        const scale = Number.parseFloat(candidate.scalePercent);
+        if (Number.isFinite(scale)) {
+          sanitized.scalePercent = Math.min(Math.max(Math.round(scale), 10), 400);
+        }
+        const pageSize = typeof candidate.pageSize === 'string' ? candidate.pageSize.trim() : '';
+        if (pageSize && FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(pageSize)) {
+          sanitized.pageSize = pageSize;
+        }
+        const orientation = typeof candidate.orientation === 'string' ? candidate.orientation.trim().toLowerCase() : '';
+        if (FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(orientation)) {
+          sanitized.orientation = orientation;
+        }
+        return sanitized;
+      }
+
+      function persistFloatingNotesPrintSettings() {
+        if (typeof localStorage === 'undefined') {
+          return;
+        }
+        try {
+          localStorage.setItem(
+            FLOATING_NOTES_PRINT_SETTINGS_STORAGE_KEY,
+            JSON.stringify(floatingNotesPrintSettings)
+          );
+        } catch (error) {
+          console.warn('No se pudieron guardar las preferencias de impresión de notas flotantes:', error);
+        }
+      }
+
+      function applyFloatingNotesPrintSettingsToUI() {
+        if (floatingNotesPrintScaleInput) {
+          floatingNotesPrintScaleInput.value = floatingNotesPrintSettings.scalePercent;
+        }
+        if (floatingNotesPrintPageSizeSelect) {
+          floatingNotesPrintPageSizeSelect.value = floatingNotesPrintSettings.pageSize;
+        }
+        if (floatingNotesPrintOrientationSelect) {
+          floatingNotesPrintOrientationSelect.value = floatingNotesPrintSettings.orientation;
+        }
+      }
+
+      function openFloatingNotesPrintSettingsPanel() {
+        if (!floatingNotesPrintSettingsPanel) return;
+        floatingNotesPrintSettingsPanel.dataset.open = 'true';
+        floatingNotesPrintSettingsPanel.setAttribute('aria-hidden', 'false');
+        floatingNotesPrintSettingsOpen = true;
+      }
+
+      function closeFloatingNotesPrintSettingsPanel() {
+        if (!floatingNotesPrintSettingsPanel) return;
+        delete floatingNotesPrintSettingsPanel.dataset.open;
+        floatingNotesPrintSettingsPanel.setAttribute('aria-hidden', 'true');
+        floatingNotesPrintSettingsOpen = false;
+      }
+
+      function toggleFloatingNotesPrintSettingsPanel() {
+        if (floatingNotesPrintSettingsOpen) {
+          closeFloatingNotesPrintSettingsPanel();
+        } else {
+          openFloatingNotesPrintSettingsPanel();
+        }
+      }
+
       function updateFloatingNotesPrintControl() {
         if (!printFloatingNotesViewBtn) return;
         const shouldShow = mainContentHidden === true;
@@ -7879,17 +8012,55 @@ export async function initializeEditor() {
       function printVisibleFloatingNotes() {
         if (!floatingNotesLayer) return;
         closeFloatingNoteStyleMenu();
+        closeFloatingNotesPrintSettingsPanel();
+
         const layerRect = floatingNotesLayer.getBoundingClientRect();
+        if (!layerRect || layerRect.width <= 0 || layerRect.height <= 0) {
+          alert('No hay notas visibles para imprimir en este tema.');
+          return;
+        }
+
         const topicId = getCurrentTopicId();
+        const previousPage = getCurrentPage();
+        const previousTheme = getPageTheme(previousPage);
+        const previousSectionId = getCurrentSectionId();
+        const previousScrollX = window.scrollX
+          || window.pageXOffset
+          || document.documentElement.scrollLeft
+          || document.body.scrollLeft
+          || 0;
+        const previousScrollY = window.scrollY
+          || window.pageYOffset
+          || document.documentElement.scrollTop
+          || document.body.scrollTop
+          || 0;
+        const previousViewportContext = captureActiveTopicViewportContext();
+        const previousLayerScrollLeft = Number.isFinite(floatingNotesLayer.scrollLeft)
+          ? floatingNotesLayer.scrollLeft
+          : null;
+        const previousLayerScrollTop = Number.isFinite(floatingNotesLayer.scrollTop)
+          ? floatingNotesLayer.scrollTop
+          : null;
+        const layerStyles = window.getComputedStyle(floatingNotesLayer);
         const visibleNotes = [];
+
+        floatingNotesPrintSettings = sanitizeFloatingNotesPrintSettings(floatingNotesPrintSettings);
+        applyFloatingNotesPrintSettingsToUI();
+        persistFloatingNotesPrintSettings();
+
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           if (!note.isConnected) return;
-          if (note.classList.contains('floating-note-behind')) return;
+          const isBehind = note.classList.contains('floating-note-behind');
           const style = window.getComputedStyle(note);
-          if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
+          const isDisplayNone = style.display === 'none';
+          const isVisibilityHidden = style.visibility === 'hidden';
+          const isFullyTransparent = Number.parseFloat(style.opacity || '1') === 0;
+          const hasZeroSize = (note.offsetWidth || 0) === 0 || (note.offsetHeight || 0) === 0;
+
+          if (!isBehind && (isDisplayNone || isVisibilityHidden || isFullyTransparent || hasZeroSize)) {
             return;
           }
-          if ((note.offsetWidth || 0) === 0 || (note.offsetHeight || 0) === 0) {
+          if (isBehind && (isDisplayNone || hasZeroSize)) {
             return;
           }
           const noteTopicId = resolveNoteTopicId(note);
@@ -7913,36 +8084,136 @@ export async function initializeEditor() {
 
         const printContainer = document.createElement('div');
         printContainer.className = 'floating-notes-print-area';
-        printContainer.style.width = `${Math.round(layerRect.width)}px`;
-        printContainer.style.height = `${Math.round(layerRect.height)}px`;
+
+        const stage = document.createElement('div');
+        stage.className = 'floating-notes-print-stage';
+        stage.style.width = `${Math.round(layerRect.width)}px`;
+        stage.style.height = `${Math.round(layerRect.height)}px`;
+        stage.style.position = 'relative';
+        stage.style.backgroundColor = layerStyles.backgroundColor || '#ffffff';
+        stage.style.backgroundImage = layerStyles.backgroundImage || 'none';
+        stage.style.backgroundPosition = layerStyles.backgroundPosition || '0 0';
+        stage.style.backgroundRepeat = layerStyles.backgroundRepeat || 'no-repeat';
+        stage.style.backgroundSize = layerStyles.backgroundSize || 'auto';
+        stage.style.flex = '0 0 auto';
+
+        printContainer.style.backgroundColor = stage.style.backgroundColor;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'floating-notes-print-wrapper';
+        wrapper.style.flex = '0 0 auto';
+        wrapper.appendChild(stage);
+        printContainer.appendChild(wrapper);
+
+        const pxPerMillimetre = 96 / 25.4;
+        const pageWidthPx = 297 * pxPerMillimetre;
+        const pageHeightPx = 210 * pxPerMillimetre;
+        const scaleX = pageWidthPx / layerRect.width;
+        const scaleY = pageHeightPx / layerRect.height;
+        const manualScale = Math.min(
+          Math.max(floatingNotesPrintSettings.scalePercent / 100, 0.1),
+          4
+        );
+        const autoScale = Number.isFinite(scaleX) && Number.isFinite(scaleY)
+          ? Math.min(1, scaleX, scaleY)
+          : 1;
+        const targetScale = Math.min(autoScale, manualScale);
+
+        printContainer.style.setProperty('--floating-notes-print-width', `${Math.round(layerRect.width)}px`);
+        printContainer.style.setProperty('--floating-notes-print-height', `${Math.round(layerRect.height)}px`);
+        printContainer.style.setProperty('--floating-notes-print-scale', `${targetScale}`);
 
         const landscapeStyle = document.createElement('style');
         landscapeStyle.dataset.floatingNotesPrint = 'orientation';
-        landscapeStyle.textContent = '@page { size: landscape; margin: 10mm; }';
+        landscapeStyle.media = 'print';
+        const pageSizeSetting = FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(floatingNotesPrintSettings.pageSize)
+          ? floatingNotesPrintSettings.pageSize
+          : FLOATING_NOTES_PRINT_DEFAULTS.pageSize;
+        const orientationSetting = FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(floatingNotesPrintSettings.orientation)
+          ? floatingNotesPrintSettings.orientation
+          : FLOATING_NOTES_PRINT_DEFAULTS.orientation;
+        landscapeStyle.textContent = `@page { size: ${pageSizeSetting} ${orientationSetting}; margin: 0; }`;
         document.head.appendChild(landscapeStyle);
 
         visibleNotes.forEach(({ note, rect }) => {
           const clone = note.cloneNode(true);
           clone.classList.remove('dragging', 'resizing');
+          clone.classList.remove('floating-note-behind');
+          clone.removeAttribute('id');
+          clone.hidden = false;
+          clone.setAttribute('aria-hidden', 'false');
+          clone.style.visibility = 'visible';
+          clone.style.opacity = '1';
+          clone.removeAttribute('data-behind-main-content');
           clone.querySelectorAll('.floating-note-resize-handle').forEach(handle => handle.remove());
+          clone.querySelectorAll('.floating-note-style-menu').forEach(menu => menu.remove());
           clone.classList.add('floating-note-compact-header');
           clone.style.position = 'absolute';
           clone.style.left = `${Math.round(rect.left - layerRect.left)}px`;
           clone.style.top = `${Math.round(rect.top - layerRect.top)}px`;
           clone.style.width = `${Math.round(rect.width)}px`;
           clone.style.height = `${Math.round(rect.height)}px`;
+          const computed = window.getComputedStyle(note);
+          if (computed.zIndex) {
+            clone.style.zIndex = computed.zIndex;
+          }
           clone.removeAttribute('data-note-id');
           clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));
-          printContainer.appendChild(clone);
+          const originalBody = note.querySelector('.floating-note-body');
+          const cloneBody = clone.querySelector('.floating-note-body');
+          if (originalBody && cloneBody) {
+            cloneBody.scrollTop = originalBody.scrollTop;
+            cloneBody.scrollLeft = originalBody.scrollLeft;
+          }
+          stage.appendChild(clone);
         });
 
+        let fallbackTimer = null;
+        let didCleanup = false;
         const cleanup = () => {
+          if (didCleanup) {
+            return;
+          }
+          didCleanup = true;
+          if (fallbackTimer) {
+            window.clearTimeout(fallbackTimer);
+            fallbackTimer = null;
+          }
           document.body.classList.remove('printing-floating-notes');
           if (printContainer.isConnected) {
             printContainer.remove();
           }
           if (landscapeStyle.isConnected) {
             landscapeStyle.remove();
+          }
+          if (previousSectionId) {
+            sectionThemes.set(previousSectionId, previousTheme);
+          }
+          if (previousTheme) {
+            syncBodyTheme(previousTheme);
+            updateThemeSelectControl(previousTheme);
+          }
+          if (previousPage && previousPage.isConnected) {
+            setActivePage(previousPage);
+            requestAnimationFrame(() => {
+              if (Number.isFinite(previousScrollX)) {
+                window.scrollTo({ left: previousScrollX, top: window.scrollY, behavior: 'auto' });
+              }
+              if (previousViewportContext) {
+                restoreTopicViewportContext(previousViewportContext);
+              } else if (Number.isFinite(previousScrollY)) {
+                window.scrollTo({ left: window.scrollX, top: previousScrollY, behavior: 'auto' });
+              }
+            });
+          } else {
+            ensureVisibleSection({ force: true });
+          }
+          if (floatingNotesLayer) {
+            if (Number.isFinite(previousLayerScrollLeft)) {
+              floatingNotesLayer.scrollLeft = previousLayerScrollLeft;
+            }
+            if (Number.isFinite(previousLayerScrollTop)) {
+              floatingNotesLayer.scrollTop = previousLayerScrollTop;
+            }
           }
           window.removeEventListener('afterprint', cleanup);
         };
@@ -7951,9 +8222,13 @@ export async function initializeEditor() {
         document.body.appendChild(printContainer);
         document.body.classList.add('printing-floating-notes');
 
+        fallbackTimer = window.setTimeout(() => {
+          fallbackTimer = null;
+          cleanup();
+        }, 2000);
+
         requestAnimationFrame(() => {
           window.print();
-          setTimeout(cleanup, 1000);
         });
       }
 
@@ -13473,9 +13748,84 @@ export async function initializeEditor() {
         setMainContentVisibility(!mainContentHidden);
       });
 
-      printFloatingNotesViewBtn?.addEventListener('click', () => {
-        printVisibleFloatingNotes();
+      if (printFloatingNotesViewBtn) {
+        printFloatingNotesViewBtn.addEventListener('click', () => {
+          printVisibleFloatingNotes();
+        });
+      }
+
+      if (floatingNotesPrintSettingsBtn) {
+        floatingNotesPrintSettingsBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleFloatingNotesPrintSettingsPanel();
+        });
+      }
+
+      if (floatingNotesPrintScaleInput) {
+        floatingNotesPrintScaleInput.addEventListener('change', () => {
+          const value = Number.parseFloat(floatingNotesPrintScaleInput.value);
+          if (Number.isFinite(value)) {
+            floatingNotesPrintSettings.scalePercent = Math.min(Math.max(Math.round(value), 10), 400);
+            floatingNotesPrintScaleInput.value = floatingNotesPrintSettings.scalePercent;
+            persistFloatingNotesPrintSettings();
+          } else {
+            floatingNotesPrintScaleInput.value = floatingNotesPrintSettings.scalePercent;
+          }
+        });
+      }
+
+      if (floatingNotesPrintPageSizeSelect) {
+        floatingNotesPrintPageSizeSelect.addEventListener('change', () => {
+          const value = floatingNotesPrintPageSizeSelect.value;
+          if (FLOATING_NOTES_PRINT_ALLOWED_SIZES.includes(value)) {
+            floatingNotesPrintSettings.pageSize = value;
+            persistFloatingNotesPrintSettings();
+          } else {
+            floatingNotesPrintPageSizeSelect.value = floatingNotesPrintSettings.pageSize;
+          }
+        });
+      }
+
+      if (floatingNotesPrintOrientationSelect) {
+        floatingNotesPrintOrientationSelect.addEventListener('change', () => {
+          const value = (floatingNotesPrintOrientationSelect.value || '').toLowerCase();
+          if (FLOATING_NOTES_PRINT_ALLOWED_ORIENTATIONS.includes(value)) {
+            floatingNotesPrintSettings.orientation = value;
+            floatingNotesPrintOrientationSelect.value = floatingNotesPrintSettings.orientation;
+            persistFloatingNotesPrintSettings();
+          } else {
+            floatingNotesPrintOrientationSelect.value = floatingNotesPrintSettings.orientation;
+          }
+        });
+      }
+
+      document.addEventListener('click', (event) => {
+        if (!floatingNotesPrintSettingsOpen) {
+          return;
+        }
+        if (!floatingNotesPrintSettingsPanel) {
+          return;
+        }
+        if (floatingNotesPrintSettingsPanel.contains(event.target)) {
+          return;
+        }
+        if (floatingNotesPrintSettingsBtn && floatingNotesPrintSettingsBtn.contains(event.target)) {
+          return;
+        }
+        closeFloatingNotesPrintSettingsPanel();
       });
+
+      document.addEventListener('keydown', (event) => {
+        if (!floatingNotesPrintSettingsOpen) {
+          return;
+        }
+        if (event.key === 'Escape') {
+          closeFloatingNotesPrintSettingsPanel();
+        }
+      });
+
+      applyFloatingNotesPrintSettingsToUI();
 
       document.addEventListener('pointerdown', (event) => {
         if (!spacingToolState.isOpen) {
