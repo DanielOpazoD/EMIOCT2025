@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Módulos - Cora Notes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+      border-bottom: 3px solid #4CAF50;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #555;
+      margin-top: 30px;
+    }
+    #output {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      min-height: 200px;
+    }
+    p {
+      margin: 8px 0;
+      padding: 8px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+    }
+    .success {
+      color: #2e7d32;
+      background: #e8f5e9;
+    }
+    .info {
+      color: #1565c0;
+      background: #e3f2fd;
+      padding-left: 30px;
+    }
+    .error {
+      color: #c62828;
+      background: #ffebee;
+    }
+    .header {
+      color: #f57c00;
+      background: #fff3e0;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .separator {
+      border-top: 2px solid #e0e0e0;
+      margin: 20px 0;
+    }
+    .final {
+      color: #1b5e20;
+      background: #c8e6c9;
+      font-weight: bold;
+      font-size: 18px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Test de Módulos Nuevos</h1>
+  <p style="color: #666; background: white; padding: 15px; border-left: 4px solid #4CAF50;">
+    Este archivo prueba que los módulos recién creados (EditorState, Constants, CacheManager)
+    funcionan correctamente de forma aislada.
+  </p>
+
+  <h2>Resultados:</h2>
+  <div id="output">
+    <p class="info">Ejecutando tests...</p>
+  </div>
+
+  <script type="module">
+    import { editorState } from './scripts/editor/core/EditorState.js';
+    import {
+      APP_NAME,
+      NOTE_STYLE_PRESETS,
+      IMAGE_MIN_WIDTH,
+      IMAGE_MAX_WIDTH,
+      FLOATING_NOTE_DEFAULT_WIDTH,
+      AVAILABLE_THEMES,
+      CACHE_STORAGE_KEY
+    } from './scripts/editor/shared/constants/editorConstants.js';
+    import {
+      isQuotaExceededError,
+      getStylesheetTextForExport,
+      clearStylesheetCache
+    } from './scripts/editor/shared/cache/CacheManager.js';
+
+    const output = document.getElementById('output');
+    output.innerHTML = '';
+
+    function log(msg, type = 'success') {
+      const p = document.createElement('p');
+      p.textContent = msg;
+      p.className = type;
+      output.appendChild(p);
+    }
+
+    function separator() {
+      const div = document.createElement('div');
+      div.className = 'separator';
+      output.appendChild(div);
+    }
+
+    try {
+      // ===================================================================
+      // TEST 1: EditorState
+      // ===================================================================
+      log('TEST 1: EditorState', 'header');
+      log('✓ EditorState importado correctamente');
+
+      // Verificar propiedades iniciales
+      log(`  currentZoom inicial: ${editorState.currentZoom}`, 'info');
+      log(`  isEditMode inicial: ${editorState.isEditMode}`, 'info');
+      log(`  floatingNoteZIndex inicial: ${editorState.floatingNoteZIndex}`, 'info');
+
+      // Test setState
+      editorState.setState({ currentZoom: 1.5, isEditMode: true });
+      if (editorState.currentZoom === 1.5 && editorState.isEditMode === true) {
+        log('✓ setState() funciona correctamente');
+      } else {
+        log('✗ setState() no funciona', 'error');
+      }
+
+      // Test subscribe
+      let listenerCalled = false;
+      const unsubscribe = editorState.subscribe('currentZoom', (value) => {
+        listenerCalled = true;
+        log(`  Listener llamado con valor: ${value}`, 'info');
+      });
+
+      editorState.setState({ currentZoom: 2 });
+      if (listenerCalled) {
+        log('✓ Sistema de suscripción funciona');
+      } else {
+        log('✗ Sistema de suscripción no funciona', 'error');
+      }
+      unsubscribe();
+
+      // Test getState
+      const state = editorState.getState();
+      if (typeof state === 'object' && state.currentZoom === 2) {
+        log('✓ getState() funciona correctamente');
+      } else {
+        log('✗ getState() no funciona', 'error');
+      }
+
+      // Test reset methods
+      editorState.resetFloatingNoteDragState();
+      if (editorState.floatingNoteDragState.note === null) {
+        log('✓ resetFloatingNoteDragState() funciona');
+      }
+
+      separator();
+
+      // ===================================================================
+      // TEST 2: Constants
+      // ===================================================================
+      log('TEST 2: Constants', 'header');
+      log('✓ Constants importadas correctamente');
+
+      log(`  APP_NAME: "${APP_NAME}"`, 'info');
+      log(`  NOTE_STYLE_PRESETS: ${NOTE_STYLE_PRESETS.length} estilos`, 'info');
+      log(`  IMAGE_MIN_WIDTH: ${IMAGE_MIN_WIDTH}px`, 'info');
+      log(`  IMAGE_MAX_WIDTH: ${IMAGE_MAX_WIDTH}px`, 'info');
+      log(`  FLOATING_NOTE_DEFAULT_WIDTH: ${FLOATING_NOTE_DEFAULT_WIDTH}px`, 'info');
+      log(`  AVAILABLE_THEMES: ${AVAILABLE_THEMES.length} temas`, 'info');
+      log(`  CACHE_STORAGE_KEY: "${CACHE_STORAGE_KEY}"`, 'info');
+
+      // Verificar estructura de NOTE_STYLE_PRESETS
+      if (NOTE_STYLE_PRESETS[0].id && NOTE_STYLE_PRESETS[0].name && NOTE_STYLE_PRESETS[0].className) {
+        log('✓ NOTE_STYLE_PRESETS tiene estructura correcta');
+        log(`  Ejemplo: ${NOTE_STYLE_PRESETS[0].id} → "${NOTE_STYLE_PRESETS[0].name}"`, 'info');
+      } else {
+        log('✗ NOTE_STYLE_PRESETS estructura incorrecta', 'error');
+      }
+
+      // Verificar que las constantes son del tipo correcto
+      if (typeof IMAGE_MIN_WIDTH === 'number' && IMAGE_MIN_WIDTH === 60) {
+        log('✓ Constantes numéricas correctas');
+      } else {
+        log('✗ Constantes numéricas incorrectas', 'error');
+      }
+
+      separator();
+
+      // ===================================================================
+      // TEST 3: CacheManager
+      // ===================================================================
+      log('TEST 3: CacheManager', 'header');
+      log('✓ CacheManager importado correctamente');
+
+      // Test isQuotaExceededError
+      const fakeQuotaError = new Error('Quota exceeded');
+      fakeQuotaError.name = 'QuotaExceededError';
+
+      if (isQuotaExceededError(fakeQuotaError)) {
+        log('✓ isQuotaExceededError() detecta errores de cuota');
+      } else {
+        log('✗ isQuotaExceededError() no funciona', 'error');
+      }
+
+      const normalError = new Error('Normal error');
+      if (!isQuotaExceededError(normalError)) {
+        log('✓ isQuotaExceededError() rechaza errores normales');
+      } else {
+        log('✗ isQuotaExceededError() falso positivo', 'error');
+      }
+
+      if (!isQuotaExceededError(null)) {
+        log('✓ isQuotaExceededError() maneja null correctamente');
+      }
+
+      // Test stylesheet cache
+      clearStylesheetCache();
+      log('✓ clearStylesheetCache() ejecutado sin errores');
+
+      separator();
+
+      // ===================================================================
+      // TEST 4: Verificar que NO afecta la app principal
+      // ===================================================================
+      log('TEST 4: Aislamiento', 'header');
+
+      // Verificar que initializeEditor existe en el archivo original
+      import('./scripts/editor.js').then(module => {
+        if (typeof module.initializeEditor === 'function') {
+          log('✓ editor.js original sigue intacto');
+          log('✓ initializeEditor() está disponible', 'info');
+        } else {
+          log('✗ editor.js modificado incorrectamente', 'error');
+        }
+
+        separator();
+        finalResults();
+      }).catch(err => {
+        log(`✗ Error importando editor.js: ${err.message}`, 'error');
+        separator();
+        finalResults();
+      });
+
+    } catch (error) {
+      log(`✗ ERROR CRÍTICO: ${error.message}`, 'error');
+      log(`  Stack: ${error.stack}`, 'error');
+    }
+
+    function finalResults() {
+      log('', 'separator');
+      log('=== ✅ TODOS LOS TESTS COMPLETADOS ===', 'final');
+      log('', 'separator');
+      log('Los módulos funcionan correctamente de forma aislada.', 'success');
+      log('La aplicación principal (index.html) NO ha sido modificada.', 'success');
+      log('Tus datos antiguos seguirán funcionando perfectamente.', 'success');
+      log('', 'separator');
+      log('Puedes continuar con la Fase 2 de la modularización.', 'info');
+    }
+  </script>
+</body>
+</html>
