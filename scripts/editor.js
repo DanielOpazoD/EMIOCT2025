@@ -23,9 +23,53 @@ import {
   sanitizeNoteTitleHtml,
   getNoteTitlePlainText
 } from './modules/notes/noteUtils.js';
+import {
+  APP_NAME,
+  IMAGE_MIN_WIDTH,
+  IMAGE_MAX_WIDTH,
+  IMAGE_RESIZE_STEP,
+  NOTE_STYLE_PRESETS,
+  FLOATING_NOTE_BORDER_DEFAULT_COLOR,
+  FLOATING_NOTE_BORDER_DEFAULT_WIDTH,
+  FLOATING_NOTE_BORDER_COLORS,
+  NOTE_ICON_SYMBOLS,
+  ICON_FEATURE_ENABLED,
+  IMAGE_VIEWER_DEFAULT_CONTEXT_KEY,
+  IMAGE_VIEWER_STORAGE_KEY,
+  IMAGE_VIEWER_ZOOM_MIN,
+  IMAGE_VIEWER_ZOOM_MAX,
+  IMAGE_VIEWER_ZOOM_STEP,
+  FLOATING_NOTE_DEFAULT_WIDTH,
+  FLOATING_NOTE_MIN_WIDTH,
+  FLOATING_NOTE_MIN_HEIGHT,
+  DOCUMENT_SHIFT_STEP,
+  DOCUMENT_SHIFT_MIN,
+  DOCUMENT_SHIFT_MAX,
+  AVAILABLE_THEMES,
+  DEFAULT_THEME,
+  AVAILABLE_TOPBAR_THEMES,
+  TOPBAR_THEME_STORAGE_KEY,
+  CACHE_STORAGE_KEY
+} from './modules/editor/editorConfig.js';
+import { createExtendedCacheController } from './modules/editor/extendedCache.js';
+import { createStylesheetLoader } from './modules/editor/stylesheetLoader.js';
+import {
+  getDefaultImageViewerContext,
+  getDefaultImageViewerState,
+  sanitizeImageViewerContext,
+  sanitizeImageViewerState
+} from './modules/editor/imageViewerState.js';
+import {
+  TEMPLATE_ACCENT_PALETTE_COLORS,
+  TEMPLATE_BACKGROUND_PALETTE_COLORS,
+  TEMPLATE_BORDER_PALETTE_COLORS,
+  TEMPLATE_NOTE_STYLE_CLASSES,
+  TEMPLATE_NOTE_STYLE_PRESETS,
+  TEMPLATE_TEXT_PALETTE_COLORS,
+  createTemplateNoteStylePresetMap
+} from './modules/editor/templateConfig.js';
 
 export async function initializeEditor() {
-      const APP_NAME = 'Cora Notes';
       let isEditMode = false;
       let isPanelEditMode = false;
       let isReadingMode = false;
@@ -55,60 +99,6 @@ export async function initializeEditor() {
         scaleX: 1,
         scaleY: 1
       };
-
-      const IMAGE_MIN_WIDTH = 60;
-      const IMAGE_MAX_WIDTH = 1600;
-      const IMAGE_RESIZE_STEP = 0.1;
-
-      const NOTE_STYLE_PRESETS = [
-        { id: 'blank', name: 'Blanca', className: 'floating-note-style-blank' },
-        { id: 'default', name: 'Clásica', className: 'floating-note-style-default' },
-        { id: 'sky', name: 'Cielo', className: 'floating-note-style-sky' },
-        { id: 'mint', name: 'Menta', className: 'floating-note-style-mint' },
-        { id: 'rose', name: 'Pétalo', className: 'floating-note-style-rose' },
-        { id: 'lilac', name: 'Lavanda', className: 'floating-note-style-lilac' },
-        { id: 'slate', name: 'Pizarra', className: 'floating-note-style-slate' },
-        { id: 'citrus', name: 'Cítrica', className: 'floating-note-style-citrus' },
-        { id: 'midnight', name: 'Nocturna', className: 'floating-note-style-midnight' },
-        { id: 'dawn', name: 'Aurora', className: 'floating-note-style-dawn' },
-        { id: 'forest', name: 'Bosque', className: 'floating-note-style-forest' },
-        { id: 'sand', name: 'Arena', className: 'floating-note-style-sand' },
-        { id: 'peach', name: 'Durazno', className: 'floating-note-style-peach' },
-        { id: 'ice', name: 'Hielo', className: 'floating-note-style-ice' },
-        { id: 'sage', name: 'Salvia', className: 'floating-note-style-sage' },
-        { id: 'morning', name: 'Matinal', className: 'floating-note-style-morning' },
-        { id: 'breeze', name: 'Brisa', className: 'floating-note-style-breeze' },
-        { id: 'mist', name: 'Niebla', className: 'floating-note-style-mist' },
-        { id: 'spring', name: 'Primavera', className: 'floating-note-style-spring' }
-      ];
-
-      const FLOATING_NOTE_BORDER_DEFAULT_COLOR = '#94a3b8';
-      const FLOATING_NOTE_BORDER_DEFAULT_WIDTH = 1;
-      const FLOATING_NOTE_BORDER_COLORS = [
-        '#000000',
-        '#1f2937',
-        '#475569',
-        '#94a3b8',
-        '#fecaca',
-        '#fde68a',
-        '#bbf7d0',
-        '#bae6fd',
-        '#ddd6fe',
-        '#fbcfe8',
-        '#fef3c7'
-      ];
-
-      const NOTE_ICON_SYMBOLS = [
-        '📌', '🔑', '⭐', '✔️', '💊', '📝', '📂', '🩻', '🩺', '📍', '📊', '⚠️', '✍️'
-      ];
-
-      const ICON_FEATURE_ENABLED = true;
-      const IMAGE_VIEWER_DEFAULT_CONTEXT_KEY = 'global';
-      const IMAGE_VIEWER_STORAGE_KEY = 'emi2025-image-viewer';
-      const IMAGE_VIEWER_ZOOM_MIN = 0.25;
-      const IMAGE_VIEWER_ZOOM_MAX = 4;
-      const IMAGE_VIEWER_ZOOM_STEP = 0.25;
-
       let imageViewerState = getDefaultImageViewerState();
       let imageViewerPreviousShift = null;
       let imageViewerActiveShift = null;
@@ -150,9 +140,6 @@ export async function initializeEditor() {
         startX: 0,
         startY: 0
       };
-      const FLOATING_NOTE_DEFAULT_WIDTH = 240;
-      const FLOATING_NOTE_MIN_WIDTH = 0;
-      const FLOATING_NOTE_MIN_HEIGHT = 0;
       let activeFloatingNoteStyleMenu = null;
       let floatingNoteResizeObserver = null;
       let floatingNotesViewportRelaxedMatching = false;
@@ -161,158 +148,21 @@ export async function initializeEditor() {
       let pendingTopicNoteIndicatorUpdate = false;
       let cachedActiveTopicViewportState = null;
       let documentHorizontalShift = 0;
-      const DOCUMENT_SHIFT_STEP = 80;
-      const DOCUMENT_SHIFT_MIN = -1500;
-      const DOCUMENT_SHIFT_MAX = 1500;
 
-      const CACHE_STORAGE_KEY = 'emi2025-editor-cache-v1';
-      let cachedStylesheetForExport = null;
-      const EXTENDED_CACHE_DB_NAME = 'emi2025-editor-cache';
-      const EXTENDED_CACHE_STORE_NAME = 'snapshots';
-      let extendedCacheDbPromise = null;
       let usingExtendedCache = false;
 
-      function isQuotaExceededError(error) {
-        if (!error) {
-          return false;
-        }
-        const quotaNames = ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'];
-        if (quotaNames.includes(error.name)) {
-          return true;
-        }
-        if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
-          return quotaNames.includes(error.name);
-        }
-        return false;
-      }
+      const {
+        isQuotaExceededError,
+        writeExtendedCacheValue,
+        readExtendedCacheValue,
+        clearExtendedCacheValue,
+        hasOpenExtendedCache
+      } = createExtendedCacheController();
 
-      function openExtendedCacheDb() {
-        if (!('indexedDB' in window)) {
-          return Promise.reject(new Error('IndexedDB no está disponible'));
-        }
-        if (extendedCacheDbPromise) {
-          return extendedCacheDbPromise;
-        }
-        extendedCacheDbPromise = new Promise((resolve, reject) => {
-          const request = window.indexedDB.open(EXTENDED_CACHE_DB_NAME, 1);
-          request.onupgradeneeded = () => {
-            const db = request.result;
-            if (!db.objectStoreNames.contains(EXTENDED_CACHE_STORE_NAME)) {
-              db.createObjectStore(EXTENDED_CACHE_STORE_NAME);
-            }
-          };
-          request.onsuccess = () => {
-            const db = request.result;
-            db.onversionchange = () => {
-              db.close();
-            };
-            resolve(db);
-          };
-          request.onerror = () => {
-            const err = request.error || new Error('No se pudo abrir IndexedDB');
-            extendedCacheDbPromise = null;
-            reject(err);
-          };
-          request.onblocked = () => {
-            console.warn('Actualización de la caché extendida bloqueada por otra pestaña.');
-          };
-        });
-        return extendedCacheDbPromise;
-      }
-
-      async function writeExtendedCacheValue(value) {
-        try {
-          const db = await openExtendedCacheDb();
-          return await new Promise((resolve, reject) => {
-            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readwrite');
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = () => reject(tx.error || new Error('No se pudo guardar en almacenamiento extendido'));
-            tx.onabort = () => reject(tx.error || new Error('Se canceló el guardado en almacenamiento extendido'));
-            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
-            store.put(value, CACHE_STORAGE_KEY);
-          });
-        } catch (error) {
-          console.error('Error al escribir en la caché extendida:', error);
-          throw error;
-        }
-      }
-
-      async function readExtendedCacheValue() {
-        try {
-          const db = await openExtendedCacheDb();
-          return await new Promise((resolve, reject) => {
-            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readonly');
-            tx.onerror = () => reject(tx.error || new Error('No se pudo leer la caché extendida'));
-            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
-            const request = store.get(CACHE_STORAGE_KEY);
-            request.onsuccess = () => resolve(request.result || null);
-            request.onerror = () => reject(request.error || new Error('Error leyendo la caché extendida'));
-          });
-        } catch (error) {
-          console.error('Error al leer la caché extendida:', error);
-          return null;
-        }
-      }
-
-      async function clearExtendedCacheValue() {
-        if (!('indexedDB' in window)) {
-          return;
-        }
-        try {
-          const db = await openExtendedCacheDb();
-          await new Promise((resolve, reject) => {
-            const tx = db.transaction(EXTENDED_CACHE_STORE_NAME, 'readwrite');
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la caché extendida'));
-            tx.onabort = () => reject(tx.error || new Error('Se canceló la limpieza de la caché extendida'));
-            const store = tx.objectStore(EXTENDED_CACHE_STORE_NAME);
-            store.delete(CACHE_STORAGE_KEY);
-          });
-        } catch (error) {
-          console.error('Error al limpiar la caché extendida:', error);
-        }
-      }
-
-      async function getStylesheetTextForExport() {
-        if (cachedStylesheetForExport !== null) {
-          return cachedStylesheetForExport;
-        }
-
-        const linkEl = document.querySelector('link[rel="stylesheet"][href]');
-        if (!linkEl) {
-          cachedStylesheetForExport = '';
-          return cachedStylesheetForExport;
-        }
-
-        const href = linkEl.href || linkEl.getAttribute('href');
-
-        try {
-          const response = await fetch(href);
-          if (!response.ok) {
-            throw new Error(`No se pudo cargar estilos: ${response.status}`);
-          }
-          cachedStylesheetForExport = await response.text();
-          return cachedStylesheetForExport;
-        } catch (error) {
-          console.error('Error cargando estilos para exportación:', error);
-          try {
-            const targetSheet = Array.from(document.styleSheets || []).find(sheet => sheet.ownerNode === linkEl);
-            if (targetSheet?.cssRules) {
-              cachedStylesheetForExport = Array.from(targetSheet.cssRules).map(rule => rule.cssText).join('\n');
-              return cachedStylesheetForExport;
-            }
-          } catch (cssError) {
-            console.warn('No se pudo leer reglas CSS para exportación:', cssError);
-          }
-          cachedStylesheetForExport = '';
-          return cachedStylesheetForExport;
-        }
-      }
+      const { getStylesheetTextForExport } = createStylesheetLoader();
 
 
       let sections = [];
-      const AVAILABLE_THEMES = ['theme-blue', 'theme-green', 'theme-purple', 'theme-orange', 'theme-teal', 'theme-rose', 'theme-sand', 'theme-slate'];
-      const DEFAULT_THEME = 'theme-blue';
       let sectionThemes = new Map();
       let currentSectionId = '';
       let currentPageRef = null;
@@ -345,15 +195,6 @@ export async function initializeEditor() {
       const topbarThemeDropdown = document.getElementById('topbarThemeDropdown');
       const topbarThemeButtons = topbarThemeDropdown ? Array.from(topbarThemeDropdown.querySelectorAll('[data-theme]')) : [];
       const magicBackFloating = document.getElementById('magicBackFloating');
-      const AVAILABLE_TOPBAR_THEMES = [
-        'topbar-color-default',
-        'topbar-color-slate',
-        'topbar-color-night',
-        'topbar-color-navy',
-        'topbar-color-sky',
-        'topbar-color-emerald'
-      ];
-      const TOPBAR_THEME_STORAGE_KEY = 'emi2025-topbar-theme';
       let activeTopbarDropdown = null;
       let currentTopbarTheme = AVAILABLE_TOPBAR_THEMES[0];
 
@@ -456,22 +297,13 @@ export async function initializeEditor() {
       const templateAddSpaceBottomBtn = document.getElementById('templateAddSpaceBottomBtn');
       const themeSelect = document.getElementById('themeSelect');
 
-      const templateBackgroundPaletteColors = ['#ffffff', '#f8f9fa', '#fef9e7', '#fff3cd', '#fde2e4', '#f8d7da', '#e7f3ff', '#d1e7dd', '#e9ecef'];
-      const templateTextPaletteColors = ['#212529', '#343a40', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#6c757d', '#ffffff'];
-      const templateBorderPaletteColors = ['#ced4da', '#adb5bd', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#0dcaf0', '#6c757d', '#212529'];
-      const templateAccentPaletteColors = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#ffc107', '#20c997', '#0dcaf0', '#6c757d'];
-      const noteStylePresets = [
-        { id: 'classic', className: 'note-style-classic', extraClasses: [] },
-        { id: 'sky', className: 'note-style-sky', extraClasses: [] },
-        { id: 'forest', className: 'note-style-forest', extraClasses: [] },
-        { id: 'sunrise', className: 'note-style-sunrise', extraClasses: [] },
-        { id: 'rose', className: 'note-style-rose', extraClasses: [] },
-        { id: 'lilac', className: 'note-style-lilac', extraClasses: [] },
-        { id: 'slate', className: 'note-style-slate', extraClasses: [] },
-        { id: 'pearl', className: 'note-style-pearl', extraClasses: ['pearl'] }
-      ];
-      const NOTE_STYLE_CLASSES = noteStylePresets.map(p => p.className);
-      const noteStylePresetMap = new Map(noteStylePresets.map(p => [p.id, p]));
+      const templateBackgroundPaletteColors = TEMPLATE_BACKGROUND_PALETTE_COLORS;
+      const templateTextPaletteColors = TEMPLATE_TEXT_PALETTE_COLORS;
+      const templateBorderPaletteColors = TEMPLATE_BORDER_PALETTE_COLORS;
+      const templateAccentPaletteColors = TEMPLATE_ACCENT_PALETTE_COLORS;
+      const noteStylePresets = TEMPLATE_NOTE_STYLE_PRESETS;
+      const NOTE_STYLE_CLASSES = TEMPLATE_NOTE_STYLE_CLASSES;
+      const noteStylePresetMap = createTemplateNoteStylePresetMap();
 
       const notesRegistry = new NoteRegistry();
       let notesViewController = null;
@@ -1988,138 +1820,6 @@ export async function initializeEditor() {
         if (isTopicNotesPopoverOpen()) {
           positionTopicNotesPopover(topicNotesAnchor);
         }
-      }
-
-      function getDefaultImageViewerContext() {
-        return {
-          images: [],
-          selectedImageId: null,
-          notesById: {}
-        };
-      }
-
-      function getDefaultImageViewerState() {
-        return {
-          contexts: {
-            [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: getDefaultImageViewerContext()
-          },
-          activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
-        };
-      }
-
-      function sanitizeViewerImages(images) {
-        if (!Array.isArray(images)) {
-          return [];
-        }
-        const unique = new Map();
-        images.forEach(image => {
-          if (!image || typeof image !== 'object') {
-            return;
-          }
-          const id = typeof image.id === 'string' ? image.id : '';
-          const dataUrl = typeof image.dataUrl === 'string' ? image.dataUrl : '';
-          if (!id || !dataUrl) {
-            return;
-          }
-          unique.set(id, {
-            id,
-            dataUrl,
-            name: typeof image.name === 'string' && image.name ? image.name : 'imagen-sin-nombre',
-            size: Number.isFinite(image.size) ? image.size : 0,
-            type: typeof image.type === 'string' && image.type ? image.type : 'image/*',
-            createdAt: typeof image.createdAt === 'string' ? image.createdAt : new Date().toISOString(),
-            width: Number.isFinite(image.width) ? image.width : null,
-            height: Number.isFinite(image.height) ? image.height : null
-          });
-        });
-        return Array.from(unique.values());
-      }
-
-      function sanitizeImageViewerContext(context) {
-        if (!context || typeof context !== 'object') {
-          return getDefaultImageViewerContext();
-        }
-        const sanitizedImages = sanitizeViewerImages(context.images);
-        const notesById = {};
-        if (context.notesById && typeof context.notesById === 'object') {
-          Object.entries(context.notesById).forEach(([key, value]) => {
-            if (typeof value === 'string') {
-              notesById[key] = value;
-            }
-          });
-        }
-        let selectedImageId = typeof context.selectedImageId === 'string' ? context.selectedImageId : null;
-        if (!sanitizedImages.some(image => image.id === selectedImageId)) {
-          selectedImageId = sanitizedImages.length ? sanitizedImages[sanitizedImages.length - 1].id : null;
-        }
-        return {
-          images: sanitizedImages,
-          selectedImageId,
-          notesById
-        };
-      }
-
-      function sanitizeImageViewerState(next) {
-        if (!next || typeof next !== 'object') {
-          return getDefaultImageViewerState();
-        }
-
-        const looksLegacy = Array.isArray(next.images)
-          || typeof next.selectedImageId === 'string'
-          || (next.notesById && typeof next.notesById === 'object');
-
-        if (looksLegacy) {
-          const legacyContext = sanitizeImageViewerContext({
-            images: next.images,
-            selectedImageId: next.selectedImageId,
-            notesById: next.notesById
-          });
-          return {
-            contexts: {
-              [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: legacyContext
-            },
-            activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
-          };
-        }
-
-        const incomingContexts = next.contexts && typeof next.contexts === 'object' ? next.contexts : {};
-        const sanitizedContexts = {};
-
-        Object.entries(incomingContexts).forEach(([key, value]) => {
-          if (typeof key !== 'string' || !key) {
-            return;
-          }
-          sanitizedContexts[key] = sanitizeImageViewerContext(value);
-        });
-
-        if (!Object.keys(sanitizedContexts).length) {
-          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
-        } else if (!sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]) {
-          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
-        }
-
-        const availableKeys = Object.keys(sanitizedContexts);
-        let activeContext = typeof next.activeContext === 'string' && sanitizedContexts[next.activeContext]
-          ? next.activeContext
-          : null;
-
-        if (!activeContext) {
-          if (availableKeys.includes(IMAGE_VIEWER_DEFAULT_CONTEXT_KEY)) {
-            activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-          } else {
-            activeContext = availableKeys[0];
-          }
-        }
-
-        if (!activeContext || !sanitizedContexts[activeContext]) {
-          activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-          sanitizedContexts[activeContext] = sanitizedContexts[activeContext] || getDefaultImageViewerContext();
-        }
-
-        return {
-          contexts: sanitizedContexts,
-          activeContext
-        };
       }
 
       function loadImageViewerState() {
@@ -14128,7 +13828,7 @@ ${inlineStyles}
         console.warn('No se pudo limpiar la caché previa antes de guardar:', cleanupError);
       }
 
-      const shouldClearExtended = usingExtendedCache || !!extendedCacheDbPromise;
+      const shouldClearExtended = usingExtendedCache || hasOpenExtendedCache();
       window.localStorage.setItem(CACHE_STORAGE_KEY, snapshotJson);
       if (shouldClearExtended) {
         await clearExtendedCacheValue();
