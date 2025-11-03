@@ -155,6 +155,30 @@
         <button id="toggleNotesBtn" title="Mostrar/Ocultar notas">👁️</button>
         <button id="toggleMainContentBtn" title="Ocultar contenido principal">🗂️</button>
         <button id="printFloatingNotesViewBtn" title="Imprimir notas visibles">🖨️</button>
+        <button id="floatingNotesPrintSettingsBtn" class="floating-notes-print-settings-toggle" title="Configurar impresión de notas">⚙️</button>
+        <div class="floating-notes-print-settings" id="floatingNotesPrintSettingsPanel" aria-hidden="true">
+          <div class="floating-notes-print-setting">
+            <label for="floatingNotesPrintScale">Escala (%)</label>
+            <input type="number" id="floatingNotesPrintScale" min="10" max="400" step="5" />
+          </div>
+          <div class="floating-notes-print-setting">
+            <label for="floatingNotesPrintPageSize">Tamaño de página</label>
+            <select id="floatingNotesPrintPageSize">
+              <option value="A4">A4</option>
+              <option value="Letter">Carta</option>
+              <option value="Legal">Legal</option>
+              <option value="A3">A3</option>
+              <option value="A5">A5</option>
+            </select>
+          </div>
+          <div class="floating-notes-print-setting">
+            <label for="floatingNotesPrintOrientation">Orientación</label>
+            <select id="floatingNotesPrintOrientation">
+              <option value="landscape">Horizontal</option>
+              <option value="portrait">Vertical</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <div class="toolbar-separator"></div>
