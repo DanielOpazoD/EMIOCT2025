@@ -768,6 +768,62 @@ body.reading-mode .reading-mode-exit {
   position: relative;
 }
 
+.floating-notes-print-settings-toggle {
+  font-size: 1rem;
+}
+
+.floating-notes-print-settings {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  min-width: 200px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
+  z-index: 6000;
+}
+
+.floating-notes-print-settings[data-open="true"] {
+  display: flex;
+}
+
+.floating-notes-print-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.floating-notes-print-setting label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.floating-notes-print-setting input,
+.floating-notes-print-setting select {
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.95rem;
+  background: #f8fafc;
+  color: #1f2937;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.floating-notes-print-setting input:focus,
+.floating-notes-print-setting select:focus {
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  outline: none;
+}
+
 .toolbar-label {
   font-size: 0.857rem;
   color: #6c757d;
@@ -5254,9 +5310,31 @@ body.printing-floating-notes .magic-page {
   pointer-events: none;
   z-index: 9999;
   overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0;
+  --floating-notes-print-scale: 1;
+  --floating-notes-print-width: 0px;
+  --floating-notes-print-height: 0px;
 }
 
-.floating-notes-print-area .floating-note {
+.floating-notes-print-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.floating-notes-print-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.floating-notes-print-stage .floating-note {
   pointer-events: none;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
 }
@@ -5287,13 +5365,27 @@ body.printing-floating-notes .magic-page {
   body.printing-floating-notes .floating-notes-print-area {
     position: relative;
     inset: auto;
-    width: 100%;
+    width: calc(var(--floating-notes-print-width, 100vw) * var(--floating-notes-print-scale, 1));
+    min-height: calc(var(--floating-notes-print-height, 100vh) * var(--floating-notes-print-scale, 1));
     height: auto;
-    min-height: 100vh;
     overflow: visible;
+    margin: 0 auto;
+    padding: 0;
   }
 
-  body.printing-floating-notes .floating-notes-print-area .floating-note {
+  body.printing-floating-notes .floating-notes-print-wrapper {
+    width: var(--floating-notes-print-width, 100%);
+    height: var(--floating-notes-print-height, auto);
+  }
+
+  body.printing-floating-notes .floating-notes-print-stage {
+    width: var(--floating-notes-print-width, 100%);
+    height: var(--floating-notes-print-height, auto);
+    transform-origin: top left;
+    transform: scale(var(--floating-notes-print-scale, 1));
+  }
+
+  body.printing-floating-notes .floating-notes-print-stage .floating-note {
     position: absolute;
   }
 
