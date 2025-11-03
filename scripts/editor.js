@@ -48,11 +48,26 @@ import {
   AVAILABLE_THEMES,
   DEFAULT_THEME,
   AVAILABLE_TOPBAR_THEMES,
-    TOPBAR_THEME_STORAGE_KEY,
-    CACHE_STORAGE_KEY
-  } from './modules/editor/editorConfig.js';
+  TOPBAR_THEME_STORAGE_KEY,
+  CACHE_STORAGE_KEY
+} from './modules/editor/editorConfig.js';
 import { createExtendedCacheController } from './modules/editor/extendedCache.js';
 import { createStylesheetLoader } from './modules/editor/stylesheetLoader.js';
+import {
+  getDefaultImageViewerContext,
+  getDefaultImageViewerState,
+  sanitizeImageViewerContext,
+  sanitizeImageViewerState
+} from './modules/editor/imageViewerState.js';
+import {
+  TEMPLATE_ACCENT_PALETTE_COLORS,
+  TEMPLATE_BACKGROUND_PALETTE_COLORS,
+  TEMPLATE_BORDER_PALETTE_COLORS,
+  TEMPLATE_NOTE_STYLE_CLASSES,
+  TEMPLATE_NOTE_STYLE_PRESETS,
+  TEMPLATE_TEXT_PALETTE_COLORS,
+  createTemplateNoteStylePresetMap
+} from './modules/editor/templateConfig.js';
 
 export async function initializeEditor() {
       let isEditMode = false;
@@ -282,22 +297,13 @@ export async function initializeEditor() {
       const templateAddSpaceBottomBtn = document.getElementById('templateAddSpaceBottomBtn');
       const themeSelect = document.getElementById('themeSelect');
 
-      const templateBackgroundPaletteColors = ['#ffffff', '#f8f9fa', '#fef9e7', '#fff3cd', '#fde2e4', '#f8d7da', '#e7f3ff', '#d1e7dd', '#e9ecef'];
-      const templateTextPaletteColors = ['#212529', '#343a40', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#6c757d', '#ffffff'];
-      const templateBorderPaletteColors = ['#ced4da', '#adb5bd', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#0dcaf0', '#6c757d', '#212529'];
-      const templateAccentPaletteColors = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#ffc107', '#20c997', '#0dcaf0', '#6c757d'];
-      const noteStylePresets = [
-        { id: 'classic', className: 'note-style-classic', extraClasses: [] },
-        { id: 'sky', className: 'note-style-sky', extraClasses: [] },
-        { id: 'forest', className: 'note-style-forest', extraClasses: [] },
-        { id: 'sunrise', className: 'note-style-sunrise', extraClasses: [] },
-        { id: 'rose', className: 'note-style-rose', extraClasses: [] },
-        { id: 'lilac', className: 'note-style-lilac', extraClasses: [] },
-        { id: 'slate', className: 'note-style-slate', extraClasses: [] },
-        { id: 'pearl', className: 'note-style-pearl', extraClasses: ['pearl'] }
-      ];
-      const NOTE_STYLE_CLASSES = noteStylePresets.map(p => p.className);
-      const noteStylePresetMap = new Map(noteStylePresets.map(p => [p.id, p]));
+      const templateBackgroundPaletteColors = TEMPLATE_BACKGROUND_PALETTE_COLORS;
+      const templateTextPaletteColors = TEMPLATE_TEXT_PALETTE_COLORS;
+      const templateBorderPaletteColors = TEMPLATE_BORDER_PALETTE_COLORS;
+      const templateAccentPaletteColors = TEMPLATE_ACCENT_PALETTE_COLORS;
+      const noteStylePresets = TEMPLATE_NOTE_STYLE_PRESETS;
+      const NOTE_STYLE_CLASSES = TEMPLATE_NOTE_STYLE_CLASSES;
+      const noteStylePresetMap = createTemplateNoteStylePresetMap();
 
       const notesRegistry = new NoteRegistry();
       let notesViewController = null;
@@ -1814,138 +1820,6 @@ export async function initializeEditor() {
         if (isTopicNotesPopoverOpen()) {
           positionTopicNotesPopover(topicNotesAnchor);
         }
-      }
-
-      function getDefaultImageViewerContext() {
-        return {
-          images: [],
-          selectedImageId: null,
-          notesById: {}
-        };
-      }
-
-      function getDefaultImageViewerState() {
-        return {
-          contexts: {
-            [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: getDefaultImageViewerContext()
-          },
-          activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
-        };
-      }
-
-      function sanitizeViewerImages(images) {
-        if (!Array.isArray(images)) {
-          return [];
-        }
-        const unique = new Map();
-        images.forEach(image => {
-          if (!image || typeof image !== 'object') {
-            return;
-          }
-          const id = typeof image.id === 'string' ? image.id : '';
-          const dataUrl = typeof image.dataUrl === 'string' ? image.dataUrl : '';
-          if (!id || !dataUrl) {
-            return;
-          }
-          unique.set(id, {
-            id,
-            dataUrl,
-            name: typeof image.name === 'string' && image.name ? image.name : 'imagen-sin-nombre',
-            size: Number.isFinite(image.size) ? image.size : 0,
-            type: typeof image.type === 'string' && image.type ? image.type : 'image/*',
-            createdAt: typeof image.createdAt === 'string' ? image.createdAt : new Date().toISOString(),
-            width: Number.isFinite(image.width) ? image.width : null,
-            height: Number.isFinite(image.height) ? image.height : null
-          });
-        });
-        return Array.from(unique.values());
-      }
-
-      function sanitizeImageViewerContext(context) {
-        if (!context || typeof context !== 'object') {
-          return getDefaultImageViewerContext();
-        }
-        const sanitizedImages = sanitizeViewerImages(context.images);
-        const notesById = {};
-        if (context.notesById && typeof context.notesById === 'object') {
-          Object.entries(context.notesById).forEach(([key, value]) => {
-            if (typeof value === 'string') {
-              notesById[key] = value;
-            }
-          });
-        }
-        let selectedImageId = typeof context.selectedImageId === 'string' ? context.selectedImageId : null;
-        if (!sanitizedImages.some(image => image.id === selectedImageId)) {
-          selectedImageId = sanitizedImages.length ? sanitizedImages[sanitizedImages.length - 1].id : null;
-        }
-        return {
-          images: sanitizedImages,
-          selectedImageId,
-          notesById
-        };
-      }
-
-      function sanitizeImageViewerState(next) {
-        if (!next || typeof next !== 'object') {
-          return getDefaultImageViewerState();
-        }
-
-        const looksLegacy = Array.isArray(next.images)
-          || typeof next.selectedImageId === 'string'
-          || (next.notesById && typeof next.notesById === 'object');
-
-        if (looksLegacy) {
-          const legacyContext = sanitizeImageViewerContext({
-            images: next.images,
-            selectedImageId: next.selectedImageId,
-            notesById: next.notesById
-          });
-          return {
-            contexts: {
-              [IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]: legacyContext
-            },
-            activeContext: IMAGE_VIEWER_DEFAULT_CONTEXT_KEY
-          };
-        }
-
-        const incomingContexts = next.contexts && typeof next.contexts === 'object' ? next.contexts : {};
-        const sanitizedContexts = {};
-
-        Object.entries(incomingContexts).forEach(([key, value]) => {
-          if (typeof key !== 'string' || !key) {
-            return;
-          }
-          sanitizedContexts[key] = sanitizeImageViewerContext(value);
-        });
-
-        if (!Object.keys(sanitizedContexts).length) {
-          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
-        } else if (!sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY]) {
-          sanitizedContexts[IMAGE_VIEWER_DEFAULT_CONTEXT_KEY] = getDefaultImageViewerContext();
-        }
-
-        const availableKeys = Object.keys(sanitizedContexts);
-        let activeContext = typeof next.activeContext === 'string' && sanitizedContexts[next.activeContext]
-          ? next.activeContext
-          : null;
-
-        if (!activeContext) {
-          if (availableKeys.includes(IMAGE_VIEWER_DEFAULT_CONTEXT_KEY)) {
-            activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-          } else {
-            activeContext = availableKeys[0];
-          }
-        }
-
-        if (!activeContext || !sanitizedContexts[activeContext]) {
-          activeContext = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-          sanitizedContexts[activeContext] = sanitizedContexts[activeContext] || getDefaultImageViewerContext();
-        }
-
-        return {
-          contexts: sanitizedContexts,
-          activeContext
-        };
       }
 
       function loadImageViewerState() {
