@@ -7562,9 +7562,19 @@ export async function initializeEditor() {
       function printVisibleFloatingNotes() {
         if (!floatingNotesLayer) return;
         closeFloatingNoteStyleMenu();
-        const layerRect = floatingNotesLayer.getBoundingClientRect();
+
+        const viewportWidth = Math.max(1, Math.round(window.innerWidth || document.documentElement.clientWidth || 0));
+        const viewportHeight = Math.max(1, Math.round(window.innerHeight || document.documentElement.clientHeight || 0));
+        const viewportBounds = {
+          left: 0,
+          top: 0,
+          right: viewportWidth,
+          bottom: viewportHeight
+        };
+
         const topicId = getCurrentTopicId();
         const visibleNotes = [];
+
         floatingNotesLayer.querySelectorAll('.floating-note').forEach(note => {
           if (!note.isConnected) return;
           if (note.classList.contains('floating-note-behind')) return;
@@ -7580,10 +7590,10 @@ export async function initializeEditor() {
             return;
           }
           const rect = note.getBoundingClientRect();
-          if (rect.bottom < layerRect.top || rect.top > layerRect.bottom) {
+          if (rect.bottom < viewportBounds.top || rect.top > viewportBounds.bottom) {
             return;
           }
-          if (rect.right < layerRect.left || rect.left > layerRect.right) {
+          if (rect.right < viewportBounds.left || rect.left > viewportBounds.right) {
             return;
           }
           visibleNotes.push({ note, rect });
@@ -7594,13 +7604,23 @@ export async function initializeEditor() {
           return;
         }
 
+        const backgroundColor = window.getComputedStyle(document.body).backgroundColor || '#ffffff';
         const printContainer = document.createElement('div');
         printContainer.className = 'floating-notes-print-area';
-        printContainer.style.width = `${Math.round(layerRect.width)}px`;
-        printContainer.style.height = `${Math.round(layerRect.height)}px`;
+        printContainer.style.width = `${viewportWidth}px`;
+        printContainer.style.height = `${viewportHeight}px`;
+        printContainer.style.background = backgroundColor;
+
+        const viewportWrapper = document.createElement('div');
+        viewportWrapper.className = 'floating-notes-print-area-viewport';
+        viewportWrapper.style.width = `${viewportWidth}px`;
+        viewportWrapper.style.height = `${viewportHeight}px`;
+        viewportWrapper.style.background = backgroundColor;
+        printContainer.appendChild(viewportWrapper);
 
         const landscapeStyle = document.createElement('style');
         landscapeStyle.dataset.floatingNotesPrint = 'orientation';
+        landscapeStyle.media = 'print';
         landscapeStyle.textContent = '@page { size: landscape; margin: 10mm; }';
         document.head.appendChild(landscapeStyle);
 
@@ -7610,16 +7630,57 @@ export async function initializeEditor() {
           clone.querySelectorAll('.floating-note-resize-handle').forEach(handle => handle.remove());
           clone.classList.add('floating-note-compact-header');
           clone.style.position = 'absolute';
-          clone.style.left = `${Math.round(rect.left - layerRect.left)}px`;
-          clone.style.top = `${Math.round(rect.top - layerRect.top)}px`;
-          clone.style.width = `${Math.round(rect.width)}px`;
-          clone.style.height = `${Math.round(rect.height)}px`;
           clone.removeAttribute('data-note-id');
           clone.querySelectorAll('[contenteditable]').forEach(el => el.setAttribute('contenteditable', 'false'));
-          printContainer.appendChild(clone);
+
+          const visibleLeft = Math.max(rect.left, viewportBounds.left);
+          const visibleTop = Math.max(rect.top, viewportBounds.top);
+          const visibleRight = Math.min(rect.right, viewportBounds.right);
+          const visibleBottom = Math.min(rect.bottom, viewportBounds.bottom);
+          const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+          const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+          if (visibleWidth <= 0 || visibleHeight <= 0) {
+            return;
+          }
+
+          const wrapper = document.createElement('div');
+          wrapper.className = 'floating-note-print-wrapper';
+          wrapper.style.left = `${Math.round(visibleLeft - viewportBounds.left)}px`;
+          wrapper.style.top = `${Math.round(visibleTop - viewportBounds.top)}px`;
+          wrapper.style.width = `${Math.round(visibleWidth)}px`;
+          wrapper.style.height = `${Math.round(visibleHeight)}px`;
+
+          const zIndex = window.getComputedStyle(note).zIndex;
+          if (zIndex && zIndex !== 'auto') {
+            wrapper.style.zIndex = zIndex;
+          }
+
+          clone.style.left = `${Math.round(rect.left - visibleLeft)}px`;
+          clone.style.top = `${Math.round(rect.top - visibleTop)}px`;
+          clone.style.width = `${Math.round(rect.width)}px`;
+          clone.style.height = `${Math.round(rect.height)}px`;
+
+          wrapper.appendChild(clone);
+          viewportWrapper.appendChild(wrapper);
         });
 
+        const previousTopicId = getCurrentTopicId();
+        const previousPage = previousTopicId ? findPageByTopicId(previousTopicId) : currentPageRef;
+        const previousScrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+
+        const cleanupHandlers = [];
+        let cleanedUp = false;
+
         const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          cleanupHandlers.splice(0).forEach((handler) => {
+            try {
+              handler();
+            } catch (error) {
+              console.error('Error al limpiar recursos de impresión de notas flotantes:', error);
+            }
+          });
           document.body.classList.remove('printing-floating-notes');
           if (printContainer.isConnected) {
             printContainer.remove();
@@ -7627,16 +7688,49 @@ export async function initializeEditor() {
           if (landscapeStyle.isConnected) {
             landscapeStyle.remove();
           }
-          window.removeEventListener('afterprint', cleanup);
+          const shouldRestorePage = previousPage && previousPage.isConnected && previousPage !== currentPageRef;
+          if (shouldRestorePage) {
+            setActivePage(previousPage);
+          } else if (previousTopicId) {
+            setActiveTopicListHighlight(previousTopicId);
+          }
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: previousScrollTop, behavior: 'auto' });
+          });
         };
 
-        window.addEventListener('afterprint', cleanup, { once: true });
+        const handleAfterPrint = () => cleanup();
+        window.addEventListener('afterprint', handleAfterPrint);
+        cleanupHandlers.push(() => window.removeEventListener('afterprint', handleAfterPrint));
+
+        const handleWindowFocus = () => cleanup();
+        window.addEventListener('focus', handleWindowFocus);
+        cleanupHandlers.push(() => window.removeEventListener('focus', handleWindowFocus));
+
+        if (typeof window.matchMedia === 'function') {
+          const mediaQueryList = window.matchMedia('print');
+          const handleMediaChange = (event) => {
+            if (!event.matches) {
+              cleanup();
+            }
+          };
+          if (typeof mediaQueryList.addEventListener === 'function') {
+            mediaQueryList.addEventListener('change', handleMediaChange);
+            cleanupHandlers.push(() => mediaQueryList.removeEventListener('change', handleMediaChange));
+          } else if (typeof mediaQueryList.addListener === 'function') {
+            mediaQueryList.addListener(handleMediaChange);
+            cleanupHandlers.push(() => mediaQueryList.removeListener(handleMediaChange));
+          }
+        }
+
+        const fallbackTimer = window.setTimeout(() => cleanup(), 5 * 60 * 1000);
+        cleanupHandlers.push(() => window.clearTimeout(fallbackTimer));
+
         document.body.appendChild(printContainer);
         document.body.classList.add('printing-floating-notes');
 
         requestAnimationFrame(() => {
           window.print();
-          setTimeout(cleanup, 1000);
         });
       }
 
