@@ -5254,9 +5254,31 @@ body.printing-floating-notes .magic-page {
   pointer-events: none;
   z-index: 9999;
   overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0;
+  --floating-notes-print-scale: 1;
+  --floating-notes-print-width: 0px;
+  --floating-notes-print-height: 0px;
 }
 
-.floating-notes-print-area .floating-note {
+.floating-notes-print-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.floating-notes-print-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.floating-notes-print-stage .floating-note {
   pointer-events: none;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
 }
@@ -5287,14 +5309,33 @@ body.printing-floating-notes .magic-page {
   body.printing-floating-notes .floating-notes-print-area {
     position: relative;
     inset: auto;
-    width: 100%;
+    width: calc(var(--floating-notes-print-width, 100vw) * var(--floating-notes-print-scale, 1));
+    min-height: calc(var(--floating-notes-print-height, 100vh) * var(--floating-notes-print-scale, 1));
     height: auto;
-    min-height: 100vh;
     overflow: visible;
+    margin: 0 auto;
+    padding: 0;
   }
 
-  body.printing-floating-notes .floating-notes-print-area .floating-note {
+  body.printing-floating-notes .floating-notes-print-wrapper {
+    width: var(--floating-notes-print-width, 100%);
+    height: var(--floating-notes-print-height, auto);
+  }
+
+  body.printing-floating-notes .floating-notes-print-stage {
+    width: var(--floating-notes-print-width, 100%);
+    height: var(--floating-notes-print-height, auto);
+    transform-origin: top left;
+    transform: scale(var(--floating-notes-print-scale, 1));
+  }
+
+  body.printing-floating-notes .floating-notes-print-stage .floating-note {
     position: absolute;
+  }
+
+  body.printing-floating-notes .floating-notes-print-stage .floating-note-behind {
+    opacity: 1 !important;
+    visibility: visible !important;
   }
 
   .page, .magic-page {
