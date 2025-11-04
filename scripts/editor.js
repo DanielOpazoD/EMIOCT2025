@@ -68,88 +68,11 @@ import {
   TEMPLATE_TEXT_PALETTE_COLORS,
   createTemplateNoteStylePresetMap
 } from './modules/editor/templateConfig.js';
+import { createEditorState } from './modules/editor/state.js';
 
 export async function initializeEditor() {
-      let isEditMode = false;
-      let isPanelEditMode = false;
-      let isReadingMode = false;
-      let pages = [...document.querySelectorAll('.page')];
-      let globalTopicCounter = 1;
-      let selectedImage = null;
-      let selectedTemplateBlock = null;
-      let currentZoom = 1;
-      let lastRegularZoom = 1;
-      let zoomBeforeMagic = null;
-      let isMagicViewActive = false;
-      let activeMagicSource = null;
-      let activeMagicWrapper = null;
-      let activeMagicPage = null;
-      let allSectionsExpanded = true;
-      let savedSelection = null;
-      let pendingToolbarInsertionSnapshot = null;
-      let tableMenuAPI = null;
-      let cachedToolbarHeight = 0;
-      let iconPickerRebindTimer = null;
-      const cropState = {
-        image: null,
-        isSelecting: false,
-        startX: 0,
-        startY: 0,
-        currentRect: null,
-        scaleX: 1,
-        scaleY: 1
-      };
-      let imageViewerState = getDefaultImageViewerState();
-      let imageViewerPreviousShift = null;
-      let imageViewerActiveShift = null;
-      let imageViewerNotesSaveTimer = null;
-      let imageViewerZoom = 1;
-      let imageViewerPreviewSource = null;
-      let imageViewerCurrentToken = null;
-      let imageViewerContextExternalImages = [];
-      let imageViewerRuntimeSelectionId = null;
-      let imageViewerContextKey = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-
-      let floatingNotesHidden = false;
-      let mainContentHidden = false;
-      let boldInfiniteMode = false;
-      let boldInfiniteApplying = false;
-      let autoTableResizeController = null;
-      let autoTableResizeTable = null;
-      const spacingToolState = {
-        isOpen: false,
-        targets: [],
-        originalStyles: new Map()
-      };
-      let spacingToolSelectionSync = null;
-      let floatingNoteZIndex = 10;
-      let floatingNoteCreationOffset = 0;
-      const floatingNoteDragState = { note: null, pointerId: null, offsetX: 0, offsetY: 0 };
-      const floatingNoteResizeState = {
-        note: null,
-        pointerId: null,
-        orientation: null,
-        edge: null,
-        corner: null,
-        startWidth: 0,
-        startHeight: 0,
-        startLeft: 0,
-        startTop: 0,
-        startRight: 0,
-        startBottom: 0,
-        startX: 0,
-        startY: 0
-      };
-      let activeFloatingNoteStyleMenu = null;
-      let floatingNoteResizeObserver = null;
-      let floatingNotesViewportRelaxedMatching = false;
-      let pendingFloatingNotesViewportSync = false;
-      let pendingFloatingNoteViewportRefresh = false;
-      let pendingTopicNoteIndicatorUpdate = false;
-      let cachedActiveTopicViewportState = null;
-      let documentHorizontalShift = 0;
-
-      let usingExtendedCache = false;
+      const state = createEditorState();
+      let pages = state.editor.pages;
 
       const {
         isQuotaExceededError,
@@ -162,13 +85,6 @@ export async function initializeEditor() {
       const { getStylesheetTextForExport } = createStylesheetLoader();
 
 
-      let sections = [];
-      let sectionThemes = new Map();
-      let currentSectionId = '';
-      let currentPageRef = null;
-      let visibleSectionId = '';
-      let panelFilterTerm = '';
-      let panelFilterNormalized = '';
       
       const panel = document.getElementById('topic-panel');
       const sectionsContainer = document.getElementById('sectionsContainer');
@@ -199,7 +115,7 @@ export async function initializeEditor() {
       let currentTopbarTheme = AVAILABLE_TOPBAR_THEMES[0];
 
       if (typeof ResizeObserver === 'function') {
-        floatingNoteResizeObserver = new ResizeObserver((entries) => {
+        state.floatingNotes.resizeObserver = new ResizeObserver((entries) => {
           entries.forEach((entry) => {
             const target = entry.target;
             if (!(target instanceof HTMLElement) || !target.classList.contains('floating-note')) {
@@ -363,7 +279,7 @@ export async function initializeEditor() {
         const validTheme = AVAILABLE_THEMES.includes(themeClass) ? themeClass : DEFAULT_THEME;
         AVAILABLE_THEMES.forEach(cls => document.body.classList.remove(cls));
         document.body.classList.add(validTheme);
-        if (isReadingMode) {
+        if (state.editor.isReadingMode) {
           document.body.classList.add('reading-mode');
         }
       }
@@ -385,7 +301,7 @@ export async function initializeEditor() {
       const normalizeSectionId = (value) => (value || '').trim();
 
       function getVisibleSectionId() {
-        return normalizeSectionId(visibleSectionId);
+        return normalizeSectionId(state.panel.visibleSectionId);
       }
 
       function refreshSectionVisibility({ force = false } = {}) {
@@ -393,9 +309,9 @@ export async function initializeEditor() {
         const showAll = !activeId;
         document.body.classList.toggle('section-locked-view', !showAll);
         if (!showAll) {
-          document.body.dataset.visibleSectionId = activeId;
+          document.body.dataset.state.panel.visibleSectionId = activeId;
         } else {
-          delete document.body.dataset.visibleSectionId;
+          delete document.body.dataset.state.panel.visibleSectionId;
         }
 
         pages.forEach((page) => {
@@ -438,15 +354,15 @@ export async function initializeEditor() {
       }
 
       function ensureVisibleSection({ force = false } = {}) {
-        const availableIds = sections.map((section) => normalizeSectionId(section.id));
+        const availableIds = state.panel.sections.map((section) => normalizeSectionId(section.id));
         let targetId = getVisibleSectionId();
         if (availableIds.length === 0) {
           targetId = '';
         } else if (!targetId || !availableIds.includes(targetId)) {
           targetId = availableIds[0];
         }
-        if (visibleSectionId !== targetId) {
-          visibleSectionId = targetId;
+        if (state.panel.visibleSectionId !== targetId) {
+          state.panel.visibleSectionId = targetId;
           force = true;
         }
         refreshSectionVisibility({ force });
@@ -459,8 +375,8 @@ export async function initializeEditor() {
           ensureVisibleSection({ force });
           return;
         }
-        if (visibleSectionId !== normalizedId) {
-          visibleSectionId = normalizedId;
+        if (state.panel.visibleSectionId !== normalizedId) {
+          state.panel.visibleSectionId = normalizedId;
           force = true;
         }
         refreshSectionVisibility({ force });
@@ -470,8 +386,8 @@ export async function initializeEditor() {
       function setActivePage(page) {
         if (!page) {
           closeTopicNotesPopover();
-          currentPageRef = null;
-          currentSectionId = '';
+          state.panel.currentPageRef = null;
+          state.panel.currentSectionId = '';
           updateSectionIndicator(null);
           updateThemeSelectControl(DEFAULT_THEME);
           syncBodyTheme(DEFAULT_THEME);
@@ -488,11 +404,11 @@ export async function initializeEditor() {
           closeTopicNotesPopover();
         }
         setActiveTopicListHighlight(nextTopicId);
-        currentPageRef = page;
+        state.panel.currentPageRef = page;
         const sectionId = page.dataset.sectionId || 'seccion-default';
-        currentSectionId = sectionId;
+        state.panel.currentSectionId = sectionId;
         const themeClass = getPageTheme(page);
-        sectionThemes.set(sectionId, themeClass);
+        state.panel.sectionThemes.set(sectionId, themeClass);
         setVisibleSection(sectionId);
         updateSectionIndicator(page);
         updateThemeSelectControl(themeClass);
@@ -505,9 +421,9 @@ export async function initializeEditor() {
 
       function setSectionTheme(sectionId, themeClass) {
         const validTheme = AVAILABLE_THEMES.includes(themeClass) ? themeClass : DEFAULT_THEME;
-        sectionThemes.set(sectionId, validTheme);
+        state.panel.sectionThemes.set(sectionId, validTheme);
         pages.filter(page => page.dataset.sectionId === sectionId).forEach(page => applyThemeToPage(page, validTheme));
-        if (currentSectionId === sectionId) {
+        if (state.panel.currentSectionId === sectionId) {
           updateThemeSelectControl(validTheme);
           syncBodyTheme(validTheme);
         }
@@ -527,19 +443,19 @@ export async function initializeEditor() {
 
       function measureToolbarHeight() {
         if (!editToolbar) {
-          return cachedToolbarHeight || 0;
+          return state.editor.cachedToolbarHeight || 0;
         }
 
         if (editToolbar.classList.contains('show')) {
           const height = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || 0;
           if (height) {
-            cachedToolbarHeight = height;
+            state.editor.cachedToolbarHeight = height;
           }
           return height;
         }
 
-        if (cachedToolbarHeight) {
-          return cachedToolbarHeight;
+        if (state.editor.cachedToolbarHeight) {
+          return state.editor.cachedToolbarHeight;
         }
 
         const previousDisplay = editToolbar.style.display;
@@ -570,15 +486,15 @@ export async function initializeEditor() {
           editToolbar.style.removeProperty('pointer-events');
         }
 
-        cachedToolbarHeight = measured || 64;
-        return cachedToolbarHeight;
+        state.editor.cachedToolbarHeight = measured || 64;
+        return state.editor.cachedToolbarHeight;
       }
 
       function getToolbarOffset() {
         const topbarHeight = topbar ? (topbar.getBoundingClientRect().height || topbar.offsetHeight || 0) : 0;
         let toolbarHeight = measureToolbarHeight();
         if (!toolbarHeight) {
-          toolbarHeight = cachedToolbarHeight || 64;
+          toolbarHeight = state.editor.cachedToolbarHeight || 64;
         }
 
         const padding = 24;
@@ -727,15 +643,15 @@ export async function initializeEditor() {
       }
 
       function scheduleIconPickerRebind(delay = 0) {
-        if (iconPickerRebindTimer) {
-          clearTimeout(iconPickerRebindTimer);
-          iconPickerRebindTimer = null;
+        if (state.editor.iconPickerRebindTimer) {
+          clearTimeout(state.editor.iconPickerRebindTimer);
+          state.editor.iconPickerRebindTimer = null;
         }
 
         const waitTime = Number.isFinite(delay) ? Math.max(0, delay) : 0;
 
-        iconPickerRebindTimer = setTimeout(() => {
-          iconPickerRebindTimer = null;
+        state.editor.iconPickerRebindTimer = setTimeout(() => {
+          state.editor.iconPickerRebindTimer = null;
           const raf = typeof requestAnimationFrame === 'function'
             ? requestAnimationFrame
             : (callback) => setTimeout(callback, 16);
@@ -890,11 +806,11 @@ export async function initializeEditor() {
       }
 
       function getSavedSelectionRect() {
-        if (!savedSelection || !savedSelection.range) {
+        if (!state.editor.savedSelection || !state.editor.savedSelection.range) {
           return null;
         }
 
-        const { range, focusTarget, pageTarget } = savedSelection;
+        const { range, focusTarget, pageTarget } = state.editor.savedSelection;
         if (!isNodeInDocument(range.startContainer) || !isNodeInDocument(range.endContainer)) {
           return null;
         }
@@ -1227,7 +1143,7 @@ export async function initializeEditor() {
           element = createFloatingNote({ id: noteData.id, meta: noteData, focus: true });
         }
         if (!element) return;
-        if (floatingNotesHidden) {
+        if (state.floatingNotes.hidden) {
           setFloatingNotesVisibility(false);
         }
         bringNoteToFront(element);
@@ -1238,7 +1154,7 @@ export async function initializeEditor() {
       function promptMoveNoteToTopic(noteData) {
         if (!noteData) return;
         const topics = [];
-        sections.forEach(section => {
+        state.panel.sections.forEach(section => {
           section.temas.forEach(tema => {
             const label = `${section.nombre || 'Sección'} › ${tema.titulo || 'Tema'}`;
             topics.push({
@@ -1472,10 +1388,10 @@ export async function initializeEditor() {
       }
 
       function scheduleTopicNoteIndicatorRefresh() {
-        if (pendingTopicNoteIndicatorUpdate) return;
-        pendingTopicNoteIndicatorUpdate = true;
+        if (state.floatingNotes.pendingTopicIndicatorUpdate) return;
+        state.floatingNotes.pendingTopicIndicatorUpdate = true;
         requestAnimationFrame(() => {
-          pendingTopicNoteIndicatorUpdate = false;
+          state.floatingNotes.pendingTopicIndicatorUpdate = false;
           refreshTopicNoteIndicators();
         });
       }
@@ -1492,14 +1408,14 @@ export async function initializeEditor() {
 
       topicNotesAddBtn?.addEventListener('click', () => {
         if (!topicNotesPopoverTopicId) return;
-        const page = findPageByTopicId(topicNotesPopoverTopicId) || currentPageRef;
+        const page = findPageByTopicId(topicNotesPopoverTopicId) || state.panel.currentPageRef;
         if (!page) return;
-        if (floatingNotesHidden) {
+        if (state.floatingNotes.hidden) {
           setFloatingNotesVisibility(false);
         }
         const payload = {
           topicId: topicNotesPopoverTopicId,
-          sectionId: page.dataset.sectionId || currentSectionId || null,
+          sectionId: page.dataset.sectionId || state.panel.currentSectionId || null,
           focus: true
         };
         if (floatingNotesLayer && topicNotesAnchor) {
@@ -1597,23 +1513,23 @@ export async function initializeEditor() {
 
       function moveTopicPage(page) {
         if (!page) return false;
-        if (!sections.length) {
+        if (!state.panel.sections.length) {
           initializeSections();
         }
-        if (sections.length <= 1) {
+        if (state.panel.sections.length <= 1) {
           alert('No hay otras secciones disponibles para mover este tema.');
           return false;
         }
 
-        const currentSection = sections.find(section => section.id === page.dataset.sectionId);
-        const options = sections.map((section, idx) => `${idx + 1}. ${section.nombre}${section === currentSection ? ' (actual)' : ''}`).join('\n');
+        const currentSection = state.panel.sections.find(section => section.id === page.dataset.sectionId);
+        const options = state.panel.sections.map((section, idx) => `${idx + 1}. ${section.nombre}${section === currentSection ? ' (actual)' : ''}`).join('\n');
         const choice = prompt(`Mover tema a sección:\n${options}\nEscribe el número o nombre de la sección destino:`, currentSection?.nombre || '');
         if (!choice || !choice.trim()) return false;
 
         const trimmed = choice.trim().toLowerCase();
-        let targetSection = sections.find((section, idx) => String(idx + 1) === trimmed);
+        let targetSection = state.panel.sections.find((section, idx) => String(idx + 1) === trimmed);
         if (!targetSection) {
-          targetSection = sections.find(section => section.nombre.toLowerCase() === trimmed);
+          targetSection = state.panel.sections.find(section => section.nombre.toLowerCase() === trimmed);
         }
 
         if (!targetSection) {
@@ -1623,8 +1539,8 @@ export async function initializeEditor() {
 
         page.dataset.sectionId = targetSection.id;
         page.dataset.sectionName = targetSection.nombre;
-        const targetTheme = sectionThemes.get(targetSection.id) || DEFAULT_THEME;
-        sectionThemes.set(targetSection.id, targetTheme);
+        const targetTheme = state.panel.sectionThemes.get(targetSection.id) || DEFAULT_THEME;
+        state.panel.sectionThemes.set(targetSection.id, targetTheme);
         applyThemeToPage(page, targetTheme);
         initializeSections();
         buildSectionsPanel();
@@ -1640,9 +1556,10 @@ export async function initializeEditor() {
         }
         page.remove();
         pages = pages.filter(p => p !== page);
+        state.editor.pages = pages;
         initializeSections();
         buildSectionsPanel();
-        if (currentPageRef === page) {
+        if (state.panel.currentPageRef === page) {
           setActivePage(getCurrentPage());
         }
         return true;
@@ -1689,15 +1606,15 @@ export async function initializeEditor() {
           hideTopicMenu();
           hideTemplateToolbar();
           hideImageToolbar();
-          tableMenuAPI?.cancelResize();
-          tableMenuAPI?.hide();
+          state.editor.tableMenuAPI?.cancelResize();
+          state.editor.tableMenuAPI?.hide();
         }
       });
 
       /* === ZOOM === */
       function syncMagicZoom() {
         if (!magic) return;
-        if (isMagicViewActive) {
+        if (state.image.isMagicViewActive) {
           magic.style.setProperty('--magic-zoom', '1');
         } else {
           magic.style.removeProperty('--magic-zoom');
@@ -1706,7 +1623,7 @@ export async function initializeEditor() {
 
       function applyZoom(level, options = {}) {
         const { skipRemember = false } = options;
-        const previousZoom = currentZoom || 1;
+        const previousZoom = state.image.currentZoom || 1;
         const newZoom = Math.max(0.5, Math.min(2, level));
         const scrollElement = document.scrollingElement || document.documentElement || document.body;
         const pageRef = getCurrentPage();
@@ -1725,17 +1642,17 @@ export async function initializeEditor() {
           };
         }
 
-        currentZoom = newZoom;
-        document.documentElement.style.setProperty('--zoom-level', currentZoom);
+        state.image.currentZoom = newZoom;
+        document.documentElement.style.setProperty('--zoom-level', state.image.currentZoom);
         if (zoomValue) {
-          zoomValue.textContent = Math.round(currentZoom * 100) + '%';
+          zoomValue.textContent = Math.round(state.image.currentZoom * 100) + '%';
         }
-        if (!skipRemember && !isMagicViewActive) {
-          lastRegularZoom = currentZoom;
+        if (!skipRemember && !state.image.isMagicViewActive) {
+          state.image.lastRegularZoom = state.image.currentZoom;
         }
 
-        if (Math.abs(currentZoom - previousZoom) >= 0.0001) {
-          adjustFloatingNotesForZoom(previousZoom, currentZoom);
+        if (Math.abs(state.image.currentZoom - previousZoom) >= 0.0001) {
+          adjustFloatingNotesForZoom(previousZoom, state.image.currentZoom);
 
           if (scrollElement) {
             if (pageScrollState) {
@@ -1750,7 +1667,7 @@ export async function initializeEditor() {
               });
             } else {
               const viewportCenter = scrollElement.scrollTop + window.innerHeight / 2;
-              const scaleFactor = currentZoom / previousZoom;
+              const scaleFactor = state.image.currentZoom / previousZoom;
               const targetCenter = viewportCenter * scaleFactor;
               const desiredTop = Math.max(0, targetCenter - window.innerHeight / 2);
               scrollElement.scrollTo({ top: desiredTop });
@@ -1795,12 +1712,12 @@ export async function initializeEditor() {
           }
         });
 
-        floatingNotesViewportRelaxedMatching = true;
+        state.floatingNotes.viewportRelaxedMatching = true;
         scheduleFloatingNotesViewportRefresh();
       }
 
       function applyDocumentShift() {
-        document.documentElement.style.setProperty('--document-horizontal-shift', `${documentHorizontalShift}px`);
+        document.documentElement.style.setProperty('--document-horizontal-shift', `${state.document.horizontalShift}px`);
         if (isTopicNotesPopoverOpen()) {
           positionTopicNotesPopover(topicNotesAnchor);
         }
@@ -1809,12 +1726,12 @@ export async function initializeEditor() {
       function adjustDocumentShift(delta) {
         const nextValue = Math.min(
           DOCUMENT_SHIFT_MAX,
-          Math.max(DOCUMENT_SHIFT_MIN, documentHorizontalShift + delta)
+          Math.max(DOCUMENT_SHIFT_MIN, state.document.horizontalShift + delta)
         );
-        if (nextValue === documentHorizontalShift) {
+        if (nextValue === state.document.horizontalShift) {
           return;
         }
-        documentHorizontalShift = nextValue;
+        state.document.horizontalShift = nextValue;
         applyDocumentShift();
         scheduleFloatingNotesViewportRefresh();
         if (isTopicNotesPopoverOpen()) {
@@ -1844,19 +1761,19 @@ export async function initializeEditor() {
           return;
         }
         try {
-          window.localStorage.setItem(IMAGE_VIEWER_STORAGE_KEY, JSON.stringify(imageViewerState));
+          window.localStorage.setItem(IMAGE_VIEWER_STORAGE_KEY, JSON.stringify(state.image.viewer.state));
         } catch (error) {
           console.warn('No se pudo guardar el estado del visor de imágenes:', error);
         }
       }
 
       function setImageViewerState(updater, options = {}) {
-        const current = imageViewerState;
+        const current = state.image.viewer.state;
         let next = typeof updater === 'function' ? updater(current) : updater;
         if (next === current) {
           next = { ...current };
         }
-        imageViewerState = sanitizeImageViewerState({
+        state.image.viewer.state = sanitizeImageViewerState({
           contexts: next?.contexts ?? current.contexts,
           activeContext: next?.activeContext ?? current.activeContext
         });
@@ -1867,8 +1784,8 @@ export async function initializeEditor() {
       }
 
       function getActiveImageViewerContextKey() {
-        const state = imageViewerState || getDefaultImageViewerState();
-        const desiredKey = imageViewerContextKey || state.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+        const state = state.image.viewer.state || getDefaultImageViewerState();
+        const desiredKey = state.image.viewer.contextKey || state.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
         if (state.contexts && state.contexts[desiredKey]) {
           return desiredKey;
         }
@@ -1881,7 +1798,7 @@ export async function initializeEditor() {
 
       function getActiveImageViewerContext() {
         const key = getActiveImageViewerContextKey();
-        const context = imageViewerState.contexts?.[key];
+        const context = state.image.viewer.state.contexts?.[key];
         if (context) {
           return { key, context };
         }
@@ -1906,18 +1823,18 @@ export async function initializeEditor() {
 
       function activateImageViewerContext(contextKey, { externalImages, selectedRuntimeId, rerender = true } = {}) {
         const targetKey = contextKey || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
-        const previousKey = imageViewerContextKey;
+        const previousKey = state.image.viewer.contextKey;
         if (Array.isArray(externalImages)) {
-          imageViewerContextExternalImages = externalImages;
+          state.image.viewer.contextExternalImages = externalImages;
         } else if (externalImages === null) {
-          imageViewerContextExternalImages = [];
+          state.image.viewer.contextExternalImages = [];
         } else if (previousKey !== targetKey) {
-          imageViewerContextExternalImages = [];
+          state.image.viewer.contextExternalImages = [];
         }
         if (selectedRuntimeId !== undefined) {
-          imageViewerRuntimeSelectionId = selectedRuntimeId;
+          state.image.viewer.runtimeSelectionId = selectedRuntimeId;
         }
-        imageViewerContextKey = targetKey;
+        state.image.viewer.contextKey = targetKey;
         setImageViewerState(state => {
           const contexts = { ...state.contexts };
           if (!contexts[targetKey]) {
@@ -1931,13 +1848,13 @@ export async function initializeEditor() {
       }
 
       function clearImageViewerPreview() {
-        imageViewerPreviewSource = null;
+        state.image.viewer.previewSource = null;
       }
 
       function getImageViewerCombinedImages() {
         const { key, context } = getActiveImageViewerContext();
-        const external = Array.isArray(imageViewerContextExternalImages)
-          ? imageViewerContextExternalImages
+        const external = Array.isArray(state.image.viewer.contextExternalImages)
+          ? state.image.viewer.contextExternalImages
           : [];
 
         const normalizedExternal = external.reduce((list, entry, index) => {
@@ -1990,12 +1907,12 @@ export async function initializeEditor() {
       function getActiveViewerImage() {
         const combined = getImageViewerCombinedImages();
         if (!combined.length) {
-          if (imageViewerPreviewSource && imageViewerPreviewSource.src) {
-            return { ...imageViewerPreviewSource, source: 'preview', runtimeId: 'preview' };
+          if (state.image.viewer.previewSource && state.image.viewer.previewSource.src) {
+            return { ...state.image.viewer.previewSource, source: 'preview', runtimeId: 'preview' };
           }
           return null;
         }
-        const runtimeId = imageViewerRuntimeSelectionId;
+        const runtimeId = state.image.viewer.runtimeSelectionId;
         let active = null;
         if (runtimeId) {
           active = combined.find(item => item.runtimeId === runtimeId) || null;
@@ -2010,14 +1927,14 @@ export async function initializeEditor() {
           active = combined[0] || null;
         }
         if (active) {
-          imageViewerRuntimeSelectionId = active.runtimeId || null;
+          state.image.viewer.runtimeSelectionId = active.runtimeId || null;
         }
         return active;
       }
 
       function clampImageViewerZoom(value) {
         if (!Number.isFinite(value)) {
-          return imageViewerZoom;
+          return state.image.viewer.zoom;
         }
         return Math.min(IMAGE_VIEWER_ZOOM_MAX, Math.max(IMAGE_VIEWER_ZOOM_MIN, value));
       }
@@ -2031,7 +1948,7 @@ export async function initializeEditor() {
           imageViewerActiveImage.style.transform = 'scale(1)';
           return;
         }
-        imageViewerActiveImage.style.transform = `scale(${imageViewerZoom})`;
+        imageViewerActiveImage.style.transform = `scale(${state.image.viewer.zoom})`;
       }
 
       function updateImageViewerZoomControls() {
@@ -2039,15 +1956,15 @@ export async function initializeEditor() {
         const hasImage = !!active;
         if (imageViewerZoomValue) {
           if (hasImage) {
-            const percentage = Math.round(imageViewerZoom * 100);
+            const percentage = Math.round(state.image.viewer.zoom * 100);
             imageViewerZoomValue.textContent = `${percentage}%`;
           } else {
             imageViewerZoomValue.textContent = '—';
           }
         }
-        const canZoomOut = hasImage && imageViewerZoom > IMAGE_VIEWER_ZOOM_MIN + 0.001;
-        const canZoomIn = hasImage && imageViewerZoom < IMAGE_VIEWER_ZOOM_MAX - 0.001;
-        const canReset = hasImage && Math.abs(imageViewerZoom - 1) > 0.001;
+        const canZoomOut = hasImage && state.image.viewer.zoom > IMAGE_VIEWER_ZOOM_MIN + 0.001;
+        const canZoomIn = hasImage && state.image.viewer.zoom < IMAGE_VIEWER_ZOOM_MAX - 0.001;
+        const canReset = hasImage && Math.abs(state.image.viewer.zoom - 1) > 0.001;
         if (imageViewerZoomOutBtn) {
           if (canZoomOut) {
             imageViewerZoomOutBtn.removeAttribute('disabled');
@@ -2073,27 +1990,27 @@ export async function initializeEditor() {
 
       function setImageViewerZoom(value) {
         if (!getActiveViewerImage()) {
-          imageViewerZoom = 1;
+          state.image.viewer.zoom = 1;
           applyImageViewerZoom();
           updateImageViewerZoomControls();
           return;
         }
         const next = clampImageViewerZoom(value);
-        if (Math.abs(next - imageViewerZoom) < 0.001) {
+        if (Math.abs(next - state.image.viewer.zoom) < 0.001) {
           updateImageViewerZoomControls();
           return;
         }
-        imageViewerZoom = next;
+        state.image.viewer.zoom = next;
         applyImageViewerZoom();
         updateImageViewerZoomControls();
       }
 
       function adjustImageViewerZoom(delta) {
-        setImageViewerZoom(imageViewerZoom + delta);
+        setImageViewerZoom(state.image.viewer.zoom + delta);
       }
 
       function resetImageViewerZoom() {
-        imageViewerZoom = 1;
+        state.image.viewer.zoom = 1;
         applyImageViewerZoom();
         updateImageViewerZoomControls();
       }
@@ -2116,12 +2033,12 @@ export async function initializeEditor() {
           return;
         }
         const desired = computeImageViewerShift();
-        if (!force && imageViewerActiveShift !== null && Math.abs(documentHorizontalShift - imageViewerActiveShift) > 6) {
-          imageViewerActiveShift = documentHorizontalShift;
+        if (!force && state.image.viewer.activeShift !== null && Math.abs(state.document.horizontalShift - state.image.viewer.activeShift) > 6) {
+          state.image.viewer.activeShift = state.document.horizontalShift;
           return;
         }
-        imageViewerActiveShift = desired;
-        documentHorizontalShift = desired;
+        state.image.viewer.activeShift = desired;
+        state.document.horizontalShift = desired;
         applyDocumentShift();
         scheduleFloatingNotesViewportRefresh();
       }
@@ -2132,7 +2049,7 @@ export async function initializeEditor() {
           enforceImageViewerShift({ force: true });
           return;
         }
-        imageViewerPreviousShift = documentHorizontalShift;
+        state.image.viewer.previousShift = state.document.horizontalShift;
         hideImageToolbar();
         imageViewerPanel.classList.add('open');
         imageViewerPanel.setAttribute('aria-hidden', 'false');
@@ -2149,16 +2066,16 @@ export async function initializeEditor() {
         imageViewerPanel.classList.remove('open');
         imageViewerPanel.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('image-viewer-open');
-        imageViewerActiveShift = null;
+        state.image.viewer.activeShift = null;
         clearImageViewerPreview();
-        imageViewerCurrentToken = null;
+        state.image.viewer.currentToken = null;
         resetImageViewerZoom();
-        if (restoreShift && imageViewerPreviousShift !== null) {
-          documentHorizontalShift = imageViewerPreviousShift;
+        if (restoreShift && state.image.viewer.previousShift !== null) {
+          state.document.horizontalShift = state.image.viewer.previousShift;
           applyDocumentShift();
           scheduleFloatingNotesViewportRefresh();
         }
-        imageViewerPreviousShift = null;
+        state.image.viewer.previousShift = null;
       }
 
       function toggleImageViewer(forceState = null) {
@@ -2241,8 +2158,8 @@ export async function initializeEditor() {
         let display = getActiveViewerImage();
         let isPreview = false;
 
-        if (!display && imageViewerPreviewSource && imageViewerPreviewSource.src) {
-          display = { ...imageViewerPreviewSource, source: 'preview', runtimeId: 'preview' };
+        if (!display && state.image.viewer.previewSource && state.image.viewer.previewSource.src) {
+          display = { ...state.image.viewer.previewSource, source: 'preview', runtimeId: 'preview' };
         }
 
         if (display && display.source === 'preview') {
@@ -2250,15 +2167,15 @@ export async function initializeEditor() {
         }
 
         if (display && display.runtimeId) {
-          imageViewerRuntimeSelectionId = display.runtimeId;
+          state.image.viewer.runtimeSelectionId = display.runtimeId;
         }
 
         const displayToken = display
           ? `${display.runtimeId || display.id || 'preview'}:${display.src || display.dataUrl || ''}`
           : null;
 
-        if (displayToken !== imageViewerCurrentToken) {
-          imageViewerCurrentToken = displayToken;
+        if (displayToken !== state.image.viewer.currentToken) {
+          state.image.viewer.currentToken = displayToken;
           resetImageViewerZoom();
         } else {
           applyImageViewerZoom();
@@ -2464,8 +2381,8 @@ export async function initializeEditor() {
         }
         const lastAdditionId = additions[additions.length - 1].id;
         clearImageViewerPreview();
-        imageViewerCurrentToken = null;
-        imageViewerRuntimeSelectionId = `library:${lastAdditionId}`;
+        state.image.viewer.currentToken = null;
+        state.image.viewer.runtimeSelectionId = `library:${lastAdditionId}`;
         updateImageViewerContext(contextKey, ctx => ({
           images: [...ctx.images, ...additions],
           selectedImageId: lastAdditionId,
@@ -2535,7 +2452,7 @@ export async function initializeEditor() {
             notesById: nextNotes
           };
         });
-        imageViewerRuntimeSelectionId = nextRuntimeSelection;
+        state.image.viewer.runtimeSelectionId = nextRuntimeSelection;
       }
 
       function buildViewerContextKey(prefix, identifier) {
@@ -2642,15 +2559,15 @@ export async function initializeEditor() {
           || externalImages.find(entry => entry.src === (imgElement.currentSrc || imgElement.src));
         const selectedRuntimeId = selection ? selection.runtimeId : (externalImages[0]?.runtimeId || null);
         const wasOpen = imageViewerPanel?.classList.contains('open');
-        imageViewerPreviewSource = null;
-        imageViewerCurrentToken = null;
+        state.image.viewer.previewSource = null;
+        state.image.viewer.currentToken = null;
         activateImageViewerContext(scope.key, {
           externalImages,
           selectedRuntimeId,
           rerender: false
         });
         if (selectedRuntimeId) {
-          imageViewerRuntimeSelectionId = selectedRuntimeId;
+          state.image.viewer.runtimeSelectionId = selectedRuntimeId;
         }
         if (wasOpen) {
           renderImageViewer();
@@ -2664,7 +2581,7 @@ export async function initializeEditor() {
           return;
         }
         const normalizedDirection = direction >= 0 ? 1 : -1;
-        const currentId = imageViewerRuntimeSelectionId;
+        const currentId = state.image.viewer.runtimeSelectionId;
         let currentIndex = combined.findIndex(item => item.runtimeId === currentId);
         if (currentIndex === -1) {
           const { context } = getActiveImageViewerContext();
@@ -2686,7 +2603,7 @@ export async function initializeEditor() {
           return;
         }
         if (next.source === 'library') {
-          imageViewerRuntimeSelectionId = next.runtimeId;
+          state.image.viewer.runtimeSelectionId = next.runtimeId;
           clearImageViewerPreview();
           updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
             images: ctx.images,
@@ -2694,7 +2611,7 @@ export async function initializeEditor() {
             notesById: ctx.notesById
           }));
         } else {
-          imageViewerRuntimeSelectionId = next.runtimeId;
+          state.image.viewer.runtimeSelectionId = next.runtimeId;
           clearImageViewerPreview();
           renderImageViewer();
         }
@@ -2735,15 +2652,15 @@ export async function initializeEditor() {
           if (!id) {
             return;
           }
-          if (context.selectedImageId === id && imageViewerRuntimeSelectionId === resolvedRuntimeId) {
+          if (context.selectedImageId === id && state.image.viewer.runtimeSelectionId === resolvedRuntimeId) {
             return;
           }
-        } else if (imageViewerRuntimeSelectionId === resolvedRuntimeId) {
+        } else if (state.image.viewer.runtimeSelectionId === resolvedRuntimeId) {
           return;
         }
         clearImageViewerPreview();
-        imageViewerCurrentToken = null;
-        imageViewerRuntimeSelectionId = resolvedRuntimeId;
+        state.image.viewer.currentToken = null;
+        state.image.viewer.runtimeSelectionId = resolvedRuntimeId;
         if (source === 'library') {
           updateImageViewerContext(getActiveImageViewerContextKey(), ctx => ({
             images: ctx.images,
@@ -2765,10 +2682,10 @@ export async function initializeEditor() {
         }
         const value = imageViewerNotes.value;
         const fallbackId = imageViewerNotes.dataset.fallbackId || '';
-        if (imageViewerNotesSaveTimer) {
-          clearTimeout(imageViewerNotesSaveTimer);
+        if (state.image.viewer.notesSaveTimer) {
+          clearTimeout(state.image.viewer.notesSaveTimer);
         }
-        imageViewerNotesSaveTimer = setTimeout(() => {
+        state.image.viewer.notesSaveTimer = setTimeout(() => {
           updateImageViewerContext(getActiveImageViewerContextKey(), ctx => {
             const nextNotes = {
               ...ctx.notesById,
@@ -2787,7 +2704,7 @@ export async function initializeEditor() {
       }
 
       function updateZoom(delta) {
-        applyZoom(currentZoom + delta);
+        applyZoom(state.image.currentZoom + delta);
       }
 
       applyDocumentShift();
@@ -2797,12 +2714,12 @@ export async function initializeEditor() {
       shiftLeftBtn?.addEventListener('click', () => adjustDocumentShift(-DOCUMENT_SHIFT_STEP));
       shiftRightBtn?.addEventListener('click', () => adjustDocumentShift(DOCUMENT_SHIFT_STEP));
 
-      imageViewerState = loadImageViewerState();
-      imageViewerContextKey = imageViewerState.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+      state.image.viewer.state = loadImageViewerState();
+      state.image.viewer.contextKey = state.image.viewer.state.activeContext || IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
       renderImageViewer();
       updateImageViewerZoomControls();
 
-      Object.entries(imageViewerState.contexts || {}).forEach(([contextKey, contextValue]) => {
+      Object.entries(state.image.viewer.state.contexts || {}).forEach(([contextKey, contextValue]) => {
         (contextValue?.images || []).forEach(image => {
           if (!image || !image.dataUrl) {
             return;
@@ -2855,7 +2772,7 @@ export async function initializeEditor() {
                   notesById: ctx.notesById
                 };
               }, { rerender: false });
-              const refreshedContext = imageViewerState.contexts?.[contextKey];
+              const refreshedContext = state.image.viewer.state.contexts?.[contextKey];
               const refreshedImage = refreshedContext?.images?.find(img => img.id === active.id);
               updateImageViewerMetaDisplay(refreshedImage ? { ...refreshedImage, width, height } : { width, height, size: 0 });
             } else {
@@ -2863,13 +2780,13 @@ export async function initializeEditor() {
               const existing = context.images?.find(img => img.id === active.id) || null;
               updateImageViewerMetaDisplay(existing);
             }
-          } else if (active.source === 'preview' && imageViewerPreviewSource) {
-            imageViewerPreviewSource = {
-              ...imageViewerPreviewSource,
-              width: Number.isFinite(width) ? width : imageViewerPreviewSource.width,
-              height: Number.isFinite(height) ? height : imageViewerPreviewSource.height
+          } else if (active.source === 'preview' && state.image.viewer.previewSource) {
+            state.image.viewer.previewSource = {
+              ...state.image.viewer.previewSource,
+              width: Number.isFinite(width) ? width : state.image.viewer.previewSource.width,
+              height: Number.isFinite(height) ? height : state.image.viewer.previewSource.height
             };
-            updateImageViewerMetaDisplay(imageViewerPreviewSource);
+            updateImageViewerMetaDisplay(state.image.viewer.previewSource);
           }
         });
       }
@@ -2950,12 +2867,12 @@ export async function initializeEditor() {
       }
 
       function clearSavedSelection() {
-        savedSelection = null;
-        pendingToolbarInsertionSnapshot = null;
+        state.editor.savedSelection = null;
+        state.editor.pendingToolbarInsertionSnapshot = null;
       }
 
       function clearToolbarInsertionSnapshot() {
-        pendingToolbarInsertionSnapshot = null;
+        state.editor.pendingToolbarInsertionSnapshot = null;
       }
 
       function captureToolbarInsertionSnapshot() {
@@ -2964,14 +2881,14 @@ export async function initializeEditor() {
 
         if (isSelectionWithinEditable(selection)) {
           snapshot = createSelectionSnapshot(selection);
-        } else if (savedSelection) {
-          snapshot = cloneSelectionSnapshot(savedSelection);
+        } else if (state.editor.savedSelection) {
+          snapshot = cloneSelectionSnapshot(state.editor.savedSelection);
         }
 
-        pendingToolbarInsertionSnapshot = snapshot ? cloneSelectionSnapshot(snapshot) : null;
+        state.editor.pendingToolbarInsertionSnapshot = snapshot ? cloneSelectionSnapshot(snapshot) : null;
 
-        if (pendingToolbarInsertionSnapshot) {
-          savedSelection = cloneSelectionSnapshot(pendingToolbarInsertionSnapshot);
+        if (state.editor.pendingToolbarInsertionSnapshot) {
+          state.editor.savedSelection = cloneSelectionSnapshot(state.editor.pendingToolbarInsertionSnapshot);
           return true;
         }
 
@@ -2979,19 +2896,19 @@ export async function initializeEditor() {
       }
 
       function primeToolbarInsertionSelection() {
-        if (pendingToolbarInsertionSnapshot) {
-          const snapshot = cloneSelectionSnapshot(pendingToolbarInsertionSnapshot);
+        if (state.editor.pendingToolbarInsertionSnapshot) {
+          const snapshot = cloneSelectionSnapshot(state.editor.pendingToolbarInsertionSnapshot);
           if (snapshot && restoreSelectionSnapshot(snapshot, { updateSnapshot: true })) {
-            savedSelection = cloneSelectionSnapshot(snapshot);
-            pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(snapshot);
+            state.editor.savedSelection = cloneSelectionSnapshot(snapshot);
+            state.editor.pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(snapshot);
             return true;
           }
-          pendingToolbarInsertionSnapshot = null;
+          state.editor.pendingToolbarInsertionSnapshot = null;
         }
 
         if (restoreSelection()) {
-          if (savedSelection) {
-            pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(savedSelection);
+          if (state.editor.savedSelection) {
+            state.editor.pendingToolbarInsertionSnapshot = cloneSelectionSnapshot(state.editor.savedSelection);
           }
           return true;
         }
@@ -3099,17 +3016,17 @@ export async function initializeEditor() {
           return false;
         }
 
-        savedSelection = snapshot;
+        state.editor.savedSelection = snapshot;
         return true;
       }
 
       function restoreSelection() {
-        if (!savedSelection) {
+        if (!state.editor.savedSelection) {
           clearSavedSelection();
           return false;
         }
 
-        if (!restoreSelectionSnapshot(savedSelection, { updateSnapshot: true })) {
+        if (!restoreSelectionSnapshot(state.editor.savedSelection, { updateSnapshot: true })) {
           clearSavedSelection();
           return false;
         }
@@ -3120,14 +3037,14 @@ export async function initializeEditor() {
       function captureIconPickerSelectionSnapshot() {
         let selection = window.getSelection();
 
-        if ((!selection || selection.rangeCount === 0) && savedSelection && savedSelection.range) {
-          restoreSelectionSnapshot(savedSelection, { updateSnapshot: false });
+        if ((!selection || selection.rangeCount === 0) && state.editor.savedSelection && state.editor.savedSelection.range) {
+          restoreSelectionSnapshot(state.editor.savedSelection, { updateSnapshot: false });
           selection = window.getSelection();
         }
 
         let snapshot = createSelectionSnapshot(selection);
-        if (!snapshot && savedSelection) {
-          snapshot = cloneSelectionSnapshot(savedSelection);
+        if (!snapshot && state.editor.savedSelection) {
+          snapshot = cloneSelectionSnapshot(state.editor.savedSelection);
         }
 
         iconPickerSelectionSnapshot = snapshot;
@@ -3301,7 +3218,7 @@ export async function initializeEditor() {
       }
 
       document.addEventListener('selectionchange', () => {
-        if (!isEditMode) {
+        if (!state.editor.isEditMode) {
           return;
         }
         const selection = window.getSelection();
@@ -3672,8 +3589,8 @@ export async function initializeEditor() {
       }
 
       function insertNoteSpacer(position) {
-        if (!selectedTemplateBlock) return;
-        const block = selectedTemplateBlock;
+        if (!state.editor.selectedTemplateBlock) return;
+        const block = state.editor.selectedTemplateBlock;
         const parent = block.parentElement;
         if (!parent) return;
         const spacer = document.createElement('p');
@@ -3780,26 +3697,26 @@ export async function initializeEditor() {
       }
 
       function applyTemplateBackground(color) {
-        if (!selectedTemplateBlock) return;
-        const target = getTemplateTarget(selectedTemplateBlock);
+        if (!state.editor.selectedTemplateBlock) return;
+        const target = getTemplateTarget(state.editor.selectedTemplateBlock);
         if (!target) return;
         if (!color || color === 'transparent') {
           target.style.backgroundColor = 'transparent';
-          delete selectedTemplateBlock.dataset.bgColor;
+          delete state.editor.selectedTemplateBlock.dataset.bgColor;
           if (templateBgColorInput) {
             templateBgColorInput.value = '#ffffff';
           }
           setPaletteActive(templateBgPalette, '');
         } else {
           target.style.backgroundColor = color;
-          selectedTemplateBlock.dataset.bgColor = color;
+          state.editor.selectedTemplateBlock.dataset.bgColor = color;
           if (templateBgColorInput) {
             templateBgColorInput.value = normalizeColorToHex(color, '#ffffff');
           }
           setPaletteActive(templateBgPalette, color);
         }
         if (target.classList.contains('box')) {
-          markNoteStyleAsCustom(selectedTemplateBlock, target);
+          markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
           if (templateNoteStyleSelect) {
             templateNoteStyleSelect.value = 'custom';
           }
@@ -3808,26 +3725,26 @@ export async function initializeEditor() {
       }
 
       function applyTemplateTextColor(color) {
-        if (!selectedTemplateBlock) return;
-        const target = getTemplateTarget(selectedTemplateBlock);
+        if (!state.editor.selectedTemplateBlock) return;
+        const target = getTemplateTarget(state.editor.selectedTemplateBlock);
         if (!target) return;
         if (!color) {
           target.style.color = '';
-          delete selectedTemplateBlock.dataset.textColor;
+          delete state.editor.selectedTemplateBlock.dataset.textColor;
           if (templateTextColorInput) {
             templateTextColorInput.value = '#212529';
           }
           setPaletteActive(templateTextPalette, '');
         } else {
           target.style.color = color;
-          selectedTemplateBlock.dataset.textColor = color;
+          state.editor.selectedTemplateBlock.dataset.textColor = color;
           if (templateTextColorInput) {
             templateTextColorInput.value = normalizeColorToHex(color, '#212529');
           }
           setPaletteActive(templateTextPalette, color);
         }
         if (target.classList.contains('box')) {
-          markNoteStyleAsCustom(selectedTemplateBlock, target);
+          markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
           if (templateNoteStyleSelect) {
             templateNoteStyleSelect.value = 'custom';
           }
@@ -3835,40 +3752,40 @@ export async function initializeEditor() {
       }
 
       function applyTemplateBorderColor(color) {
-        if (!selectedTemplateBlock) return;
-        const target = getTemplateTarget(selectedTemplateBlock);
+        if (!state.editor.selectedTemplateBlock) return;
+        const target = getTemplateTarget(state.editor.selectedTemplateBlock);
         if (!target || !target.classList.contains('box')) return;
         const normalized = color || '#ced4da';
         target.style.borderStyle = 'solid';
         target.style.borderColor = normalized;
-        selectedTemplateBlock.dataset.borderColor = normalized;
+        state.editor.selectedTemplateBlock.dataset.borderColor = normalized;
         if (templateBorderColorInput) {
           templateBorderColorInput.value = normalizeColorToHex(normalized, '#ced4da');
         }
         setPaletteActive(templateBorderPalette, normalized);
-        if (selectedTemplateBlock.dataset.accentColor) {
-          target.style.borderLeftColor = selectedTemplateBlock.dataset.accentColor;
+        if (state.editor.selectedTemplateBlock.dataset.accentColor) {
+          target.style.borderLeftColor = state.editor.selectedTemplateBlock.dataset.accentColor;
         }
-        updateTemplateToolbarState(selectedTemplateBlock);
-        markNoteStyleAsCustom(selectedTemplateBlock, target);
+        updateTemplateToolbarState(state.editor.selectedTemplateBlock);
+        markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
         if (templateNoteStyleSelect) {
           templateNoteStyleSelect.value = 'custom';
         }
       }
 
       function applyTemplateAccentColor(color) {
-        if (!selectedTemplateBlock) return;
-        const target = getTemplateTarget(selectedTemplateBlock);
+        if (!state.editor.selectedTemplateBlock) return;
+        const target = getTemplateTarget(state.editor.selectedTemplateBlock);
         if (!target || !target.classList.contains('box')) return;
-        const normalized = color || selectedTemplateBlock.dataset.borderColor || '#0d6efd';
+        const normalized = color || state.editor.selectedTemplateBlock.dataset.borderColor || '#0d6efd';
         target.style.borderLeftColor = normalized;
-        selectedTemplateBlock.dataset.accentColor = normalized;
+        state.editor.selectedTemplateBlock.dataset.accentColor = normalized;
         if (templateAccentColorInput) {
           templateAccentColorInput.value = normalizeColorToHex(normalized, '#0d6efd');
         }
         setPaletteActive(templateAccentPalette, normalized);
-        updateTemplateToolbarState(selectedTemplateBlock);
-        markNoteStyleAsCustom(selectedTemplateBlock, target);
+        updateTemplateToolbarState(state.editor.selectedTemplateBlock);
+        markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
         if (templateNoteStyleSelect) {
           templateNoteStyleSelect.value = 'custom';
         }
@@ -4016,27 +3933,27 @@ export async function initializeEditor() {
       }
 
       function repositionTemplateToolbar() {
-        if (selectedTemplateBlock) {
-          updateTemplateToolbarPosition(selectedTemplateBlock);
+        if (state.editor.selectedTemplateBlock) {
+          updateTemplateToolbarPosition(state.editor.selectedTemplateBlock);
         }
       }
 
       function showTemplateToolbar(block) {
         if (!templateToolbar || !block) return;
-        if (selectedTemplateBlock && selectedTemplateBlock !== block) {
-          selectedTemplateBlock.classList.remove('selected-template');
+        if (state.editor.selectedTemplateBlock && state.editor.selectedTemplateBlock !== block) {
+          state.editor.selectedTemplateBlock.classList.remove('selected-template');
         }
         hideImageToolbar();
-        selectedTemplateBlock = block;
+        state.editor.selectedTemplateBlock = block;
         block.classList.add('selected-template');
         updateTemplateToolbarState(block);
         updateTemplateToolbarPosition(block);
       }
 
       function hideTemplateToolbar() {
-        if (selectedTemplateBlock) {
-          selectedTemplateBlock.classList.remove('selected-template');
-          selectedTemplateBlock = null;
+        if (state.editor.selectedTemplateBlock) {
+          state.editor.selectedTemplateBlock.classList.remove('selected-template');
+          state.editor.selectedTemplateBlock = null;
         }
         if (templateToolbar) {
           templateToolbar.classList.remove('show');
@@ -4102,8 +4019,8 @@ export async function initializeEditor() {
       }
 
       function getCurrentPage() {
-        if (currentPageRef && document.body.contains(currentPageRef)) {
-          return currentPageRef;
+        if (state.panel.currentPageRef && document.body.contains(state.panel.currentPageRef)) {
+          return state.panel.currentPageRef;
         }
         const viewportCenter = window.scrollY + window.innerHeight / 2;
         return pages.find(p => {
@@ -4350,7 +4267,7 @@ export async function initializeEditor() {
         }
 
         function startResize(mode, cell, event) {
-          if (!isEditMode) return;
+          if (!state.editor.isEditMode) return;
           event.preventDefault();
 
           state.active = true;
@@ -4429,7 +4346,7 @@ export async function initializeEditor() {
         }
 
         function handleTableMouseDown(event) {
-          if (!isEditMode || event.button !== 0) return;
+          if (!state.editor.isEditMode || event.button !== 0) return;
           const cell = event.target.closest('th,td');
           if (!cell) return;
           const rect = cell.getBoundingClientRect();
@@ -4524,7 +4441,7 @@ export async function initializeEditor() {
         }
 
         function showMenu(table, cell) {
-          if (!isEditMode || !table) return;
+          if (!state.editor.isEditMode || !table) return;
           if (!table.closest('[contenteditable="true"]')) return;
           if (cell && !isCellInTopRow(cell, table)) {
             hideMenu();
@@ -5199,7 +5116,7 @@ export async function initializeEditor() {
         }
 
         document.addEventListener('click', (event) => {
-          if (!isEditMode) return;
+          if (!state.editor.isEditMode) return;
           if (tableMenu.contains(event.target)) return;
           const table = event.target.closest('table');
           if (!table) {
@@ -5217,7 +5134,7 @@ export async function initializeEditor() {
         });
 
         document.addEventListener('selectionchange', () => {
-          if (!isEditMode) return;
+          if (!state.editor.isEditMode) return;
           const selection = window.getSelection();
           if (!selection || !selection.rangeCount) return;
           const node = selection.anchorNode;
@@ -5247,7 +5164,7 @@ export async function initializeEditor() {
         };
       }
 
-      tableMenuAPI = initializeTableMenu();
+      state.editor.tableMenuAPI = initializeTableMenu();
 
       /* === MODAL === */
       function showModal(content) {
@@ -5269,7 +5186,7 @@ export async function initializeEditor() {
       /* === INICIALIZACIÓN === */
       function initializeSections() {
         const sectionMap = new Map();
-        const newThemeMap = new Map(sectionThemes);
+        const newThemeMap = new Map(state.panel.sectionThemes);
 
         pages.forEach(page => {
           const sectionId = page.dataset.sectionId || 'seccion-default';
@@ -5304,8 +5221,8 @@ export async function initializeEditor() {
           });
         });
 
-        sectionThemes = newThemeMap;
-        sections = Array.from(sectionMap.values());
+        state.panel.sectionThemes = newThemeMap;
+        state.panel.sections = Array.from(sectionMap.values());
         ensureVisibleSection({ force: true });
       }
 
@@ -5436,14 +5353,14 @@ export async function initializeEditor() {
 
       /* === MODO LECTURA === */
       function toggleReadingMode() {
-        isReadingMode = !isReadingMode;
+        state.editor.isReadingMode = !state.editor.isReadingMode;
         closeTopicNotesPopover();
-        document.body.classList.toggle('reading-mode', isReadingMode);
-        readingModeBtn.classList.toggle('active', isReadingMode);
+        document.body.classList.toggle('reading-mode', state.editor.isReadingMode);
+        readingModeBtn.classList.toggle('active', state.editor.isReadingMode);
         
-        if (isReadingMode) {
+        if (state.editor.isReadingMode) {
           closePanel();
-          if (isEditMode) {
+          if (state.editor.isEditMode) {
             toggleEditMode();
           }
         }
@@ -5741,10 +5658,10 @@ export async function initializeEditor() {
       }
 
       function changeSelectedImageWidth(multiplier) {
-        if (!selectedImage) return;
-        const current = getImageWidthPx(selectedImage) || getImageNaturalWidth(selectedImage) || 200;
-        setImageWidthPx(selectedImage, current * multiplier);
-        updateWidthDisplayForImage(selectedImage);
+        if (!state.image.selectedImage) return;
+        const current = getImageWidthPx(state.image.selectedImage) || getImageNaturalWidth(state.image.selectedImage) || 200;
+        setImageWidthPx(state.image.selectedImage, current * multiplier);
+        updateWidthDisplayForImage(state.image.selectedImage);
         repositionImageToolbar();
       }
 
@@ -5816,8 +5733,8 @@ export async function initializeEditor() {
         if (!imageCropPreview) return;
         const rect = imageCropPreview.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-          cropState.scaleX = imageCropPreview.naturalWidth / rect.width;
-          cropState.scaleY = imageCropPreview.naturalHeight / rect.height;
+          state.image.crop.scaleX = imageCropPreview.naturalWidth / rect.width;
+          state.image.crop.scaleY = imageCropPreview.naturalHeight / rect.height;
         }
       }
 
@@ -5838,7 +5755,7 @@ export async function initializeEditor() {
         const width = Math.abs(x1 - x2);
         const height = Math.abs(y1 - y2);
 
-        cropState.currentRect = { left, top, width, height };
+        state.image.crop.currentRect = { left, top, width, height };
         imageCropSelection.style.left = (left - stageRect.left) + 'px';
         imageCropSelection.style.top = (top - stageRect.top) + 'px';
         imageCropSelection.style.width = width + 'px';
@@ -5850,8 +5767,8 @@ export async function initializeEditor() {
           return;
         }
 
-        const naturalWidth = Math.round(width * cropState.scaleX);
-        const naturalHeight = Math.round(height * cropState.scaleY);
+        const naturalWidth = Math.round(width * state.image.crop.scaleX);
+        const naturalHeight = Math.round(height * state.image.crop.scaleY);
         if (imageCropSizeLabel) {
           imageCropSizeLabel.textContent = `${naturalWidth} × ${naturalHeight} px`;
         }
@@ -5862,11 +5779,11 @@ export async function initializeEditor() {
 
       function openImageCropModal(img) {
         if (!imageCropModal || !imageCropPreview) return;
-        cropState.image = img;
-        cropState.isSelecting = false;
-        cropState.currentRect = null;
-        cropState.scaleX = 1;
-        cropState.scaleY = 1;
+        state.image.crop.image = img;
+        state.image.crop.isSelecting = false;
+        state.image.crop.currentRect = null;
+        state.image.crop.scaleX = 1;
+        state.image.crop.scaleY = 1;
         if (imageCropSelection) {
           imageCropSelection.classList.remove('show');
         }
@@ -5886,9 +5803,9 @@ export async function initializeEditor() {
         if (!imageCropModal) return;
         imageCropModal.classList.remove('show');
         imageCropModal.setAttribute('aria-hidden', 'true');
-        cropState.image = null;
-        cropState.isSelecting = false;
-        cropState.currentRect = null;
+        state.image.crop.image = null;
+        state.image.crop.isSelecting = false;
+        state.image.crop.currentRect = null;
         if (imageCropSelection) {
           imageCropSelection.classList.remove('show');
         }
@@ -5901,8 +5818,8 @@ export async function initializeEditor() {
       }
 
       function repositionImageToolbar() {
-        if (selectedImage) {
-          updateToolbarPosition(selectedImage);
+        if (state.image.selectedImage) {
+          updateToolbarPosition(state.image.selectedImage);
         }
       }
 
@@ -5932,23 +5849,23 @@ export async function initializeEditor() {
       });
 
       cropImageBtn?.addEventListener('click', () => {
-        if (!selectedImage) {
+        if (!state.image.selectedImage) {
           alert('Selecciona una imagen para recortar.');
           return;
         }
-        openImageCropModal(selectedImage);
+        openImageCropModal(state.image.selectedImage);
       });
 
       const finishCropSelection = (event) => {
-        if (!cropState.isSelecting) return;
-        cropState.isSelecting = false;
+        if (!state.image.crop.isSelecting) return;
+        state.image.crop.isSelecting = false;
         try {
           imageCropStage?.releasePointerCapture(event.pointerId);
         } catch (err) {
           /* ignore */
         }
-        if (!cropState.currentRect || cropState.currentRect.width < 3 || cropState.currentRect.height < 3) {
-          cropState.currentRect = null;
+        if (!state.image.crop.currentRect || state.image.crop.currentRect.width < 3 || state.image.crop.currentRect.height < 3) {
+          state.image.crop.currentRect = null;
           imageCropSelection?.classList.remove('show');
           if (imageCropSizeLabel) imageCropSizeLabel.textContent = '0 × 0 px';
           if (imageCropApplyBtn) imageCropApplyBtn.disabled = true;
@@ -5956,16 +5873,16 @@ export async function initializeEditor() {
       };
 
       imageCropStage?.addEventListener('pointerdown', (event) => {
-        if (!imageCropModal?.classList.contains('show') || !cropState.image || !imageCropPreview?.complete) return;
+        if (!imageCropModal?.classList.contains('show') || !state.image.crop.image || !imageCropPreview?.complete) return;
         const imageRect = imageCropPreview.getBoundingClientRect();
         if (imageRect.width === 0 || imageRect.height === 0) return;
         const withinImage = event.clientX >= imageRect.left && event.clientX <= imageRect.right
           && event.clientY >= imageRect.top && event.clientY <= imageRect.bottom;
         if (!withinImage) return;
-        cropState.isSelecting = true;
-        cropState.startX = event.clientX;
-        cropState.startY = event.clientY;
-        setCropSelection(cropState.startX, cropState.startY, cropState.startX, cropState.startY);
+        state.image.crop.isSelecting = true;
+        state.image.crop.startX = event.clientX;
+        state.image.crop.startY = event.clientY;
+        setCropSelection(state.image.crop.startX, state.image.crop.startY, state.image.crop.startX, state.image.crop.startY);
         imageCropSelection?.classList.add('show');
         if (imageCropApplyBtn) imageCropApplyBtn.disabled = true;
         if (imageCropSizeLabel) imageCropSizeLabel.textContent = '0 × 0 px';
@@ -5978,8 +5895,8 @@ export async function initializeEditor() {
       });
 
       imageCropStage?.addEventListener('pointermove', (event) => {
-        if (!cropState.isSelecting) return;
-        setCropSelection(cropState.startX, cropState.startY, event.clientX, event.clientY);
+        if (!state.image.crop.isSelecting) return;
+        setCropSelection(state.image.crop.startX, state.image.crop.startY, event.clientX, event.clientY);
         event.preventDefault();
       });
 
@@ -5988,17 +5905,17 @@ export async function initializeEditor() {
       imageCropStage?.addEventListener('pointercancel', finishCropSelection);
 
       imageCropApplyBtn?.addEventListener('click', () => {
-        if (!cropState.image || !cropState.currentRect || !imageCropPreview) return;
-        const { left, top, width, height } = cropState.currentRect;
+        if (!state.image.crop.image || !state.image.crop.currentRect || !imageCropPreview) return;
+        const { left, top, width, height } = state.image.crop.currentRect;
         if (width < 3 || height < 3) {
           alert('Selecciona un área mayor para recortar.');
           return;
         }
         const imageRect = imageCropPreview.getBoundingClientRect();
-        const sx = Math.round((left - imageRect.left) * cropState.scaleX);
-        const sy = Math.round((top - imageRect.top) * cropState.scaleY);
-        const sw = Math.round(width * cropState.scaleX);
-        const sh = Math.round(height * cropState.scaleY);
+        const sx = Math.round((left - imageRect.left) * state.image.crop.scaleX);
+        const sy = Math.round((top - imageRect.top) * state.image.crop.scaleY);
+        const sw = Math.round(width * state.image.crop.scaleX);
+        const sh = Math.round(height * state.image.crop.scaleY);
         if (sw <= 1 || sh <= 1) {
           alert('El recorte seleccionado es demasiado pequeño.');
           return;
@@ -6019,10 +5936,10 @@ export async function initializeEditor() {
           try {
             ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
             const dataUrl = canvas.toDataURL('image/png');
-            cropState.image.src = dataUrl;
-            cropState.image.removeAttribute('height');
-            cropState.image.style.height = 'auto';
-            updateToolbarState(cropState.image);
+            state.image.crop.image.src = dataUrl;
+            state.image.crop.image.removeAttribute('height');
+            state.image.crop.image.style.height = 'auto';
+            updateToolbarState(state.image.crop.image);
             repositionImageToolbar();
             closeImageCropModal();
           } catch (error) {
@@ -6033,7 +5950,7 @@ export async function initializeEditor() {
         source.onerror = () => {
           alert('No se pudo cargar la imagen para recortar.');
         };
-        source.src = cropState.image.src;
+        source.src = state.image.crop.image.src;
       });
 
       imageCropCancelBtn?.addEventListener('click', closeImageCropModal);
@@ -6047,10 +5964,10 @@ export async function initializeEditor() {
 
       function showImageToolbar(img) {
         hideTemplateToolbar();
-        if (selectedImage && selectedImage !== img) {
-          selectedImage.classList.remove('selected-image');
+        if (state.image.selectedImage && state.image.selectedImage !== img) {
+          state.image.selectedImage.classList.remove('selected-image');
         }
-        selectedImage = img;
+        state.image.selectedImage = img;
         img.classList.add('selected-image');
 
         updateToolbarState(img);
@@ -6058,9 +5975,9 @@ export async function initializeEditor() {
       }
 
       function hideImageToolbar() {
-        if (selectedImage) {
-          selectedImage.classList.remove('selected-image');
-          selectedImage = null;
+        if (state.image.selectedImage) {
+          state.image.selectedImage.classList.remove('selected-image');
+          state.image.selectedImage = null;
         }
         imageToolbar.classList.remove('show');
         if (cropImageBtn) {
@@ -6069,7 +5986,7 @@ export async function initializeEditor() {
       }
 
       document.addEventListener('click', (e) => {
-        if (isEditMode && e.target.tagName === 'IMG') {
+        if (state.editor.isEditMode && e.target.tagName === 'IMG') {
           if (document.body.classList.contains('image-viewer-open')) {
             hideImageToolbar();
           } else {
@@ -6080,7 +5997,7 @@ export async function initializeEditor() {
           hideImageToolbar();
         }
 
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           const templateBlock = e.target.closest('.template-block');
           if (templateBlock) {
             showTemplateToolbar(templateBlock);
@@ -6102,7 +6019,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('click', (event) => {
-        if (!activeFloatingNoteStyleMenu) return;
+        if (!state.floatingNotes.activeStyleMenu) return;
         if (event.target.closest('.floating-note-style-menu')) return;
         if (event.target.closest('.floating-note-header')) return;
         closeFloatingNoteStyleMenu();
@@ -6115,7 +6032,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('keydown', (event) => {
-        if (!isEditMode || !selectedImage) return;
+        if (!state.editor.isEditMode || !state.image.selectedImage) return;
         if (event.defaultPrevented) return;
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         const activeElement = document.activeElement;
@@ -6820,7 +6737,7 @@ export async function initializeEditor() {
         });
         updateSuperNoteBody(note, updated);
         syncNoteElementMeta(note, updated);
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           setTimeout(() => {
             const body = note.querySelector('.floating-note-body');
             body?.focus();
@@ -6968,7 +6885,7 @@ export async function initializeEditor() {
         });
         updateSuperNoteBody(note, updated);
         syncNoteElementMeta(note, updated);
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           setTimeout(() => {
             const body = note.querySelector('.floating-note-body');
             body?.focus();
@@ -7169,14 +7086,14 @@ export async function initializeEditor() {
       }
 
       function invalidateActiveTopicViewportState() {
-        cachedActiveTopicViewportState = null;
+        state.floatingNotes.cachedActiveTopicViewportState = null;
       }
 
       function getActiveTopicViewportState() {
-        if (cachedActiveTopicViewportState) {
-          return cachedActiveTopicViewportState;
+        if (state.floatingNotes.cachedActiveTopicViewportState) {
+          return state.floatingNotes.cachedActiveTopicViewportState;
         }
-        if (!currentPageRef) {
+        if (!state.panel.currentPageRef) {
           return null;
         }
         const scrollY = window.scrollY
@@ -7184,23 +7101,23 @@ export async function initializeEditor() {
           || document.documentElement.scrollTop
           || document.body.scrollTop
           || 0;
-        const rect = currentPageRef.getBoundingClientRect();
+        const rect = state.panel.currentPageRef.getBoundingClientRect();
         const pageTop = scrollY + rect.top;
-        const pageHeight = Math.max(currentPageRef.scrollHeight || rect.height || 0, 1);
+        const pageHeight = Math.max(state.panel.currentPageRef.scrollHeight || rect.height || 0, 1);
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
         const rawOffset = scrollY - pageTop;
         const maxOffset = Math.max(pageHeight - viewportHeight, 0);
         const viewportTopOffset = Math.min(Math.max(rawOffset, 0), maxOffset);
         const viewportCenterOffset = viewportTopOffset + viewportHeight * 0.5;
         const relativeCenter = Math.min(Math.max(viewportCenterOffset / pageHeight, 0), 1);
-        cachedActiveTopicViewportState = {
-          topicId: currentPageRef.dataset.topicId || '',
+        state.floatingNotes.cachedActiveTopicViewportState = {
+          topicId: state.panel.currentPageRef.dataset.topicId || '',
           pageHeight,
           viewportHeight,
           viewportTopOffset,
           relativeCenter
         };
-        return cachedActiveTopicViewportState;
+        return state.floatingNotes.cachedActiveTopicViewportState;
       }
 
       function captureActiveTopicViewportContext() {
@@ -7220,8 +7137,8 @@ export async function initializeEditor() {
       const FLOATING_NOTE_VIEWPORT_REANCHOR_RATIO_EPSILON = 0.002;
 
       function consumeFloatingNotesRelaxedMatching() {
-        const shouldRelax = floatingNotesViewportRelaxedMatching;
-        floatingNotesViewportRelaxedMatching = false;
+        const shouldRelax = state.floatingNotes.viewportRelaxedMatching;
+        state.floatingNotes.viewportRelaxedMatching = false;
         return shouldRelax;
       }
 
@@ -7311,10 +7228,10 @@ export async function initializeEditor() {
           }
         }
 
-        if (!shouldShow && floatingNoteDragState.note === note) {
+        if (!shouldShow && state.floatingNotes.dragState.note === note) {
           endFloatingNoteDrag();
         }
-        const activeMenuNoteId = activeFloatingNoteStyleMenu?.dataset?.noteId;
+        const activeMenuNoteId = state.floatingNotes.activeStyleMenu?.dataset?.noteId;
         if (!shouldShow && activeMenuNoteId && activeMenuNoteId === note.dataset.noteId) {
           closeFloatingNoteStyleMenu();
         }
@@ -7336,10 +7253,10 @@ export async function initializeEditor() {
       }
 
       function scheduleFloatingNotesViewportRefresh(options = {}) {
-        if (pendingFloatingNoteViewportRefresh) return;
-        pendingFloatingNoteViewportRefresh = true;
+        if (state.floatingNotes.pendingViewportRefresh) return;
+        state.floatingNotes.pendingViewportRefresh = true;
         requestAnimationFrame(() => {
-          pendingFloatingNoteViewportRefresh = false;
+          state.floatingNotes.pendingViewportRefresh = false;
           invalidateActiveTopicViewportState();
           refreshFloatingNotesTopicVisibility(options);
         });
@@ -7441,9 +7358,9 @@ export async function initializeEditor() {
 
       function openFloatingNoteStyleMenu(menu, anchorElement = null) {
         if (!menu) return;
-        if (activeFloatingNoteStyleMenu && activeFloatingNoteStyleMenu !== menu) {
-          activeFloatingNoteStyleMenu.classList.remove('show');
-          activeFloatingNoteStyleMenu.setAttribute('aria-hidden', 'true');
+        if (state.floatingNotes.activeStyleMenu && state.floatingNotes.activeStyleMenu !== menu) {
+          state.floatingNotes.activeStyleMenu.classList.remove('show');
+          state.floatingNotes.activeStyleMenu.setAttribute('aria-hidden', 'true');
         }
         menu.classList.add('show');
         menu.setAttribute('aria-hidden', 'false');
@@ -7453,26 +7370,26 @@ export async function initializeEditor() {
           menu.style.left = '';
           menu.style.top = '';
         }
-        activeFloatingNoteStyleMenu = menu;
+        state.floatingNotes.activeStyleMenu = menu;
       }
 
       function closeFloatingNoteStyleMenu(menu = null) {
-        const targetMenu = menu || activeFloatingNoteStyleMenu;
+        const targetMenu = menu || state.floatingNotes.activeStyleMenu;
         if (!targetMenu) return;
         targetMenu.classList.remove('show');
         targetMenu.setAttribute('aria-hidden', 'true');
         targetMenu.style.left = '';
         targetMenu.style.top = '';
         targetMenu.style.visibility = '';
-        if (activeFloatingNoteStyleMenu === targetMenu) {
-          activeFloatingNoteStyleMenu = null;
+        if (state.floatingNotes.activeStyleMenu === targetMenu) {
+          state.floatingNotes.activeStyleMenu = null;
         }
       }
 
       function bringNoteToFront(note) {
         if (!note) return;
-        floatingNoteZIndex += 1;
-        note.style.zIndex = String(floatingNoteZIndex);
+        state.floatingNotes.zIndex += 1;
+        note.style.zIndex = String(state.floatingNotes.zIndex);
       }
 
       function clampNotePosition(note, left, top) {
@@ -7524,17 +7441,17 @@ export async function initializeEditor() {
 
       function refreshToggleNotesButton() {
         if (!toggleNotesBtn) return;
-        toggleNotesBtn.classList.toggle('active', !floatingNotesHidden);
-        toggleNotesBtn.setAttribute('aria-pressed', floatingNotesHidden ? 'false' : 'true');
-        toggleNotesBtn.title = floatingNotesHidden ? 'Mostrar notas flotantes' : 'Ocultar notas flotantes';
-        toggleNotesBtn.textContent = floatingNotesHidden ? '🙈' : '👁️';
+        toggleNotesBtn.classList.toggle('active', !state.floatingNotes.hidden);
+        toggleNotesBtn.setAttribute('aria-pressed', state.floatingNotes.hidden ? 'false' : 'true');
+        toggleNotesBtn.title = state.floatingNotes.hidden ? 'Mostrar notas flotantes' : 'Ocultar notas flotantes';
+        toggleNotesBtn.textContent = state.floatingNotes.hidden ? '🙈' : '👁️';
       }
 
       function setFloatingNotesVisibility(hidden) {
-        floatingNotesHidden = !!hidden;
-        document.body.classList.toggle('notes-hidden', floatingNotesHidden);
+        state.floatingNotes.hidden = !!hidden;
+        document.body.classList.toggle('notes-hidden', state.floatingNotes.hidden);
         refreshToggleNotesButton();
-        if (floatingNotesHidden) {
+        if (state.floatingNotes.hidden) {
           closeFloatingNoteStyleMenu();
         } else {
           clampAllFloatingNotes();
@@ -7570,7 +7487,7 @@ export async function initializeEditor() {
 
       function updateFloatingNotesPrintControl() {
         if (!printFloatingNotesViewBtn) return;
-        const shouldShow = mainContentHidden === true;
+        const shouldShow = state.floatingNotes.mainContentHidden === true;
         printFloatingNotesViewBtn.hidden = !shouldShow;
         printFloatingNotesViewBtn.disabled = !shouldShow;
         printFloatingNotesViewBtn.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
@@ -7710,11 +7627,11 @@ export async function initializeEditor() {
 
       function startFloatingNoteDrag(note, event) {
         if (!note || !floatingNotesLayer) return;
-        floatingNoteDragState.note = note;
-        floatingNoteDragState.pointerId = event.pointerId;
+        state.floatingNotes.dragState.note = note;
+        state.floatingNotes.dragState.pointerId = event.pointerId;
         const rect = note.getBoundingClientRect();
-        floatingNoteDragState.offsetX = event.clientX - rect.left;
-        floatingNoteDragState.offsetY = event.clientY - rect.top;
+        state.floatingNotes.dragState.offsetX = event.clientX - rect.left;
+        state.floatingNotes.dragState.offsetY = event.clientY - rect.top;
         note.classList.add('dragging');
         bringNoteToFront(note);
         try {
@@ -7727,19 +7644,19 @@ export async function initializeEditor() {
 
       function startFloatingNoteHorizontalResize(note, edge, event) {
         if (!note || !floatingNotesLayer) return;
-        floatingNoteResizeState.note = note;
-        floatingNoteResizeState.pointerId = event.pointerId;
-        floatingNoteResizeState.orientation = 'horizontal';
-        floatingNoteResizeState.edge = edge === 'left' ? 'left' : 'right';
-        floatingNoteResizeState.corner = null;
-        floatingNoteResizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
-        floatingNoteResizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
-        floatingNoteResizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
-        floatingNoteResizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
-        floatingNoteResizeState.startRight = floatingNoteResizeState.startLeft + floatingNoteResizeState.startWidth;
-        floatingNoteResizeState.startBottom = floatingNoteResizeState.startTop + floatingNoteResizeState.startHeight;
-        floatingNoteResizeState.startX = event.clientX;
-        floatingNoteResizeState.startY = event.clientY;
+        state.floatingNotes.resizeState.note = note;
+        state.floatingNotes.resizeState.pointerId = event.pointerId;
+        state.floatingNotes.resizeState.orientation = 'horizontal';
+        state.floatingNotes.resizeState.edge = edge === 'left' ? 'left' : 'right';
+        state.floatingNotes.resizeState.corner = null;
+        state.floatingNotes.resizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
+        state.floatingNotes.resizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
+        state.floatingNotes.resizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+        state.floatingNotes.resizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+        state.floatingNotes.resizeState.startRight = state.floatingNotes.resizeState.startLeft + state.floatingNotes.resizeState.startWidth;
+        state.floatingNotes.resizeState.startBottom = state.floatingNotes.resizeState.startTop + state.floatingNotes.resizeState.startHeight;
+        state.floatingNotes.resizeState.startX = event.clientX;
+        state.floatingNotes.resizeState.startY = event.clientY;
         note.classList.add('resizing');
         note.classList.add('resizing-horizontal');
         note.classList.remove('resizing-vertical');
@@ -7755,19 +7672,19 @@ export async function initializeEditor() {
 
       function startFloatingNoteCornerResize(note, corner, event) {
         if (!note || !floatingNotesLayer) return;
-        floatingNoteResizeState.note = note;
-        floatingNoteResizeState.pointerId = event.pointerId;
-        floatingNoteResizeState.orientation = 'corner';
-        floatingNoteResizeState.corner = corner;
-        floatingNoteResizeState.edge = null;
-        floatingNoteResizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
-        floatingNoteResizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
-        floatingNoteResizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
-        floatingNoteResizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
-        floatingNoteResizeState.startRight = floatingNoteResizeState.startLeft + floatingNoteResizeState.startWidth;
-        floatingNoteResizeState.startBottom = floatingNoteResizeState.startTop + floatingNoteResizeState.startHeight;
-        floatingNoteResizeState.startX = event.clientX;
-        floatingNoteResizeState.startY = event.clientY;
+        state.floatingNotes.resizeState.note = note;
+        state.floatingNotes.resizeState.pointerId = event.pointerId;
+        state.floatingNotes.resizeState.orientation = 'corner';
+        state.floatingNotes.resizeState.corner = corner;
+        state.floatingNotes.resizeState.edge = null;
+        state.floatingNotes.resizeState.startWidth = note.getBoundingClientRect().width || note.offsetWidth || FLOATING_NOTE_DEFAULT_WIDTH;
+        state.floatingNotes.resizeState.startHeight = note.getBoundingClientRect().height || note.offsetHeight || FLOATING_NOTE_MIN_HEIGHT;
+        state.floatingNotes.resizeState.startLeft = Number.parseFloat(note.dataset.left || note.style.left || '0');
+        state.floatingNotes.resizeState.startTop = Number.parseFloat(note.dataset.top || note.style.top || '0');
+        state.floatingNotes.resizeState.startRight = state.floatingNotes.resizeState.startLeft + state.floatingNotes.resizeState.startWidth;
+        state.floatingNotes.resizeState.startBottom = state.floatingNotes.resizeState.startTop + state.floatingNotes.resizeState.startHeight;
+        state.floatingNotes.resizeState.startX = event.clientX;
+        state.floatingNotes.resizeState.startY = event.clientY;
         note.classList.add('resizing');
         note.classList.add('resizing-corner');
         note.classList.remove('resizing-horizontal');
@@ -7782,8 +7699,8 @@ export async function initializeEditor() {
       }
 
       function handleFloatingNotePointerMove(event) {
-        if (floatingNoteResizeState.note && floatingNoteResizeState.pointerId === event.pointerId) {
-          const state = floatingNoteResizeState;
+        if (state.floatingNotes.resizeState.note && state.floatingNotes.resizeState.pointerId === event.pointerId) {
+          const state = state.floatingNotes.resizeState;
           const note = state.note;
           if (state.orientation === 'horizontal') {
             const rawDelta = event.clientX - state.startX;
@@ -7840,7 +7757,7 @@ export async function initializeEditor() {
           return;
         }
 
-        const state = floatingNoteDragState;
+        const state = state.floatingNotes.dragState;
         if (!state.note || state.pointerId !== event.pointerId || !floatingNotesLayer) {
           return;
         }
@@ -7852,7 +7769,7 @@ export async function initializeEditor() {
       }
 
       function endFloatingNoteDrag(event) {
-        const resizeState = floatingNoteResizeState;
+        const resizeState = state.floatingNotes.resizeState;
         if (resizeState.note && (event === undefined || resizeState.pointerId === (event?.pointerId))) {
           try {
             resizeState.note.releasePointerCapture(resizeState.pointerId);
@@ -7861,22 +7778,22 @@ export async function initializeEditor() {
           }
           resizeState.note.classList.remove('resizing', 'resizing-horizontal', 'resizing-vertical', 'resizing-corner');
           updateFloatingNoteSizeDataset(resizeState.note);
-          floatingNoteResizeState.note = null;
-          floatingNoteResizeState.pointerId = null;
-          floatingNoteResizeState.orientation = null;
-          floatingNoteResizeState.edge = null;
-          floatingNoteResizeState.corner = null;
-          floatingNoteResizeState.startWidth = 0;
-          floatingNoteResizeState.startHeight = 0;
-          floatingNoteResizeState.startLeft = 0;
-          floatingNoteResizeState.startTop = 0;
-          floatingNoteResizeState.startRight = 0;
-          floatingNoteResizeState.startBottom = 0;
-          floatingNoteResizeState.startX = 0;
-          floatingNoteResizeState.startY = 0;
+          state.floatingNotes.resizeState.note = null;
+          state.floatingNotes.resizeState.pointerId = null;
+          state.floatingNotes.resizeState.orientation = null;
+          state.floatingNotes.resizeState.edge = null;
+          state.floatingNotes.resizeState.corner = null;
+          state.floatingNotes.resizeState.startWidth = 0;
+          state.floatingNotes.resizeState.startHeight = 0;
+          state.floatingNotes.resizeState.startLeft = 0;
+          state.floatingNotes.resizeState.startTop = 0;
+          state.floatingNotes.resizeState.startRight = 0;
+          state.floatingNotes.resizeState.startBottom = 0;
+          state.floatingNotes.resizeState.startX = 0;
+          state.floatingNotes.resizeState.startY = 0;
         }
 
-        const state = floatingNoteDragState;
+        const state = state.floatingNotes.dragState;
         if (!state.note) return;
         if (event && state.pointerId !== undefined && event.pointerId !== state.pointerId) {
           return;
@@ -7887,8 +7804,8 @@ export async function initializeEditor() {
           // Ignore errors when releasing pointer capture
         }
         state.note.classList.remove('dragging');
-        floatingNoteDragState.note = null;
-        floatingNoteDragState.pointerId = null;
+        state.floatingNotes.dragState.note = null;
+        state.floatingNotes.dragState.pointerId = null;
       }
 
       function clearFloatingNotes() {
@@ -7897,10 +7814,10 @@ export async function initializeEditor() {
         closeFloatingNoteStyleMenu();
         floatingNotesLayer.innerHTML = '';
         document.querySelectorAll('.note-options-menu').forEach(menu => menu.remove());
-        floatingNoteCreationOffset = 0;
-        floatingNoteZIndex = 10;
-        if (floatingNoteResizeObserver) {
-          floatingNoteResizeObserver.disconnect();
+        state.floatingNotes.creationOffset = 0;
+        state.floatingNotes.zIndex = 10;
+        if (state.floatingNotes.resizeObserver) {
+          state.floatingNotes.resizeObserver.disconnect();
         }
         document.querySelectorAll('.note-anchor').forEach(anchor => anchor.remove());
         notesRegistry.clear({ silent: true });
@@ -8070,8 +7987,8 @@ export async function initializeEditor() {
           return '';
         })();
 
-        const topicId = data.topicId || metaSource.topicId || currentPageRef?.dataset.topicId || null;
-        const sectionId = data.sectionId || metaSource.sectionId || currentSectionId || currentPageRef?.dataset.sectionId || null;
+        const topicId = data.topicId || metaSource.topicId || state.panel.currentPageRef?.dataset.topicId || null;
+        const sectionId = data.sectionId || metaSource.sectionId || state.panel.currentSectionId || state.panel.currentPageRef?.dataset.sectionId || null;
         const noteType = data.type || metaSource.type || DEFAULT_NOTE_TYPE;
         const category = (data.category || metaSource.category || DEFAULT_NOTE_CATEGORY);
         const priority = data.priority || metaSource.priority || DEFAULT_NOTE_PRIORITY;
@@ -8185,13 +8102,13 @@ export async function initializeEditor() {
         categoryIcon.className = 'note-icon';
         const categoryLabel = document.createElement('span');
         categoryLabel.className = 'note-label';
-        categoryLabel.contentEditable = isEditMode ? 'true' : 'false';
+        categoryLabel.contentEditable = state.editor.isEditMode ? 'true' : 'false';
         categoryLabel.setAttribute('role', 'textbox');
         categoryLabel.setAttribute('aria-label', 'Título de la nota');
         categoryLabel.spellcheck = false;
         categoryLabel.dataset.editing = 'false';
         categoryWrap.append(categoryIcon, categoryLabel);
-        categoryWrap.dataset.editableTitle = isEditMode ? 'true' : 'false';
+        categoryWrap.dataset.editableTitle = state.editor.isEditMode ? 'true' : 'false';
 
         const navigation = document.createElement('div');
         navigation.className = 'note-navigation';
@@ -8248,7 +8165,7 @@ export async function initializeEditor() {
         const body = document.createElement('div');
         body.className = 'floating-note-body note-body';
         body.spellcheck = true;
-        body.contentEditable = isEditMode ? 'true' : 'false';
+        body.contentEditable = state.editor.isEditMode ? 'true' : 'false';
         body.innerHTML = noteData.html || '';
         markFloatingNoteImagesInitialized(body);
 
@@ -8517,9 +8434,9 @@ export async function initializeEditor() {
           closeFloatingNoteStyleMenu();
         });
 
-        if (floatingNoteResizeObserver) {
+        if (state.floatingNotes.resizeObserver) {
           try {
-            floatingNoteResizeObserver.observe(note);
+            state.floatingNotes.resizeObserver.observe(note);
           } catch (err) {
             // ignore observer errors
           }
@@ -8532,7 +8449,7 @@ export async function initializeEditor() {
         }
 
         // ✅ CORRECCIÓN APLICADA AQUÍ
-        const defaultOffset = (floatingNoteCreationOffset += 40);
+        const defaultOffset = (state.floatingNotes.creationOffset += 40);
         const layerRect = floatingNotesLayer.getBoundingClientRect();
 
         // ✓ Sin sumar scrollX/scrollY porque la capa es position:fixed
@@ -8550,7 +8467,7 @@ export async function initializeEditor() {
         syncNoteElementMeta(note, noteData);
         attachExistingAnchor(note, noteData.anchorId);
 
-        if (data.focus !== false && isEditMode) {
+        if (data.focus !== false && state.editor.isEditMode) {
           setTimeout(() => body.focus(), 0);
         }
 
@@ -9115,9 +9032,9 @@ export async function initializeEditor() {
       function deleteFloatingNote(note) {
         if (!note) return;
         const noteId = note.dataset.noteId;
-        if (floatingNoteResizeObserver) {
+        if (state.floatingNotes.resizeObserver) {
           try {
-            floatingNoteResizeObserver.unobserve(note);
+            state.floatingNotes.resizeObserver.unobserve(note);
           } catch (err) {
             // ignore observer errors
           }
@@ -9370,7 +9287,7 @@ export async function initializeEditor() {
         if (body) {
           body.innerHTML = targetPage.html || '';
           markFloatingNoteImagesInitialized(body);
-          if (isEditMode) {
+          if (state.editor.isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
         }
@@ -9406,7 +9323,7 @@ export async function initializeEditor() {
         if (body) {
           body.innerHTML = '';
           markFloatingNoteImagesInitialized(body);
-          if (isEditMode) {
+          if (state.editor.isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
         }
@@ -9446,7 +9363,7 @@ export async function initializeEditor() {
         if (body) {
           body.innerHTML = activePage.html || '';
           markFloatingNoteImagesInitialized(body);
-          if (isEditMode) {
+          if (state.editor.isEditMode) {
             setTimeout(() => body.focus(), 0);
           }
         }
@@ -9547,11 +9464,11 @@ export async function initializeEditor() {
       }
 
       function getCurrentTopicId() {
-        return currentPageRef?.dataset.topicId || '';
+        return state.panel.currentPageRef?.dataset.topicId || '';
       }
 
       function getCurrentSectionId() {
-        return currentSectionId || '';
+        return state.panel.currentSectionId || '';
       }
 
       function findPageByTopicId(topicId) {
@@ -10133,7 +10050,7 @@ export async function initializeEditor() {
 
         getSectionTitle(sectionId) {
           if (!sectionId) return 'Sin sección';
-          const section = sections.find(sec => sec.id === sectionId);
+          const section = state.panel.sections.find(sec => sec.id === sectionId);
           return section?.nombre || 'Sin sección';
         }
       }
@@ -10141,13 +10058,13 @@ export async function initializeEditor() {
       notesViewController = new NotesViewController();
 
       function requestFloatingNotesViewportSync() {
-        floatingNotesViewportRelaxedMatching = true;
-        if (pendingFloatingNotesViewportSync) {
+        state.floatingNotes.viewportRelaxedMatching = true;
+        if (state.floatingNotes.pendingViewportSync) {
           return;
         }
-        pendingFloatingNotesViewportSync = true;
+        state.floatingNotes.pendingViewportSync = true;
         requestAnimationFrame(() => {
-          pendingFloatingNotesViewportSync = false;
+          state.floatingNotes.pendingViewportSync = false;
           clampAllFloatingNotes();
           scheduleFloatingNotesViewportRefresh();
         });
@@ -10166,7 +10083,7 @@ export async function initializeEditor() {
       window.addEventListener('pointermove', handleFloatingNotePointerMove);
       window.addEventListener('pointerup', (event) => {
         endFloatingNoteDrag(event);
-        if (!floatingNoteResizeObserver && floatingNotesLayer) {
+        if (!state.floatingNotes.resizeObserver && floatingNotesLayer) {
           floatingNotesLayer.querySelectorAll('.floating-note').forEach(updateFloatingNoteSizeDataset);
         }
       });
@@ -10190,17 +10107,17 @@ export async function initializeEditor() {
 
       addFloatingNoteBtn?.addEventListener('click', () => {
         if (!floatingNotesLayer) return;
-        if (floatingNotesHidden) {
+        if (state.floatingNotes.hidden) {
           setFloatingNotesVisibility(false);
         }
         const note = createFloatingNote({ focus: true });
-        if (note && isEditMode) {
+        if (note && state.editor.isEditMode) {
           enableHtmlPaste();
         }
       });
 
       toggleNotesBtn?.addEventListener('click', () => {
-        setFloatingNotesVisibility(!floatingNotesHidden);
+        setFloatingNotesVisibility(!state.floatingNotes.hidden);
       });
 
       imageWidthIncreaseBtn?.addEventListener('click', () => {
@@ -10236,11 +10153,11 @@ export async function initializeEditor() {
       });
 
       templateBorderWidthSlider?.addEventListener('input', (e) => {
-        if (!selectedTemplateBlock) return;
-        const target = getTemplateTarget(selectedTemplateBlock);
+        if (!state.editor.selectedTemplateBlock) return;
+        const target = getTemplateTarget(state.editor.selectedTemplateBlock);
         if (!target || !target.classList.contains('box')) return;
         const width = parseInt(e.target.value, 10) || 0;
-        const accentExtra = parseInt(selectedTemplateBlock.dataset.borderAccentExtra || '0', 10) || 0;
+        const accentExtra = parseInt(state.editor.selectedTemplateBlock.dataset.borderAccentExtra || '0', 10) || 0;
         if (width <= 0) {
           target.style.borderWidth = '0';
           target.style.borderStyle = 'none';
@@ -10258,18 +10175,18 @@ export async function initializeEditor() {
         if (templateBorderWidthDisplay) {
           templateBorderWidthDisplay.textContent = width + 'px';
         }
-        updateBorderWidthDataset(selectedTemplateBlock, width, Math.max(0, accentExtra));
-        markNoteStyleAsCustom(selectedTemplateBlock, target);
+        updateBorderWidthDataset(state.editor.selectedTemplateBlock, width, Math.max(0, accentExtra));
+        markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
         if (templateNoteStyleSelect) {
           templateNoteStyleSelect.value = 'custom';
         }
       });
 
       templateFontSizeSlider?.addEventListener('input', (e) => {
-        if (!selectedTemplateBlock) return;
+        if (!state.editor.selectedTemplateBlock) return;
         const size = parseInt(e.target.value, 10) || 100;
-        selectedTemplateBlock.dataset.fontScale = String(size);
-        selectedTemplateBlock.style.fontSize = size === 100 ? '' : size + '%';
+        state.editor.selectedTemplateBlock.dataset.fontScale = String(size);
+        state.editor.selectedTemplateBlock.style.fontSize = size === 100 ? '' : size + '%';
         if (templateFontSizeDisplay) {
           templateFontSizeDisplay.textContent = size + '%';
         }
@@ -10277,10 +10194,10 @@ export async function initializeEditor() {
       });
 
       templateMarginTopSlider?.addEventListener('input', (e) => {
-        if (!selectedTemplateBlock) return;
+        if (!state.editor.selectedTemplateBlock) return;
         const margin = parseInt(e.target.value, 10) || 0;
-        selectedTemplateBlock.dataset.marginTop = String(margin);
-        selectedTemplateBlock.style.marginTop = margin + 'px';
+        state.editor.selectedTemplateBlock.dataset.marginTop = String(margin);
+        state.editor.selectedTemplateBlock.style.marginTop = margin + 'px';
         if (templateMarginTopDisplay) {
           templateMarginTopDisplay.textContent = margin + 'px';
         }
@@ -10288,10 +10205,10 @@ export async function initializeEditor() {
       });
 
       templateMarginBottomSlider?.addEventListener('input', (e) => {
-        if (!selectedTemplateBlock) return;
+        if (!state.editor.selectedTemplateBlock) return;
         const margin = parseInt(e.target.value, 10) || 0;
-        selectedTemplateBlock.dataset.marginBottom = String(margin);
-        selectedTemplateBlock.style.marginBottom = margin + 'px';
+        state.editor.selectedTemplateBlock.dataset.marginBottom = String(margin);
+        state.editor.selectedTemplateBlock.style.marginBottom = margin + 'px';
         if (templateMarginBottomDisplay) {
           templateMarginBottomDisplay.textContent = margin + 'px';
         }
@@ -10299,25 +10216,25 @@ export async function initializeEditor() {
       });
 
       templateNoteStyleSelect?.addEventListener('change', (event) => {
-        if (!selectedTemplateBlock) return;
+        if (!state.editor.selectedTemplateBlock) return;
         const styleId = event.target.value;
         if (styleId === 'custom') {
-          const target = getTemplateTarget(selectedTemplateBlock);
+          const target = getTemplateTarget(state.editor.selectedTemplateBlock);
           if (target && target.classList.contains('box')) {
-            markNoteStyleAsCustom(selectedTemplateBlock, target);
-            updateTemplateToolbarState(selectedTemplateBlock);
+            markNoteStyleAsCustom(state.editor.selectedTemplateBlock, target);
+            updateTemplateToolbarState(state.editor.selectedTemplateBlock);
           }
           return;
         }
-        applyNoteStyle(selectedTemplateBlock, styleId);
+        applyNoteStyle(state.editor.selectedTemplateBlock, styleId);
       });
 
       templateAddSpaceTopBtn?.addEventListener('click', () => insertNoteSpacer('before'));
       templateAddSpaceBottomBtn?.addEventListener('click', () => insertNoteSpacer('after'));
 
       templateDeleteBtn?.addEventListener('click', () => {
-        if (!selectedTemplateBlock) return;
-        const block = selectedTemplateBlock;
+        if (!state.editor.selectedTemplateBlock) return;
+        const block = state.editor.selectedTemplateBlock;
         const range = document.createRange();
         range.setStartAfter(block);
         range.collapse(true);
@@ -10325,19 +10242,19 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        savedSelection = null;
+        state.editor.savedSelection = null;
         hideTemplateToolbar();
       });
 
       function applyFloatClass(targetClass) {
-        if (!selectedImage) return;
+        if (!state.image.selectedImage) return;
 
-        const container = getImageContainer(selectedImage);
+        const container = getImageContainer(state.image.selectedImage);
 
         floatClasses.forEach(cls => {
           container.classList.remove(cls);
-          if (container !== selectedImage) {
-            selectedImage.classList.remove(cls);
+          if (container !== state.image.selectedImage) {
+            state.image.selectedImage.classList.remove(cls);
           }
         });
 
@@ -10366,9 +10283,9 @@ export async function initializeEditor() {
       });
 
       applyAltBtn?.addEventListener('click', () => {
-        if (!selectedImage || !imageAltInput) return;
-        selectedImage.alt = imageAltInput.value.trim();
-        selectedImage.setAttribute('alt', selectedImage.alt);
+        if (!state.image.selectedImage || !imageAltInput) return;
+        state.image.selectedImage.alt = imageAltInput.value.trim();
+        state.image.selectedImage.setAttribute('alt', state.image.selectedImage.alt);
         imageAltInput.blur();
       });
 
@@ -10380,19 +10297,19 @@ export async function initializeEditor() {
       });
 
       imageFrameToggle?.addEventListener('change', (e) => {
-        if (!selectedImage) return;
+        if (!state.image.selectedImage) return;
         if (e.target.checked) {
-          selectedImage.classList.add('image-frame');
+          state.image.selectedImage.classList.add('image-frame');
         } else {
-          selectedImage.classList.remove('image-frame');
+          state.image.selectedImage.classList.remove('image-frame');
         }
         repositionImageToolbar();
       });
 
       function wrapImageWithFigure() {
-        if (!selectedImage || selectedImage.parentElement?.classList.contains('image-figure')) return;
+        if (!state.image.selectedImage || state.image.selectedImage.parentElement?.classList.contains('image-figure')) return;
 
-        const container = getImageContainer(selectedImage);
+        const container = getImageContainer(state.image.selectedImage);
         const existingFloat = floatClasses.find(cls => container.classList.contains(cls));
 
         const figure = document.createElement('figure');
@@ -10408,9 +10325,9 @@ export async function initializeEditor() {
         caption.spellcheck = true;
         caption.textContent = 'Escribe una descripción';
 
-        const parent = selectedImage.parentElement;
-        parent?.insertBefore(figure, selectedImage);
-        figure.appendChild(selectedImage);
+        const parent = state.image.selectedImage.parentElement;
+        parent?.insertBefore(figure, state.image.selectedImage);
+        figure.appendChild(state.image.selectedImage);
         figure.appendChild(caption);
 
         caption.focus();
@@ -10418,39 +10335,39 @@ export async function initializeEditor() {
         if (wrapFigureBtn) wrapFigureBtn.disabled = true;
         if (unwrapFigureBtn) unwrapFigureBtn.disabled = false;
 
-        updateToolbarState(selectedImage);
-        updateToolbarPosition(selectedImage);
+        updateToolbarState(state.image.selectedImage);
+        updateToolbarPosition(state.image.selectedImage);
       }
 
       function unwrapImageFigure() {
-        if (!selectedImage) return;
-        const figure = selectedImage.parentElement;
+        if (!state.image.selectedImage) return;
+        const figure = state.image.selectedImage.parentElement;
         if (!figure || !figure.classList.contains('image-figure')) return;
 
         const existingFloat = floatClasses.find(cls => figure.classList.contains(cls));
         const parent = figure.parentElement;
         if (!parent) return;
 
-        parent.insertBefore(selectedImage, figure);
+        parent.insertBefore(state.image.selectedImage, figure);
         figure.remove();
 
         if (existingFloat) {
-          selectedImage.classList.add(existingFloat);
+          state.image.selectedImage.classList.add(existingFloat);
         }
 
         if (wrapFigureBtn) wrapFigureBtn.disabled = false;
         if (unwrapFigureBtn) unwrapFigureBtn.disabled = true;
 
-        updateToolbarState(selectedImage);
-        updateToolbarPosition(selectedImage);
+        updateToolbarState(state.image.selectedImage);
+        updateToolbarPosition(state.image.selectedImage);
       }
 
       wrapFigureBtn?.addEventListener('click', wrapImageWithFigure);
       unwrapFigureBtn?.addEventListener('click', unwrapImageFigure);
 
       document.getElementById('deleteImageBtn')?.addEventListener('click', () => {
-        if (selectedImage && confirm('¿Eliminar esta imagen?')) {
-          selectedImage.remove();
+        if (state.image.selectedImage && confirm('¿Eliminar esta imagen?')) {
+          state.image.selectedImage.remove();
           hideImageToolbar();
         }
       });
@@ -10682,7 +10599,7 @@ export async function initializeEditor() {
       }
 
       function applyPersistentHighlightIfNeeded() {
-        if (!persistentHighlight.active || !persistentHighlight.color || suppressPersistentHighlight || !isEditMode) {
+        if (!persistentHighlight.active || !persistentHighlight.color || suppressPersistentHighlight || !state.editor.isEditMode) {
           return;
         }
         const selection = window.getSelection();
@@ -11000,7 +10917,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('mouseup', (event) => {
-        if (!isEditMode) {
+        if (!state.editor.isEditMode) {
           return;
         }
         if (event.button !== 0) {
@@ -11010,7 +10927,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('keyup', (event) => {
-        if (!isEditMode || !persistentHighlight.active) {
+        if (!state.editor.isEditMode || !persistentHighlight.active) {
           return;
         }
         const key = typeof event.key === 'string' ? event.key : '';
@@ -11022,7 +10939,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('dblclick', (event) => {
-        if (!isEditMode || !highlightPalette) {
+        if (!state.editor.isEditMode || !highlightPalette) {
           return;
         }
         const target = event.target;
@@ -11280,7 +11197,7 @@ export async function initializeEditor() {
       });
 
       document.getElementById('insertTemplateBtn')?.addEventListener('click', () => {
-        if (!savedSelection) {
+        if (!state.editor.savedSelection) {
           const activeEditable = document.activeElement && document.activeElement.isContentEditable ? document.activeElement : null;
           const target = activeEditable || getCurrentPage() || getCurrentMagicPage();
           if (target) {
@@ -11464,13 +11381,13 @@ export async function initializeEditor() {
           .trim();
 
       function setPanelFilter(value) {
-        panelFilterTerm = value ?? '';
-        panelFilterNormalized = normalizeForSearch(panelFilterTerm);
+        state.panel.filterTerm = value ?? '';
+        state.panel.filterNormalized = normalizeForSearch(state.panel.filterTerm);
         if (panelSearchClear) {
-          panelSearchClear.hidden = !panelFilterNormalized;
+          panelSearchClear.hidden = !state.panel.filterNormalized;
         }
         if (panelSearchInput) {
-          panelSearchInput.classList.toggle('has-value', Boolean(panelFilterNormalized));
+          panelSearchInput.classList.toggle('has-value', Boolean(state.panel.filterNormalized));
         }
         buildSectionsPanel();
       }
@@ -11573,29 +11490,29 @@ export async function initializeEditor() {
       }
 
       function persistMagicEdits() {
-        if (!activeMagicWrapper && !activeMagicSource) {
+        if (!state.image.activeMagicWrapper && !state.image.activeMagicSource) {
           return;
         }
 
-        if (activeMagicWrapper && !document.contains(activeMagicWrapper)) {
-          activeMagicWrapper = null;
+        if (state.image.activeMagicWrapper && !document.contains(state.image.activeMagicWrapper)) {
+          state.image.activeMagicWrapper = null;
         }
 
-        if (!activeMagicSource && activeMagicWrapper && activeMagicPage) {
-          const { source } = ensureMagicTopicSource('', activeMagicPage);
-          activeMagicSource = source || null;
+        if (!state.image.activeMagicSource && state.image.activeMagicWrapper && state.image.activeMagicPage) {
+          const { source } = ensureMagicTopicSource('', state.image.activeMagicPage);
+          state.image.activeMagicSource = source || null;
         }
 
-        if (activeMagicSource && !document.contains(activeMagicSource)) {
-          activeMagicSource = null;
+        if (state.image.activeMagicSource && !document.contains(state.image.activeMagicSource)) {
+          state.image.activeMagicSource = null;
         }
 
-        if (!activeMagicSource || !activeMagicWrapper) {
+        if (!state.image.activeMagicSource || !state.image.activeMagicWrapper) {
           return;
         }
 
-        activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
-        afterContentSanitize(activeMagicSource);
+        state.image.activeMagicSource.innerHTML = state.image.activeMagicWrapper.innerHTML;
+        afterContentSanitize(state.image.activeMagicSource);
       }
 
       function setMagicFloatingBackVisibility(visible, disabled = false) {
@@ -11612,7 +11529,7 @@ export async function initializeEditor() {
       }
 
       function returnFromMagicView() {
-        const targetPage = activeMagicPage;
+        const targetPage = state.image.activeMagicPage;
         closeMagicView();
         if (targetPage && document.contains(targetPage)) {
           scrollPageIntoViewWithOffset(targetPage);
@@ -11623,30 +11540,30 @@ export async function initializeEditor() {
 
       function closeMagicView() {
         persistMagicEdits();
-        if (isMagicViewActive) {
-          const restoreZoom = zoomBeforeMagic ?? lastRegularZoom ?? 1;
-          isMagicViewActive = false;
-          zoomBeforeMagic = null;
+        if (state.image.isMagicViewActive) {
+          const restoreZoom = state.image.zoomBeforeMagic ?? state.image.lastRegularZoom ?? 1;
+          state.image.isMagicViewActive = false;
+          state.image.zoomBeforeMagic = null;
           applyZoom(restoreZoom);
         }
         document.body.classList.remove('magic-open');
         if (!magic) return;
         magic.classList.remove('open');
         magic.style.removeProperty('--magic-zoom');
-        zoomBeforeMagic = null;
-        activeMagicSource = null;
-        activeMagicWrapper = null;
-        activeMagicPage = null;
+        state.image.zoomBeforeMagic = null;
+        state.image.activeMagicSource = null;
+        state.image.activeMagicWrapper = null;
+        state.image.activeMagicPage = null;
         setMagicFloatingBackVisibility(false);
       }
 
       function activateMagicTopic(anchorId, title, pageRef = null) {
         if (!magic) return;
         persistMagicEdits();
-        if (!isMagicViewActive) {
-          zoomBeforeMagic = currentZoom;
+        if (!state.image.isMagicViewActive) {
+          state.image.zoomBeforeMagic = state.image.currentZoom;
         }
-        isMagicViewActive = true;
+        state.image.isMagicViewActive = true;
         applyZoom(1, { skipRemember: true });
         magic.innerHTML = '';
         const magicPage = document.createElement('div');
@@ -11664,12 +11581,12 @@ export async function initializeEditor() {
 
         magicPage.appendChild(wrapper);
         magic.appendChild(magicPage);
-        activeMagicSource = src;
-        activeMagicWrapper = wrapper;
-        activeMagicPage = pageRef || null;
+        state.image.activeMagicSource = src;
+        state.image.activeMagicWrapper = wrapper;
+        state.image.activeMagicPage = pageRef || null;
         setMagicFloatingBackVisibility(true);
 
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           magicPage.contentEditable = 'true';
           enableHtmlPaste();
         }
@@ -11683,20 +11600,20 @@ export async function initializeEditor() {
       function buildSectionsPanel() {
         if (!sectionsContainer) return;
         sectionsContainer.innerHTML = '';
-        globalTopicCounter = 1;
+        state.editor.globalTopicCounter = 1;
         let totalTopics = 0;
         let renderedTopics = 0;
         let matchedTopics = 0;
         let renderedSections = 0;
-        const hasFilter = Boolean(panelFilterNormalized);
+        const hasFilter = Boolean(state.panel.filterNormalized);
         const topicNoteCounts = collectTopicNoteCounts();
 
-        sections.forEach((section) => {
+        state.panel.sections.forEach((section) => {
           totalTopics += section.temas.length;
 
-          const sectionMatch = hasFilter && normalizeForSearch(section.nombre || '').includes(panelFilterNormalized);
+          const sectionMatch = hasFilter && normalizeForSearch(section.nombre || '').includes(state.panel.filterNormalized);
           const topicMatches = hasFilter
-            ? section.temas.filter((tema) => normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized))
+            ? section.temas.filter((tema) => normalizeForSearch(tema.titulo || '').includes(state.panel.filterNormalized))
             : section.temas;
 
           if (hasFilter && !sectionMatch && topicMatches.length === 0) {
@@ -11775,7 +11692,7 @@ export async function initializeEditor() {
           });
 
           actionsDiv.appendChild(addTopicBtn);
-          if (isPanelEditMode) {
+          if (state.editor.isPanelEditMode) {
             const renameBtn = document.createElement('button');
             renameBtn.className = 'section-action-btn';
             renameBtn.textContent = '✏️';
@@ -11821,8 +11738,8 @@ export async function initializeEditor() {
 
             const numSpan = document.createElement('span');
             numSpan.className = 'topic-number';
-            numSpan.textContent = `${globalTopicCounter}.`;
-            globalTopicCounter++;
+            numSpan.textContent = `${state.editor.globalTopicCounter}.`;
+            state.editor.globalTopicCounter++;
 
             const btnMain = document.createElement('button');
             btnMain.className = 'topic-action';
@@ -11869,7 +11786,7 @@ export async function initializeEditor() {
             trailing.className = 'topic-trailing';
             trailing.appendChild(noteIndicator);
 
-            if (isPanelEditMode) {
+            if (state.editor.isPanelEditMode) {
               const editActions = document.createElement('div');
               editActions.className = 'topic-edit-actions';
 
@@ -11901,7 +11818,7 @@ export async function initializeEditor() {
             }
 
             if (hasFilter) {
-              const topicMatchesFilter = normalizeForSearch(tema.titulo || '').includes(panelFilterNormalized);
+              const topicMatchesFilter = normalizeForSearch(tema.titulo || '').includes(state.panel.filterNormalized);
               li.classList.toggle('matches-filter', topicMatchesFilter);
             }
 
@@ -11922,7 +11839,7 @@ export async function initializeEditor() {
         if (renderedSections === 0) {
           const emptyState = document.createElement('div');
           emptyState.className = 'panel-empty';
-          const term = escapeHtml(panelFilterTerm.trim());
+          const term = escapeHtml(state.panel.filterTerm.trim());
           emptyState.innerHTML = term
             ? `<p>No encontramos coincidencias para <strong>“${term}”</strong>.</p>`
             : '<p>Aún no hay secciones creadas.</p>';
@@ -11958,25 +11875,25 @@ export async function initializeEditor() {
         }
         updateSectionsPanelActiveState();
         refreshTopicNoteIndicators();
-        const activeTopicId = (currentPageRef && currentPageRef.dataset)
-          ? currentPageRef.dataset.topicId || ''
+        const activeTopicId = (state.panel.currentPageRef && state.panel.currentPageRef.dataset)
+          ? state.panel.currentPageRef.dataset.topicId || ''
           : '';
         setActiveTopicListHighlight(activeTopicId);
       }
 
       function togglePanelEditMode() {
-        isPanelEditMode = !isPanelEditMode;
-        document.body.classList.toggle('panel-edit-mode', isPanelEditMode);
-        editPanelBtn.classList.toggle('active', isPanelEditMode);
+        state.editor.isPanelEditMode = !state.editor.isPanelEditMode;
+        document.body.classList.toggle('panel-edit-mode', state.editor.isPanelEditMode);
+        editPanelBtn.classList.toggle('active', state.editor.isPanelEditMode);
         buildSectionsPanel();
       }
 
       function toggleAllSections() {
-        allSectionsExpanded = !allSectionsExpanded;
-        sections.forEach(s => s.collapsed = !allSectionsExpanded);
+        state.editor.allSectionsExpanded = !state.editor.allSectionsExpanded;
+        state.panel.sections.forEach(s => s.collapsed = !state.editor.allSectionsExpanded);
         buildSectionsPanel();
         const btn = document.getElementById('toggleAllBtn');
-        btn.textContent = allSectionsExpanded ? '⊟' : '⊞';
+        btn.textContent = state.editor.allSectionsExpanded ? '⊟' : '⊞';
       }
 
       function renameSection(section) {
@@ -11986,8 +11903,8 @@ export async function initializeEditor() {
           section.temas.forEach(tema => {
             tema.page.dataset.sectionName = section.nombre;
           });
-          if (currentSectionId === section.id) {
-            updateSectionIndicator(currentPageRef);
+          if (state.panel.currentSectionId === section.id) {
+            updateSectionIndicator(state.panel.currentPageRef);
           }
           buildSectionsPanel();
         }
@@ -12001,10 +11918,11 @@ export async function initializeEditor() {
         });
 
         pages = pages.filter(p => p.dataset.sectionId !== section.id);
-        sections = sections.filter(s => s.id !== section.id);
-        sectionThemes.delete(section.id);
+        state.editor.pages = pages;
+        state.panel.sections = state.panel.sections.filter(s => s.id !== section.id);
+        state.panel.sectionThemes.delete(section.id);
         buildSectionsPanel();
-        if (currentPageRef && !document.body.contains(currentPageRef)) {
+        if (state.panel.currentPageRef && !document.body.contains(state.panel.currentPageRef)) {
           setActivePage(getCurrentPage());
         }
       }
@@ -12020,20 +11938,21 @@ export async function initializeEditor() {
         io.disconnect();
         pages.forEach(page => page.remove());
         pages = [];
-        sections = [];
-        sectionThemes = new Map();
-        allSectionsExpanded = true;
-        globalTopicCounter = 1;
-        currentPageRef = null;
-        currentSectionId = '';
-        savedSelection = null;
+        state.editor.pages = pages;
+        state.panel.sections = [];
+        state.panel.sectionThemes = new Map();
+        state.editor.allSectionsExpanded = true;
+        state.editor.globalTopicCounter = 1;
+        state.panel.currentPageRef = null;
+        state.panel.currentSectionId = '';
+        state.editor.savedSelection = null;
         const magicContainer = document.querySelector('.magic-content-container');
         if (magicContainer) {
           magicContainer.innerHTML = '';
         }
         clearFloatingNotes();
         setFloatingNotesVisibility(false);
-        setFloatingNotesEditable(isEditMode);
+        setFloatingNotesEditable(state.editor.isEditMode);
         buildSectionsPanel();
         setActivePage(null);
         syncBodyTheme(DEFAULT_THEME);
@@ -12051,8 +11970,8 @@ export async function initializeEditor() {
           temas: []
         };
 
-        sectionThemes.set(newSection.id, DEFAULT_THEME);
-        sections.push(newSection);
+        state.panel.sectionThemes.set(newSection.id, DEFAULT_THEME);
+        state.panel.sections.push(newSection);
         buildSectionsPanel();
       }
 
@@ -12079,9 +11998,9 @@ export async function initializeEditor() {
         newPage.dataset.sectionName = section.nombre || '';
         const topicId = generateUniqueId('topic');
         newPage.dataset.topicId = topicId;
-        const sectionTheme = sectionThemes.get(sectionId) || DEFAULT_THEME;
+        const sectionTheme = state.panel.sectionThemes.get(sectionId) || DEFAULT_THEME;
         applyThemeToPage(newPage, sectionTheme);
-        newPage.contentEditable = isEditMode ? 'true' : 'false';
+        newPage.contentEditable = state.editor.isEditMode ? 'true' : 'false';
 
         const h1 = document.createElement('h1');
         const titleSpan = document.createElement('span');
@@ -12121,10 +12040,10 @@ export async function initializeEditor() {
         }
 
         if (!newPage.isConnected) {
-          const sectionIndex = sections.findIndex(s => s.id === section.id);
+          const sectionIndex = state.panel.sections.findIndex(s => s.id === section.id);
           let siblingPage = null;
-          for (let idx = sectionIndex + 1; idx < sections.length; idx += 1) {
-            const nextSection = sections[idx];
+          for (let idx = sectionIndex + 1; idx < state.panel.sections.length; idx += 1) {
+            const nextSection = state.panel.sections[idx];
             const candidate = nextSection?.temas?.[0]?.page;
             if (candidate?.parentNode) {
               siblingPage = candidate;
@@ -12140,6 +12059,7 @@ export async function initializeEditor() {
         }
 
         pages = [...document.querySelectorAll('.page')];
+        state.editor.pages = pages;
         setupMagicIcons();
         if (io) {
           io.observe(newPage);
@@ -12151,12 +12071,12 @@ export async function initializeEditor() {
       }
 
       function sortSectionsAlpha() {
-        sections.sort((a, b) => a.nombre.localeCompare(b.nombre));
+        state.panel.sections.sort((a, b) => a.nombre.localeCompare(b.nombre));
         buildSectionsPanel();
       }
 
       function sortSectionsNumeric() {
-        sections.sort((a, b) => {
+        state.panel.sections.sort((a, b) => {
           const numA = parseInt(a.nombre.match(/\d+/)?.[0] || '999');
           const numB = parseInt(b.nombre.match(/\d+/)?.[0] || '999');
           return numA - numB;
@@ -12299,7 +12219,7 @@ export async function initializeEditor() {
         let fallbackRatio = 0;
         let fallbackDistance = Infinity;
 
-        const current = currentPageRef && currentPageRef.isConnected ? currentPageRef : null;
+        const current = state.panel.currentPageRef && state.panel.currentPageRef.isConnected ? state.panel.currentPageRef : null;
         let currentRatio = 0;
         let currentDistance = Infinity;
 
@@ -12370,7 +12290,7 @@ export async function initializeEditor() {
         }
 
         const topicId = candidate.dataset.topicId || '';
-        if (candidate !== currentPageRef) {
+        if (candidate !== state.panel.currentPageRef) {
           setActivePage(candidate);
         } else {
           setActiveTopicListHighlight(topicId);
@@ -12423,7 +12343,7 @@ export async function initializeEditor() {
           closeSpacingTool();
           setBoldInfiniteMode(false);
           deactivateTableAutoResize();
-          savedSelection = null;
+          state.editor.savedSelection = null;
         }
       });
 
@@ -12436,33 +12356,33 @@ export async function initializeEditor() {
 
       /* === TEMA DE COLORES === */
       themeSelect?.addEventListener('change', () => {
-        const targetSection = currentSectionId || (getCurrentPage()?.dataset.sectionId) || 'seccion-default';
+        const targetSection = state.panel.currentSectionId || (getCurrentPage()?.dataset.sectionId) || 'seccion-default';
         setSectionTheme(targetSection, themeSelect.value);
       });
 
       /* === EDICIÓN === */
       function toggleEditMode() {
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           persistMagicEdits();
         }
-        isEditMode = !isEditMode;
+        state.editor.isEditMode = !state.editor.isEditMode;
         hideTopicMenu();
         hideIconPicker();
 
-        if (isEditMode) {
+        if (state.editor.isEditMode) {
           pages.forEach(page => page.contentEditable = 'true');
           const magicPage = getCurrentMagicPage();
           if (magicPage) magicPage.contentEditable = 'true';
           setFloatingNotesEditable(true);
           editToolbar.classList.add('show');
-          cachedToolbarHeight = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || cachedToolbarHeight || 56;
+          state.editor.cachedToolbarHeight = editToolbar.getBoundingClientRect().height || editToolbar.offsetHeight || state.editor.cachedToolbarHeight || 56;
           editBtn.classList.add('active');
           editBtn.textContent = '✏️';
           if (saveHtmlBtn) {
             saveHtmlBtn.style.display = 'inline-block';
           }
           enableHtmlPaste();
-          tableMenuAPI?.refresh();
+          state.editor.tableMenuAPI?.refresh();
         } else {
           pages.forEach(page => page.contentEditable = 'false');
           const magicPages = document.querySelectorAll('.magic-page');
@@ -12476,8 +12396,8 @@ export async function initializeEditor() {
           }
           hideTemplateToolbar();
           hideImageToolbar();
-          tableMenuAPI?.cancelResize();
-          tableMenuAPI?.hide();
+          state.editor.tableMenuAPI?.cancelResize();
+          state.editor.tableMenuAPI?.hide();
           closeSpacingTool();
           setBoldInfiniteMode(false);
           deactivateTableAutoResize();
@@ -12722,13 +12642,13 @@ export async function initializeEditor() {
       }
 
       function initializeSpacingTargets(targets) {
-        spacingToolState.targets = targets;
-        spacingToolState.originalStyles = new Map();
+        state.floatingNotes.spacingTool.targets = targets;
+        state.floatingNotes.spacingTool.originalStyles = new Map();
         targets.forEach((target) => {
           if (!(target instanceof HTMLElement)) {
             return;
           }
-          spacingToolState.originalStyles.set(target, {
+          state.floatingNotes.spacingTool.originalStyles.set(target, {
             marginTop: target.style.marginTop,
             marginBottom: target.style.marginBottom,
             lineHeight: target.style.lineHeight
@@ -12742,7 +12662,7 @@ export async function initializeEditor() {
           return;
         }
 
-        if (!spacingToolState.targets.length) {
+        if (!state.floatingNotes.spacingTool.targets.length) {
           spacingMarginTop.value = '0';
           spacingMarginBottom.value = '0';
           spacingBlockGap.value = '0';
@@ -12751,8 +12671,8 @@ export async function initializeEditor() {
           return;
         }
 
-        const first = spacingToolState.targets[0];
-        const last = spacingToolState.targets[spacingToolState.targets.length - 1] || first;
+        const first = state.floatingNotes.spacingTool.targets[0];
+        const last = state.floatingNotes.spacingTool.targets[state.floatingNotes.spacingTool.targets.length - 1] || first;
         const firstStyles = window.getComputedStyle(first);
         const lastStyles = window.getComputedStyle(last);
 
@@ -12785,7 +12705,7 @@ export async function initializeEditor() {
       }
 
       function applySpacingValue(type, value) {
-        if (!spacingToolState.targets.length) {
+        if (!state.floatingNotes.spacingTool.targets.length) {
           return;
         }
         const numeric = Number(value);
@@ -12795,7 +12715,7 @@ export async function initializeEditor() {
         const pxValue = `${Math.round(numeric)}px`;
 
         if (type === 'marginTop') {
-          spacingToolState.targets.forEach((target) => {
+          state.floatingNotes.spacingTool.targets.forEach((target) => {
             if (!(target instanceof HTMLElement)) return;
             target.style.marginTop = numeric <= 0 ? '' : pxValue;
           });
@@ -12803,10 +12723,10 @@ export async function initializeEditor() {
         }
 
         if (type === 'marginBottom') {
-          const lastIndex = spacingToolState.targets.length - 1;
-          spacingToolState.targets.forEach((target, index) => {
+          const lastIndex = state.floatingNotes.spacingTool.targets.length - 1;
+          state.floatingNotes.spacingTool.targets.forEach((target, index) => {
             if (!(target instanceof HTMLElement)) return;
-            if (spacingToolState.targets.length === 1 || index === lastIndex) {
+            if (state.floatingNotes.spacingTool.targets.length === 1 || index === lastIndex) {
               target.style.marginBottom = numeric <= 0 ? '' : pxValue;
             }
           });
@@ -12814,8 +12734,8 @@ export async function initializeEditor() {
         }
 
         if (type === 'blockGap') {
-          const lastIndex = spacingToolState.targets.length - 1;
-          spacingToolState.targets.forEach((target, index) => {
+          const lastIndex = state.floatingNotes.spacingTool.targets.length - 1;
+          state.floatingNotes.spacingTool.targets.forEach((target, index) => {
             if (!(target instanceof HTMLElement)) return;
             if (index === lastIndex) {
               return;
@@ -12829,7 +12749,7 @@ export async function initializeEditor() {
           const min = Number(spacingLineHeight?.min || 0.8);
           const max = Number(spacingLineHeight?.max || 3);
           const ratio = Math.min(Math.max(numeric, min), max);
-          spacingToolState.targets.forEach((target) => {
+          state.floatingNotes.spacingTool.targets.forEach((target) => {
             if (!(target instanceof HTMLElement)) return;
             target.style.lineHeight = ratio ? ratio.toFixed(2) : '';
           });
@@ -12837,7 +12757,7 @@ export async function initializeEditor() {
       }
 
       function resetSpacingTargets() {
-        spacingToolState.originalStyles.forEach((styles, element) => {
+        state.floatingNotes.spacingTool.originalStyles.forEach((styles, element) => {
           if (!(element instanceof HTMLElement)) {
             return;
           }
@@ -12880,7 +12800,7 @@ export async function initializeEditor() {
         if (!spacingTool || !spacingToolBtn) {
           return;
         }
-        if (!isEditMode) {
+        if (!state.editor.isEditMode) {
           alert('Activa el modo edición para ajustar el espaciado.');
           return;
         }
@@ -12893,7 +12813,7 @@ export async function initializeEditor() {
         spacingTool.classList.add('show');
         spacingTool.setAttribute('aria-hidden', 'false');
         spacingTool.style.visibility = 'hidden';
-        spacingToolState.isOpen = true;
+        state.floatingNotes.spacingTool.isOpen = true;
         spacingToolBtn.classList.add('active');
         spacingToolBtn.setAttribute('aria-pressed', 'true');
         positionSpacingTool(spacingToolBtn);
@@ -12902,16 +12822,16 @@ export async function initializeEditor() {
       }
 
       function closeSpacingTool() {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
-        if (spacingToolSelectionSync && typeof spacingToolSelectionSync.cancel === 'function') {
-          spacingToolSelectionSync.cancel();
+        if (state.floatingNotes.spacingToolSelectionSync && typeof state.floatingNotes.spacingToolSelectionSync.cancel === 'function') {
+          state.floatingNotes.spacingToolSelectionSync.cancel();
         }
-        spacingToolSelectionSync = null;
-        spacingToolState.isOpen = false;
-        spacingToolState.targets = [];
-        spacingToolState.originalStyles.clear();
+        state.floatingNotes.spacingToolSelectionSync = null;
+        state.floatingNotes.spacingTool.isOpen = false;
+        state.floatingNotes.spacingTool.targets = [];
+        state.floatingNotes.spacingTool.originalStyles.clear();
         if (spacingTool) {
           spacingTool.classList.remove('show');
           spacingTool.setAttribute('aria-hidden', 'true');
@@ -12924,7 +12844,7 @@ export async function initializeEditor() {
       }
 
       function toggleSpacingTool() {
-        if (spacingToolState.isOpen) {
+        if (state.floatingNotes.spacingTool.isOpen) {
           closeSpacingTool();
         } else {
           openSpacingTool();
@@ -12932,36 +12852,36 @@ export async function initializeEditor() {
       }
 
       function scheduleSpacingToolSelectionRefresh() {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
-        if (spacingToolSelectionSync) {
+        if (state.floatingNotes.spacingToolSelectionSync) {
           return;
         }
         if (typeof requestAnimationFrame === 'function') {
           const rafId = requestAnimationFrame(() => {
-            spacingToolSelectionSync = null;
+            state.floatingNotes.spacingToolSelectionSync = null;
             const targets = collectSpacingTargets();
             if (!targets.length) {
               return;
             }
             initializeSpacingTargets(targets);
           });
-          spacingToolSelectionSync = {
+          state.floatingNotes.spacingToolSelectionSync = {
             cancel() {
               cancelAnimationFrame(rafId);
             }
           };
         } else {
           const timeoutId = setTimeout(() => {
-            spacingToolSelectionSync = null;
+            state.floatingNotes.spacingToolSelectionSync = null;
             const targets = collectSpacingTargets();
             if (!targets.length) {
               return;
             }
             initializeSpacingTargets(targets);
           }, 16);
-          spacingToolSelectionSync = {
+          state.floatingNotes.spacingToolSelectionSync = {
             cancel() {
               clearTimeout(timeoutId);
             }
@@ -12970,15 +12890,15 @@ export async function initializeEditor() {
       }
 
       function setBoldInfiniteMode(enabled) {
-        const nextState = !!enabled && isEditMode;
-        boldInfiniteMode = nextState;
+        const nextState = !!enabled && state.editor.isEditMode;
+        state.floatingNotes.boldInfiniteMode = nextState;
         if (boldBtn) {
           boldBtn.classList.toggle('active', nextState);
           boldBtn.setAttribute('aria-pressed', nextState ? 'true' : 'false');
           boldBtn.title = nextState ? 'Salir de modo negrita infinita' : boldBtnDefaultTitle;
         }
         if (!nextState) {
-          boldInfiniteApplying = false;
+          state.floatingNotes.boldInfiniteApplying = false;
         }
       }
 
@@ -12990,7 +12910,7 @@ export async function initializeEditor() {
         const selection = window.getSelection();
         const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed && selection.toString().length > 0;
 
-        if (boldInfiniteMode) {
+        if (state.floatingNotes.boldInfiniteMode) {
           if (hasSelection) {
             execCmd('bold');
           }
@@ -13007,17 +12927,17 @@ export async function initializeEditor() {
       }
 
       function handleSelectionChange() {
-        if (boldInfiniteMode) {
-          if (!isEditMode) {
+        if (state.floatingNotes.boldInfiniteMode) {
+          if (!state.editor.isEditMode) {
             setBoldInfiniteMode(false);
-          } else if (!boldInfiniteApplying) {
+          } else if (!state.floatingNotes.boldInfiniteApplying) {
             const selection = window.getSelection();
             if (selection && selection.rangeCount > 0 && !selection.isCollapsed && isSelectionWithinEditable(selection)) {
               const content = selection.toString();
               if (content.trim().length) {
-                boldInfiniteApplying = true;
+                state.floatingNotes.boldInfiniteApplying = true;
                 execCmd('bold');
-                const release = () => { boldInfiniteApplying = false; };
+                const release = () => { state.floatingNotes.boldInfiniteApplying = false; };
                 if (typeof requestAnimationFrame === 'function') {
                   requestAnimationFrame(release);
                 } else {
@@ -13034,52 +12954,52 @@ export async function initializeEditor() {
         if (!table || !(table instanceof HTMLTableElement)) {
           return;
         }
-        if (!isEditMode) {
+        if (!state.editor.isEditMode) {
           return;
         }
         const editableAncestor = resolveEditableAncestor(table);
         if (!editableAncestor) {
           return;
         }
-        if (autoTableResizeTable && autoTableResizeTable !== table) {
+        if (state.floatingNotes.autoTableResizeTable && state.floatingNotes.autoTableResizeTable !== table) {
           deactivateTableAutoResize();
         }
         const controller = makeTableResizable(table);
         if (!controller) {
           return;
         }
-        autoTableResizeTable = table;
-        autoTableResizeController = controller;
+        state.floatingNotes.autoTableResizeTable = table;
+        state.floatingNotes.autoTableResizeController = controller;
         controller.activate({
           onFinish() {
-            if (autoTableResizeTable === table) {
-              autoTableResizeController = null;
-              autoTableResizeTable = null;
+            if (state.floatingNotes.autoTableResizeTable === table) {
+              state.floatingNotes.autoTableResizeController = null;
+              state.floatingNotes.autoTableResizeTable = null;
             }
           },
           onCancel() {
-            if (autoTableResizeTable === table) {
-              autoTableResizeController = null;
-              autoTableResizeTable = null;
+            if (state.floatingNotes.autoTableResizeTable === table) {
+              state.floatingNotes.autoTableResizeController = null;
+              state.floatingNotes.autoTableResizeTable = null;
             }
           }
         });
       }
 
       function deactivateTableAutoResize() {
-        if (autoTableResizeController) {
+        if (state.floatingNotes.autoTableResizeController) {
           try {
-            autoTableResizeController.cancel();
+            state.floatingNotes.autoTableResizeController.cancel();
           } catch (error) {
             console.warn('No se pudo cancelar el ajuste de tabla automáticamente:', error);
           }
         }
-        autoTableResizeController = null;
-        autoTableResizeTable = null;
+        state.floatingNotes.autoTableResizeController = null;
+        state.floatingNotes.autoTableResizeTable = null;
       }
 
       function handleTablePointerDown(event) {
-        if (!isEditMode) {
+        if (!state.editor.isEditMode) {
           deactivateTableAutoResize();
           return;
         }
@@ -13095,13 +13015,13 @@ export async function initializeEditor() {
       }
 
       function setMainContentVisibility(hidden) {
-        mainContentHidden = !!hidden;
-        document.body.classList.toggle('pages-hidden', mainContentHidden);
+        state.floatingNotes.mainContentHidden = !!hidden;
+        document.body.classList.toggle('pages-hidden', state.floatingNotes.mainContentHidden);
         if (toggleMainContentBtn) {
-          toggleMainContentBtn.classList.toggle('active', mainContentHidden);
-          toggleMainContentBtn.setAttribute('aria-pressed', mainContentHidden ? 'true' : 'false');
-          toggleMainContentBtn.title = mainContentHidden ? 'Mostrar contenido principal' : 'Ocultar contenido principal';
-          toggleMainContentBtn.textContent = mainContentHidden ? '📄' : '🗂️';
+          toggleMainContentBtn.classList.toggle('active', state.floatingNotes.mainContentHidden);
+          toggleMainContentBtn.setAttribute('aria-pressed', state.floatingNotes.mainContentHidden ? 'true' : 'false');
+          toggleMainContentBtn.title = state.floatingNotes.mainContentHidden ? 'Mostrar contenido principal' : 'Ocultar contenido principal';
+          toggleMainContentBtn.textContent = state.floatingNotes.mainContentHidden ? '📄' : '🗂️';
         }
         updateFloatingNotesPrintControl();
       }
@@ -13135,34 +13055,34 @@ export async function initializeEditor() {
       spacingToolClose?.addEventListener('click', () => closeSpacingTool());
       spacingToolDone?.addEventListener('click', () => closeSpacingTool());
       spacingToolReset?.addEventListener('click', () => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         resetSpacingTargets();
       });
       spacingMarginTop?.addEventListener('input', () => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         applySpacingValue('marginTop', spacingMarginTop.value);
         updateSpacingValueDisplay();
       });
       spacingMarginBottom?.addEventListener('input', () => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         applySpacingValue('marginBottom', spacingMarginBottom.value);
         updateSpacingValueDisplay();
       });
       spacingBlockGap?.addEventListener('input', () => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         applySpacingValue('blockGap', spacingBlockGap.value);
         updateSpacingValueDisplay();
       });
       spacingLineHeight?.addEventListener('input', () => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         applySpacingValue('lineHeight', spacingLineHeight.value);
@@ -13170,7 +13090,7 @@ export async function initializeEditor() {
       });
 
       toggleMainContentBtn?.addEventListener('click', () => {
-        setMainContentVisibility(!mainContentHidden);
+        setMainContentVisibility(!state.floatingNotes.mainContentHidden);
       });
 
       printFloatingNotesViewBtn?.addEventListener('click', () => {
@@ -13178,7 +13098,7 @@ export async function initializeEditor() {
       });
 
       document.addEventListener('pointerdown', (event) => {
-        if (!spacingToolState.isOpen) {
+        if (!state.floatingNotes.spacingTool.isOpen) {
           return;
         }
         if (spacingTool?.contains(event.target)) {
@@ -13191,7 +13111,7 @@ export async function initializeEditor() {
       });
 
       window.addEventListener('resize', () => {
-        if (spacingToolState.isOpen) {
+        if (state.floatingNotes.spacingTool.isOpen) {
           positionSpacingTool(spacingToolBtn);
         }
       });
@@ -13199,7 +13119,7 @@ export async function initializeEditor() {
       document.addEventListener('selectionchange', handleSelectionChange);
       document.addEventListener('mousedown', handleTablePointerDown, true);
 
-      setMainContentVisibility(mainContentHidden);
+      setMainContentVisibility(state.floatingNotes.mainContentHidden);
       setBoldInfiniteMode(false);
 
       bindIconPickerTrigger();
@@ -13467,7 +13387,7 @@ ${inlineStyles}
           </div>
           <div class="stat-card">
             <div class="stat-label">Secciones</div>
-            <div class="stat-value">${sections.length}</div>
+            <div class="stat-value">${state.panel.sections.length}</div>
           </div>
         </div>
         <h4 style="margin-top: 20px;">Detalle por Tema:</h4>
@@ -13496,7 +13416,7 @@ ${inlineStyles}
   });
   
   document.addEventListener('keydown', (e) => {
-    if (!isEditMode) return;
+    if (!state.editor.isEditMode) return;
 
     if (e.ctrlKey || e.metaKey) {
       switch(e.key.toLowerCase()) {
@@ -13570,10 +13490,10 @@ ${inlineStyles}
       });
     }
 
-    sections.forEach(section => {
+    state.panel.sections.forEach(section => {
       const baseSectionId = section.id || section.temas.find(t => t.page)?.page?.dataset.sectionId || generateUniqueId('seccion');
       const baseSectionName = section.nombre || section.temas.find(t => t.page)?.page?.dataset.sectionName || 'Sección';
-      const sectionTheme = sectionThemes.get(baseSectionId) || section.theme || DEFAULT_THEME;
+      const sectionTheme = state.panel.sectionThemes.get(baseSectionId) || section.theme || DEFAULT_THEME;
       const exportSection = {
         id: baseSectionId,
         nombre: baseSectionName,
@@ -13634,7 +13554,7 @@ ${inlineStyles}
       const sectionName = page.dataset.sectionName || 'Sección';
       let exportSection = sectionMap.get(sectionId);
       if (!exportSection) {
-        const fallbackTheme = sectionThemes.get(sectionId) || getPageTheme(page);
+        const fallbackTheme = state.panel.sectionThemes.get(sectionId) || getPageTheme(page);
         exportSection = {
           id: sectionId,
           nombre: sectionName,
@@ -13790,8 +13710,8 @@ ${inlineStyles}
       magicContainerHtml: magicContainer ? magicContainer.innerHTML : '',
       magicTopics: exportedMagicTopics,
       floatingNotes: exportedNotes,
-      notesHidden: floatingNotesHidden,
-      documentShift: documentHorizontalShift
+      notesHidden: state.floatingNotes.hidden,
+      documentShift: state.document.horizontalShift
     };
   }
 
@@ -13810,8 +13730,8 @@ ${inlineStyles}
     const snapshot = {
       version: 1,
       savedAt: new Date().toISOString(),
-      zoom: isMagicViewActive ? lastRegularZoom : currentZoom,
-      documentShift: documentHorizontalShift,
+      zoom: state.image.isMagicViewActive ? state.image.lastRegularZoom : state.image.currentZoom,
+      documentShift: state.document.horizontalShift,
       data: collectDocumentData()
     };
 
@@ -13828,12 +13748,12 @@ ${inlineStyles}
         console.warn('No se pudo limpiar la caché previa antes de guardar:', cleanupError);
       }
 
-      const shouldClearExtended = usingExtendedCache || hasOpenExtendedCache();
+      const shouldClearExtended = state.cache.usingExtendedCache || hasOpenExtendedCache();
       window.localStorage.setItem(CACHE_STORAGE_KEY, snapshotJson);
       if (shouldClearExtended) {
         await clearExtendedCacheValue();
       }
-      usingExtendedCache = false;
+      state.cache.usingExtendedCache = false;
 
       if (showFeedback) {
         if (cacheSaveBtn) {
@@ -13848,7 +13768,7 @@ ${inlineStyles}
       if (isQuotaExceededError(error) && ('indexedDB' in window)) {
         try {
           await writeExtendedCacheValue(snapshotJson);
-          usingExtendedCache = true;
+          state.cache.usingExtendedCache = true;
           if (showFeedback) {
             if (cacheSaveBtn) {
               showCacheButtonFeedback('📦', 'Guardado extendido');
@@ -13892,7 +13812,7 @@ ${inlineStyles}
         raw = await readExtendedCacheValue();
         if (raw) {
           source = 'extended';
-          usingExtendedCache = true;
+          state.cache.usingExtendedCache = true;
         }
       } catch (error) {
         console.error('No se pudo leer la caché extendida:', error);
@@ -13919,12 +13839,12 @@ ${inlineStyles}
       if (typeof parsed.zoom === 'number') {
         applyZoom(parsed.zoom);
       } else {
-        applyZoom(currentZoom);
+        applyZoom(state.image.currentZoom);
       }
 
       if (!Number.isFinite(parsed.data?.documentShift)) {
         if (Number.isFinite(parsed.documentShift)) {
-          documentHorizontalShift = Math.min(
+          state.document.horizontalShift = Math.min(
             DOCUMENT_SHIFT_MAX,
             Math.max(DOCUMENT_SHIFT_MIN, parsed.documentShift)
           );
@@ -13934,9 +13854,9 @@ ${inlineStyles}
         }
       }
 
-      if (source === 'local' && usingExtendedCache) {
+      if (source === 'local' && state.cache.usingExtendedCache) {
         await clearExtendedCacheValue();
-        usingExtendedCache = false;
+        state.cache.usingExtendedCache = false;
       }
 
       return restored;
@@ -13979,12 +13899,12 @@ ${inlineStyles}
 
     const rawShift = Number.parseFloat(data.documentShift);
     if (Number.isFinite(rawShift)) {
-      documentHorizontalShift = Math.min(
+      state.document.horizontalShift = Math.min(
         DOCUMENT_SHIFT_MAX,
         Math.max(DOCUMENT_SHIFT_MIN, rawShift)
       );
     } else {
-      documentHorizontalShift = 0;
+      state.document.horizontalShift = 0;
     }
     applyDocumentShift();
 
@@ -14001,7 +13921,7 @@ ${inlineStyles}
       setDocumentTitle(data.specialty);
     }
 
-    sectionThemes = new Map();
+    state.panel.sectionThemes = new Map();
 
     const magicContainer = document.querySelector('.magic-content-container');
     const magicTopicMap = new Map();
@@ -14057,7 +13977,7 @@ ${inlineStyles}
       const sectionName = sectionData?.nombre ? String(sectionData.nombre) : 'Sección';
       const sectionCollapsed = !!sectionData?.collapsed;
       const sectionTheme = AVAILABLE_THEMES.includes(sectionData?.theme) ? sectionData.theme : DEFAULT_THEME;
-      sectionThemes.set(sectionId, sectionTheme);
+      state.panel.sectionThemes.set(sectionId, sectionTheme);
       const sectionInfo = { id: sectionId, nombre: sectionName, collapsed: sectionCollapsed, temas: [], theme: sectionTheme };
       const topics = Array.isArray(sectionData?.temas) ? sectionData.temas : [];
 
@@ -14076,7 +13996,7 @@ ${inlineStyles}
         if (Array.isArray(topicData?.templateBlocks)) {
           restoreTemplateBlocks(page, topicData.templateBlocks);
         }
-        page.contentEditable = isEditMode ? 'true' : 'false';
+        page.contentEditable = state.editor.isEditMode ? 'true' : 'false';
         const pageTheme = AVAILABLE_THEMES.includes(topicData?.theme) ? topicData.theme : sectionTheme;
         applyThemeToPage(page, pageTheme);
 
@@ -14164,23 +14084,24 @@ ${inlineStyles}
     });
 
     pages = newPages;
-    sections = newSections;
-    allSectionsExpanded = sections.every(section => !section.collapsed);
-    globalTopicCounter = 1;
+    state.editor.pages = pages;
+    state.panel.sections = newSections;
+    state.editor.allSectionsExpanded = state.panel.sections.every(section => !section.collapsed);
+    state.editor.globalTopicCounter = 1;
 
     restoreFloatingNotes(Array.isArray(data.floatingNotes) ? data.floatingNotes : [], !!data.notesHidden);
-    setFloatingNotesEditable(isEditMode);
+    setFloatingNotesEditable(state.editor.isEditMode);
 
     pages.forEach(page => io.observe(page));
     setupMagicIcons();
     initializeSections();
     buildSectionsPanel();
-    if (isEditMode) {
+    if (state.editor.isEditMode) {
       enableHtmlPaste();
     }
     hideImageToolbar();
     hideTemplateToolbar();
-    savedSelection = null;
+    state.editor.savedSelection = null;
     const firstPage = pages[0] || null;
     setActivePage(firstPage || null);
     scheduleIconPickerRebind(150);
@@ -14238,7 +14159,7 @@ ${inlineStyles}
   /* === GUARDAR HTML === */
   saveHtmlBtn?.addEventListener('click', async () => {
     persistMagicEdits();
-    const wasEditing = isEditMode;
+    const wasEditing = state.editor.isEditMode;
     if (wasEditing) {
       pages.forEach(page => page.contentEditable = 'false');
     }
@@ -14250,10 +14171,10 @@ ${inlineStyles}
 
     const buildData = {
       especialidad: getDocumentTitle() || 'documento',
-      secciones: sections.map(sec => ({
+      secciones: state.panel.sections.map(sec => ({
         id: sec.id,
         nombre: sec.nombre,
-        theme: sectionThemes.get(sec.id) || sec.theme || DEFAULT_THEME,
+        theme: state.panel.sectionThemes.get(sec.id) || sec.theme || DEFAULT_THEME,
         temas: sec.temas.map(t => ({
           id: t.id,
           titulo: t.titulo
@@ -14382,7 +14303,7 @@ ${inlineStyles}
             }
             existingTopicIds.add(topicId);
 
-            clonedPage.contentEditable = isEditMode ? 'true' : 'false';
+            clonedPage.contentEditable = state.editor.isEditMode ? 'true' : 'false';
             mainContainer.insertBefore(clonedPage, scriptTag);
           });
 
@@ -14444,6 +14365,7 @@ ${inlineStyles}
       }
 
       pages = [...document.querySelectorAll('.page')];
+      state.editor.pages = pages;
       pages.forEach(p => {
         afterContentSanitize(p);
         if (!p.dataset.topicId) {
@@ -14456,7 +14378,7 @@ ${inlineStyles}
       initializeSections();
       buildSectionsPanel();
 
-      if (isEditMode) {
+      if (state.editor.isEditMode) {
         pages.forEach(page => page.contentEditable = 'true');
         enableHtmlPaste();
       }
@@ -14516,7 +14438,7 @@ ${inlineStyles}
   const restoredFromCache = await restoreFromLocalCache();
   if (!restoredFromCache) {
     buildSectionsPanel();
-    applyZoom(currentZoom);
+    applyZoom(state.image.currentZoom);
   }
 
 }
