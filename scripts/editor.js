@@ -68,6 +68,7 @@ import {
   TEMPLATE_TEXT_PALETTE_COLORS,
   createTemplateNoteStylePresetMap
 } from './modules/editor/templateConfig.js';
+import { createNoteManager } from './modules/editor/noteManager.js';
 
 export async function initializeEditor() {
       let isEditMode = false;
@@ -306,40 +307,21 @@ export async function initializeEditor() {
       const noteStylePresetMap = createTemplateNoteStylePresetMap();
 
       const notesRegistry = new NoteRegistry();
-      let notesViewController = null;
-      let pendingNotesViewUpdate = false;
-      function ensureNoteData(noteId, overrides = {}) {
-        return notesRegistry.ensure(noteId, overrides);
-      }
-
-      function updateNoteData(noteId, updates = {}, { silent = false } = {}) {
-        return notesRegistry.update(noteId, updates, { silent });
-      }
-
-      function removeNoteData(noteId) {
-        if (!noteId) return;
-        notesRegistry.remove(noteId);
-      }
-
-      function isFloatingFamilyNote(note) {
-        if (!note) return false;
-        const type = note.type || NOTE_TYPES.FLOATING;
-        return type === NOTE_TYPES.FLOATING || type === NOTE_TYPES.SUPER;
-      }
-
-      function scheduleNotesViewRefresh() {
-        scheduleTopicNoteIndicatorRefresh();
-        if (!notesViewController) return;
-        if (pendingNotesViewUpdate) return;
-        pendingNotesViewUpdate = true;
-        requestAnimationFrame(() => {
-          pendingNotesViewUpdate = false;
-          notesViewController.notifyNotesUpdated();
-        });
-      }
-
-      notesRegistry.setChangeListener(() => {
-        scheduleNotesViewRefresh();
+      const {
+        ensureNoteData,
+        updateNoteData,
+        removeNoteData,
+        isFloatingFamilyNote,
+        scheduleNotesViewRefresh,
+        setNotesViewController,
+        getNotesViewController
+      } = createNoteManager({
+        registry: notesRegistry,
+        noteTypes: NOTE_TYPES,
+        scheduleTopicNoteIndicatorRefresh,
+        requestAnimationFrame: typeof requestAnimationFrame === 'function'
+          ? requestAnimationFrame
+          : (callback) => setTimeout(callback, 16)
       });
 
       function getPageTheme(page) {
@@ -1514,8 +1496,9 @@ export async function initializeEditor() {
       });
 
       topicNotesOpenPanelBtn?.addEventListener('click', () => {
-        if (notesViewController) {
-          notesViewController.open('topic');
+        const controller = getNotesViewController();
+        if (controller) {
+          controller.open('topic');
         }
         closeTopicNotesPopover();
       });
@@ -10138,7 +10121,7 @@ export async function initializeEditor() {
         }
       }
 
-      notesViewController = new NotesViewController();
+      setNotesViewController(new NotesViewController());
 
       function requestFloatingNotesViewportSync() {
         floatingNotesViewportRelaxedMatching = true;
@@ -10154,12 +10137,13 @@ export async function initializeEditor() {
       }
 
       notesViewBtn?.addEventListener('click', () => {
-        if (!notesViewController) return;
+        const controller = getNotesViewController();
+        if (!controller) return;
         closeTopicNotesPopover();
-        if (notesViewController.isOpen()) {
-          notesViewController.close();
+        if (controller.isOpen()) {
+          controller.close();
         } else {
-          notesViewController.open('all');
+          controller.open('all');
         }
       });
 
@@ -12410,7 +12394,7 @@ export async function initializeEditor() {
         if (e.key === 'Escape') {
           closePanel();
           closeTopbarDropdowns();
-          notesViewController?.close();
+          getNotesViewController()?.close();
           closeTopicNotesPopover();
           hideModal();
           hideImageToolbar();
