@@ -2707,6 +2707,24 @@ body.panel-filter-active .panel-topic-count {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
+.topic-list .topic-pill-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  opacity: 0.25;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.topic-list li.has-pill .topic-pill-indicator {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.topic-list .topic-pill-indicator[hidden] {
+  display: none !important;
+}
+
 .topic-list .topic-trailing {
   margin-left: auto;
   display: flex;
@@ -2883,7 +2901,7 @@ h1 .topic-title-text {
   border-radius: 50%;
   transition: all 0.3s ease;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 10px;
   margin-right: 0;
 }
 
@@ -2891,6 +2909,13 @@ h1 .topic-title-text {
   background: var(--theme-primary);
   transform: scale(1.15) rotate(15deg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.magic-icon.has-content {
+  background: var(--theme-primary);
+  color: #fff;
+  transform: scale(1.08);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.25);
 }
 
 .topic-note-icon {
@@ -2907,6 +2932,45 @@ h1 .topic-title-text {
   flex-shrink: 0;
   margin-left: 10px;
   color: var(--theme-primary);
+}
+
+.magic-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 24px;
+  padding: 0 12px;
+  margin-left: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: rgba(13, 110, 253, 0.08);
+  color: var(--theme-primary);
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+}
+
+.magic-pill-icon:hover,
+.magic-pill-icon:focus-visible {
+  background: var(--theme-primary);
+  color: #fff;
+  transform: translateY(-1px);
+  outline: none;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}
+
+.magic-pill-icon.has-content {
+  background: var(--theme-primary);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+}
+
+.magic-pill-icon:active {
+  transform: translateY(0);
 }
 
 .topic-note-icon:hover,
@@ -3727,6 +3791,22 @@ body.magic-open .magic-view {
 
 .magic-view.open {
   display: flex;
+}
+
+.magic-view-magic .magic-title::before {
+  content: '✨';
+  margin-right: 8px;
+}
+
+.magic-view-pill .magic-title::before {
+  content: '💊';
+  margin-right: 8px;
+}
+
+.magic-view-pill .magic-page {
+  border-top: 4px solid var(--theme-primary);
+  border-radius: 18px;
+  box-shadow: 0 10px 40px rgba(13, 110, 253, 0.15);
 }
 
 .magic-back-floating {

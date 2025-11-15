@@ -85,6 +85,7 @@ export async function initializeEditor() {
       let activeMagicSource = null;
       let activeMagicWrapper = null;
       let activeMagicPage = null;
+      let activeMagicType = 'magic';
       let allSectionsExpanded = true;
       let savedSelection = null;
       let pendingToolbarInsertionSnapshot = null;
@@ -110,6 +111,79 @@ export async function initializeEditor() {
       let imageViewerContextExternalImages = [];
       let imageViewerRuntimeSelectionId = null;
       let imageViewerContextKey = IMAGE_VIEWER_DEFAULT_CONTEXT_KEY;
+
+      const SUPPLEMENT_TYPES = Object.freeze({
+        MAGIC: 'magic',
+        PILL: 'pill'
+      });
+
+      const SUPPLEMENT_CONFIG = {
+        [SUPPLEMENT_TYPES.MAGIC]: {
+          type: SUPPLEMENT_TYPES.MAGIC,
+          datasetKey: 'magicAnchorId',
+          topicClass: 'magic-topic',
+          typeClass: 'magic-topic-default',
+          topicPrefix: 'magic-topic-',
+          legacyPrefixes: ['magic-'],
+          iconClass: 'magic-icon',
+          iconTitle: 'Ver contenido mágico',
+          iconSymbol: '✨',
+          emptyPlaceholder: '<p>No hay contenido adicional.</p>',
+          viewClass: 'magic-view-magic',
+          panelIndicatorClass: null,
+          panelIndicatorText: '',
+          panelItemClass: 'has-magic',
+          panelIndicatorTitleFilled: '',
+          panelIndicatorTitleEmpty: '',
+          topicIdField: 'magicId',
+          topicHtmlField: 'magicHtml'
+        },
+        [SUPPLEMENT_TYPES.PILL]: {
+          type: SUPPLEMENT_TYPES.PILL,
+          datasetKey: 'pillAnchorId',
+          topicClass: 'magic-topic',
+          typeClass: 'magic-topic-pill',
+          topicPrefix: 'pill-topic-',
+          legacyPrefixes: ['magic-pill-', 'pill-'],
+          iconClass: 'magic-pill-icon',
+          iconTitle: 'Ver información farmacológica',
+          iconSymbol: '💊',
+          emptyPlaceholder: '<p>No hay información farmacológica.</p>',
+          viewClass: 'magic-view-pill',
+          panelIndicatorClass: 'topic-pill-indicator',
+          panelIndicatorText: '💊',
+          panelItemClass: 'has-pill',
+          panelIndicatorTitleFilled: 'Contiene información farmacológica',
+          panelIndicatorTitleEmpty: 'Sin información farmacológica',
+          topicIdField: 'pillId',
+          topicHtmlField: 'pillHtml'
+        }
+      };
+
+      function normalizeSupplementType(type) {
+        if (typeof type !== 'string') {
+          return SUPPLEMENT_TYPES.MAGIC;
+        }
+        const normalized = type.trim().toLowerCase();
+        return SUPPLEMENT_CONFIG[normalized] ? normalized : SUPPLEMENT_TYPES.MAGIC;
+      }
+
+      function getSupplementConfig(type) {
+        const normalized = normalizeSupplementType(type);
+        return SUPPLEMENT_CONFIG[normalized] || SUPPLEMENT_CONFIG[SUPPLEMENT_TYPES.MAGIC];
+      }
+
+      function ensureSupplementTopicClasses(element, type) {
+        if (!element) {
+          return;
+        }
+        const config = getSupplementConfig(type);
+        element.classList.add(config.topicClass);
+        if (config.typeClass) {
+          element.classList.add(config.typeClass);
+        }
+        element.dataset.supplementType = config.type;
+      }
 
       let floatingNotesHidden = false;
       let mainContentHidden = false;
@@ -5299,7 +5373,10 @@ export async function initializeEditor() {
         }
       });
       
-      document.querySelectorAll('.magic-topic').forEach(m => afterContentSanitize(m));
+      document.querySelectorAll('.magic-topic').forEach((m) => {
+        ensureSupplementTopicClasses(m, m?.dataset?.supplementType || SUPPLEMENT_TYPES.MAGIC);
+        afterContentSanitize(m);
+      });
       initializeSections();
 
       (function setSpecialtyFromBuildComment() {
@@ -5314,6 +5391,77 @@ export async function initializeEditor() {
           }
         } catch (e) {}
       })();
+
+      function getSupplementElementForPage(page, type = SUPPLEMENT_TYPES.MAGIC) {
+        if (!page) return null;
+        const normalizedType = normalizeSupplementType(type);
+        const anchorId = magicAnchorFor(page, normalizedType);
+        if (!anchorId) return null;
+        const element = document.getElementById(anchorId);
+        if (!element) return null;
+        if (!element.classList.contains(getSupplementConfig(normalizedType).topicClass)) return null;
+        const elementType = normalizeSupplementType(element.dataset.supplementType);
+        return elementType === normalizedType ? element : null;
+      }
+
+      function hasMeaningfulSupplementContent(element) {
+        if (!element) return false;
+        const text = (element.textContent || '').trim();
+        if (text.length > 0) return true;
+        return Boolean(element.querySelector('img, video, audio, iframe, object, embed, svg, canvas, table, ul, ol, blockquote, pre, code'));
+      }
+
+      function hasSupplementContent(page, type = SUPPLEMENT_TYPES.MAGIC) {
+        const element = getSupplementElementForPage(page, type);
+        return hasMeaningfulSupplementContent(element);
+      }
+
+      function refreshSupplementIndicators(type = null) {
+        const targetTypes = Array.isArray(type)
+          ? type.map(normalizeSupplementType)
+          : [type ? normalizeSupplementType(type) : null].filter(Boolean);
+        const resolvedTypes = targetTypes.length ? targetTypes : Object.keys(SUPPLEMENT_CONFIG);
+
+        resolvedTypes.forEach((supplementType) => {
+          const config = getSupplementConfig(supplementType);
+          pages.forEach((page) => {
+            if (!page || !page.isConnected) return;
+            const element = getSupplementElementForPage(page, supplementType);
+            const hasContent = hasMeaningfulSupplementContent(element);
+            const icon = page.querySelector(`.${config.iconClass}`);
+            if (icon) {
+              icon.classList.toggle('has-content', hasContent);
+              icon.setAttribute('aria-pressed', hasContent ? 'true' : 'false');
+              const baseTitle = config.iconTitle;
+              icon.title = hasContent ? `${baseTitle} (con contenido)` : `${baseTitle} (vacío)`;
+              icon.setAttribute('aria-label', icon.title);
+            }
+
+            if (!sectionsContainer) return;
+            const topicId = (page.dataset.topicId || '').trim();
+            if (!topicId) return;
+
+            if (config.panelItemClass) {
+              const safeId = safeCssEscape(topicId);
+              const selector = `.topic-list li[data-topic-id="${safeId}"]`;
+              const listItem = sectionsContainer.querySelector(selector);
+              if (!listItem) return;
+              listItem.classList.toggle(config.panelItemClass, hasContent);
+
+              if (config.panelIndicatorClass) {
+                const indicator = listItem.querySelector(`.${config.panelIndicatorClass}`);
+                if (indicator) {
+                  indicator.hidden = !hasContent;
+                  indicator.setAttribute('aria-hidden', hasContent ? 'false' : 'true');
+                  indicator.title = hasContent
+                    ? config.panelIndicatorTitleFilled
+                    : config.panelIndicatorTitleEmpty;
+                }
+              }
+            }
+          });
+        });
+      }
 
       /* === ICONOS MÁGICOS EN PÁGINAS === */
       function setupMagicIcons() {
@@ -5352,6 +5500,18 @@ export async function initializeEditor() {
             h1.appendChild(magicIcon);
           }
 
+          let pillIcon = h1.querySelector('.magic-pill-icon');
+          if (!pillIcon) {
+            pillIcon = document.createElement('button');
+            pillIcon.type = 'button';
+            pillIcon.className = 'magic-pill-icon';
+            pillIcon.textContent = '💊';
+            pillIcon.title = 'Ver información farmacológica';
+            pillIcon.setAttribute('aria-label', 'Ver información farmacológica');
+            pillIcon.setAttribute('aria-pressed', 'false');
+            h1.appendChild(pillIcon);
+          }
+
           let noteIcon = h1.querySelector('.topic-note-icon');
           if (!noteIcon) {
             noteIcon = document.createElement('span');
@@ -5384,9 +5544,18 @@ export async function initializeEditor() {
             magicIcon.addEventListener('click', (e) => {
               e.stopPropagation();
               closePanel();
-              activateMagicTopic(magicAnchorFor(page), getTitle(), page);
+              activateMagicTopic(magicAnchorFor(page, SUPPLEMENT_TYPES.MAGIC), getTitle(), page, SUPPLEMENT_TYPES.MAGIC);
             });
             magicIcon.dataset.bound = 'true';
+          }
+
+          if (!pillIcon.dataset.bound) {
+            pillIcon.addEventListener('click', (event) => {
+              event.stopPropagation();
+              closePanel();
+              activateMagicTopic(magicAnchorFor(page, SUPPLEMENT_TYPES.PILL), getTitle(), page, SUPPLEMENT_TYPES.PILL);
+            });
+            pillIcon.dataset.bound = 'true';
           }
 
           if (!titleSpan.dataset.bound) {
@@ -5403,9 +5572,12 @@ export async function initializeEditor() {
           if (titleSpan.nextSibling !== magicIcon) {
             h1.insertBefore(magicIcon, titleSpan.nextSibling);
           }
-          if (magicIcon.nextSibling !== noteIcon) {
-            if (magicIcon.nextSibling) {
-              h1.insertBefore(noteIcon, magicIcon.nextSibling);
+          if (magicIcon.nextSibling !== pillIcon) {
+            h1.insertBefore(pillIcon, magicIcon.nextSibling);
+          }
+          if (pillIcon.nextSibling !== noteIcon) {
+            if (pillIcon.nextSibling) {
+              h1.insertBefore(noteIcon, pillIcon.nextSibling);
             } else {
               h1.appendChild(noteIcon);
             }
@@ -5413,6 +5585,7 @@ export async function initializeEditor() {
           noteIcon.setAttribute('aria-expanded', isTopicNotesPopoverOpen() && topicNotesPopoverTopicId === (page.dataset.topicId || '') ? 'true' : 'false');
         });
         refreshTopicNoteIndicators();
+        refreshSupplementIndicators();
       }
 
       setupMagicIcons();
@@ -11459,22 +11632,27 @@ export async function initializeEditor() {
         buildSectionsPanel();
       }
 
-      function magicAnchorFor(page) {
+      function magicAnchorFor(page, type = SUPPLEMENT_TYPES.MAGIC) {
         if (!page) return '';
 
-        const storedAnchor = page.dataset.magicAnchorId?.trim();
+        const config = getSupplementConfig(type);
+        const datasetKey = config.datasetKey;
+
+        const storedAnchor = (page.dataset[datasetKey] || '').trim();
         if (storedAnchor) {
           const storedEl = document.getElementById(storedAnchor);
-          if (storedEl) {
-            if (storedEl.classList.contains('magic-topic')) {
+          if (storedEl && storedEl.classList.contains(config.topicClass)) {
+            ensureSupplementTopicClasses(storedEl, type);
+            const storedType = normalizeSupplementType(storedEl.dataset.supplementType);
+            if (storedType === config.type) {
               const tid = (page.dataset.topicId || '').trim();
               if (tid) {
                 storedEl.dataset.sourceTopicId = tid;
               }
+              return storedAnchor;
             }
-            return storedAnchor;
           }
-          delete page.dataset.magicAnchorId;
+          delete page.dataset[datasetKey];
         }
 
         const tid = (page.dataset.topicId || '').trim();
@@ -11482,47 +11660,81 @@ export async function initializeEditor() {
           return '';
         }
 
-        const candidates = [`magic-topic-${tid}`, `magic-${tid}`, tid];
+        const candidates = [];
+        if (config.topicPrefix) {
+          candidates.push(`${config.topicPrefix}${tid}`);
+        }
+        if (Array.isArray(config.legacyPrefixes)) {
+          config.legacyPrefixes.forEach(prefix => {
+            candidates.push(`${prefix}${tid}`);
+          });
+        }
+        candidates.push(tid);
+
         for (const candidate of candidates) {
           if (!candidate) continue;
           const el = document.getElementById(candidate);
-          if (el) {
-            if (el.classList.contains('magic-topic')) {
+          if (el && el.classList.contains(config.topicClass)) {
+            ensureSupplementTopicClasses(el, type);
+            const elType = normalizeSupplementType(el.dataset.supplementType);
+            if (elType === config.type) {
               el.dataset.sourceTopicId = tid;
+              page.dataset[datasetKey] = candidate;
+              return candidate;
             }
-            page.dataset.magicAnchorId = candidate;
-            return candidate;
           }
         }
 
         const container = document.querySelector('.magic-content-container');
         if (container) {
-          const selector = `.magic-topic[data-source-topic-id="${escapeAttr(tid)}"]`;
-          const el = container.querySelector(selector);
+          const safeTopicId = escapeAttr(tid);
+          const typedSelector = `.magic-topic[data-source-topic-id="${safeTopicId}"][data-supplement-type="${config.type}"]`;
+          let el = container.querySelector(typedSelector);
+          if (!el) {
+            const fallbackSelector = `.magic-topic[data-source-topic-id="${safeTopicId}"]`;
+            el = container.querySelector(fallbackSelector);
+          }
           if (el && el.id) {
-            page.dataset.magicAnchorId = el.id;
-            return el.id;
+            ensureSupplementTopicClasses(el, el.dataset.supplementType || SUPPLEMENT_TYPES.MAGIC);
+            const elType = normalizeSupplementType(el.dataset.supplementType);
+            if (elType === config.type) {
+              page.dataset[datasetKey] = el.id;
+              return el.id;
+            }
           }
         }
 
         return '';
       }
 
-      function ensureMagicTopicSource(anchorId, pageRef) {
+      function ensureMagicTopicSource(anchorId, pageRef, type = SUPPLEMENT_TYPES.MAGIC) {
+        const config = getSupplementConfig(type);
+        const datasetKey = config.datasetKey;
         let resolvedId = typeof anchorId === 'string' ? anchorId.trim() : '';
+        if (!resolvedId && pageRef) {
+          resolvedId = (pageRef.dataset[datasetKey] || '').trim();
+        }
         let src = resolvedId ? document.getElementById(resolvedId) : null;
 
-        if (src && !src.classList.contains('magic-topic')) {
-          src = null;
+        if (src) {
+          if (!src.classList.contains(config.topicClass)) {
+            src = null;
+          } else {
+            ensureSupplementTopicClasses(src, type);
+            const currentType = normalizeSupplementType(src.dataset.supplementType);
+            if (currentType !== config.type) {
+              src = null;
+            }
+          }
         }
 
         if (!src && pageRef) {
           const container = document.querySelector('.magic-content-container');
           if (container) {
             const topicId = (pageRef.dataset.topicId || '').trim();
-            let baseId = resolvedId || (topicId ? `magic-topic-${topicId}` : '');
+            let baseId = resolvedId || (topicId ? `${config.topicPrefix}${topicId}` : '');
             if (!baseId) {
-              baseId = generateUniqueId('magic-topic');
+              baseId = generateUniqueId(config.topicClass);
             }
             let candidateId = baseId;
             while (candidateId && document.getElementById(candidateId)) {
@@ -11530,18 +11742,18 @@ export async function initializeEditor() {
             }
             src = document.createElement('div');
             src.id = candidateId;
-            src.className = 'magic-topic';
+            ensureSupplementTopicClasses(src, type);
             if (topicId) {
               src.dataset.sourceTopicId = topicId;
             }
             container.appendChild(src);
-            pageRef.dataset.magicAnchorId = candidateId;
+            pageRef.dataset[datasetKey] = candidateId;
             resolvedId = candidateId;
           }
         }
 
         if (src && !src.id) {
-          let baseId = resolvedId || generateUniqueId('magic-topic');
+          let baseId = resolvedId || generateUniqueId(config.topicClass);
           let uniqueId = baseId;
           while (uniqueId && document.getElementById(uniqueId)) {
             uniqueId = `${baseId}-${Math.random().toString(36).slice(2, 6)}`;
@@ -11549,8 +11761,12 @@ export async function initializeEditor() {
           src.id = uniqueId;
           resolvedId = uniqueId;
           if (pageRef) {
-            pageRef.dataset.magicAnchorId = uniqueId;
+            pageRef.dataset[datasetKey] = uniqueId;
           }
+        }
+
+        if (src) {
+          ensureSupplementTopicClasses(src, type);
         }
 
         return { source: src, anchorId: resolvedId };
@@ -11561,16 +11777,23 @@ export async function initializeEditor() {
           return;
         }
 
+        const currentType = normalizeSupplementType(activeMagicType);
+        const config = getSupplementConfig(currentType);
+
         if (activeMagicWrapper && !document.contains(activeMagicWrapper)) {
           activeMagicWrapper = null;
         }
 
         if (!activeMagicSource && activeMagicWrapper && activeMagicPage) {
-          const { source } = ensureMagicTopicSource('', activeMagicPage);
+          const { source } = ensureMagicTopicSource('', activeMagicPage, currentType);
           activeMagicSource = source || null;
         }
 
-        if (activeMagicSource && !document.contains(activeMagicSource)) {
+        if (
+          activeMagicSource
+          && (!document.contains(activeMagicSource)
+            || normalizeSupplementType(activeMagicSource.dataset.supplementType) !== config.type)
+        ) {
           activeMagicSource = null;
         }
 
@@ -11579,7 +11802,16 @@ export async function initializeEditor() {
         }
 
         activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
+        ensureSupplementTopicClasses(activeMagicSource, currentType);
         afterContentSanitize(activeMagicSource);
+        if (activeMagicPage) {
+          const topicId = (activeMagicPage.dataset.topicId || '').trim();
+          if (topicId) {
+            activeMagicSource.dataset.sourceTopicId = topicId;
+          }
+          activeMagicPage.dataset[config.datasetKey] = activeMagicSource.id || '';
+        }
+        refreshSupplementIndicators(currentType);
       }
 
       function setMagicFloatingBackVisibility(visible, disabled = false) {
@@ -11616,16 +11848,26 @@ export async function initializeEditor() {
         document.body.classList.remove('magic-open');
         if (!magic) return;
         magic.classList.remove('open');
+        Object.values(SUPPLEMENT_CONFIG).forEach((cfg) => {
+          if (cfg.viewClass) {
+            magic.classList.remove(cfg.viewClass);
+          }
+        });
+        delete magic.dataset.supplementType;
         magic.style.removeProperty('--magic-zoom');
         zoomBeforeMagic = null;
         activeMagicSource = null;
         activeMagicWrapper = null;
         activeMagicPage = null;
+        activeMagicType = SUPPLEMENT_TYPES.MAGIC;
         setMagicFloatingBackVisibility(false);
       }
 
-      function activateMagicTopic(anchorId, title, pageRef = null) {
+      function activateMagicTopic(anchorId, title, pageRef = null, type = SUPPLEMENT_TYPES.MAGIC) {
         if (!magic) return;
+        const normalizedType = normalizeSupplementType(type);
+        const config = getSupplementConfig(normalizedType);
+        activeMagicType = normalizedType;
         persistMagicEdits();
         if (!isMagicViewActive) {
           zoomBeforeMagic = currentZoom;
@@ -11635,20 +11877,24 @@ export async function initializeEditor() {
         magic.innerHTML = '';
         const magicPage = document.createElement('div');
         magicPage.className = 'magic-page';
+        magicPage.dataset.supplementType = normalizedType;
 
         const h = document.createElement('h1');
         h.className = 'magic-title';
         h.textContent = title || 'Tema';
         magicPage.appendChild(h);
 
-        const { source: src } = ensureMagicTopicSource(anchorId, pageRef);
+        const { source: src } = ensureMagicTopicSource(anchorId, pageRef, normalizedType);
         const wrapper = document.createElement('div');
-        wrapper.innerHTML = src ? src.innerHTML : '<p>No hay contenido adicional.</p>';
+        wrapper.innerHTML = src ? src.innerHTML : config.emptyPlaceholder;
         afterContentSanitize(wrapper);
 
         magicPage.appendChild(wrapper);
         magic.appendChild(magicPage);
-        activeMagicSource = src;
+        activeMagicSource = src || null;
+        if (activeMagicSource) {
+          ensureSupplementTopicClasses(activeMagicSource, normalizedType);
+        }
         activeMagicWrapper = wrapper;
         activeMagicPage = pageRef || null;
         setMagicFloatingBackVisibility(true);
@@ -11659,9 +11905,19 @@ export async function initializeEditor() {
         }
 
         syncMagicZoom();
+        Object.values(SUPPLEMENT_CONFIG).forEach((cfg) => {
+          if (cfg.viewClass) {
+            magic.classList.remove(cfg.viewClass);
+          }
+        });
+        if (config.viewClass) {
+          magic.classList.add(config.viewClass);
+        }
+        magic.dataset.supplementType = normalizedType;
         magic.classList.add('open');
         magic.scrollTop = 0;
         document.body.classList.add('magic-open');
+        refreshSupplementIndicators(normalizedType);
       }
 
       function buildSectionsPanel() {
@@ -11798,6 +12054,8 @@ export async function initializeEditor() {
             matchedTopics += topicMatches.length;
           }
 
+          const pillConfig = getSupplementConfig(SUPPLEMENT_TYPES.PILL);
+
           topicsToRender.forEach((tema) => {
             const li = document.createElement('li');
             const topicIdValue = (tema.id || '').trim();
@@ -11851,6 +12109,13 @@ export async function initializeEditor() {
 
             const trailing = document.createElement('div');
             trailing.className = 'topic-trailing';
+            const pillIndicator = document.createElement('span');
+            pillIndicator.className = pillConfig.panelIndicatorClass || 'topic-pill-indicator';
+            pillIndicator.textContent = pillConfig.panelIndicatorText || '💊';
+            pillIndicator.hidden = true;
+            pillIndicator.setAttribute('aria-hidden', 'true');
+            pillIndicator.title = pillConfig.panelIndicatorTitleEmpty;
+            trailing.appendChild(pillIndicator);
             trailing.appendChild(noteIndicator);
 
             if (isPanelEditMode) {
@@ -11889,6 +12154,16 @@ export async function initializeEditor() {
               li.classList.toggle('matches-filter', topicMatchesFilter);
             }
 
+            const hasPill = hasSupplementContent(tema.page, SUPPLEMENT_TYPES.PILL);
+            if (pillIndicator) {
+              pillIndicator.hidden = !hasPill;
+              pillIndicator.setAttribute('aria-hidden', hasPill ? 'false' : 'true');
+              pillIndicator.title = hasPill
+                ? pillConfig.panelIndicatorTitleFilled
+                : pillConfig.panelIndicatorTitleEmpty;
+            }
+            li.classList.toggle(pillConfig.panelItemClass || 'has-pill', hasPill);
+
             li.appendChild(numSpan);
             li.appendChild(btnMain);
             li.appendChild(titleSpan);
@@ -11901,6 +12176,7 @@ export async function initializeEditor() {
           sectionsContainer.appendChild(sectionDiv);
         });
 
+        refreshSupplementIndicators();
         document.body.classList.toggle('panel-filter-active', hasFilter);
 
         if (renderedSections === 0) {
@@ -13370,8 +13646,15 @@ export async function initializeEditor() {
     const h1 = page.querySelector('h1');
     const titleSpan = h1?.querySelector('span:first-child');
     const title = (titleSpan?.textContent || h1?.textContent || 'tema').trim();
-    const magicId = magicAnchorFor(page);
-    const magicContent = document.getElementById(magicId);
+    const magicId = magicAnchorFor(page, SUPPLEMENT_TYPES.MAGIC);
+    const pillId = magicAnchorFor(page, SUPPLEMENT_TYPES.PILL);
+    const magicContent = magicId ? document.getElementById(magicId) : null;
+    const pillContent = pillId ? document.getElementById(pillId) : null;
+
+    const supplementalHtml = [magicContent, pillContent]
+      .filter(Boolean)
+      .map((node) => node.outerHTML)
+      .join('');
     
     const tempPage = page.cloneNode(true);
     tempPage.contentEditable = 'false';
@@ -13392,7 +13675,7 @@ ${inlineStyles}
   </style>
 </head>
 <body class="${currentTheme}">
-  ${magicContent ? '<div class="magic-content-container" style="display:none">' + magicContent.outerHTML + '</div>' : ''}
+  ${supplementalHtml ? '<div class="magic-content-container" style="display:none">' + supplementalHtml + '</div>' : ''}
   ${tempPage.outerHTML}
 </body>
 </html>`;
@@ -13533,10 +13816,12 @@ ${inlineStyles}
     const seenPages = new Set();
     const exportedSections = [];
     const exportedMagicTopics = [];
+    const exportedPillTopics = [];
     const exportedNotes = [];
 
     if (magicContainer) {
       magicContainer.querySelectorAll('.magic-topic').forEach(topic => {
+        ensureSupplementTopicClasses(topic, topic?.dataset?.supplementType || SUPPLEMENT_TYPES.MAGIC);
         let topicId = (topic.id || '').trim();
         if (!topicId) {
           topicId = generateUniqueId('magic-topic');
@@ -13546,11 +13831,17 @@ ${inlineStyles}
         if (sourceTopicId) {
           topic.dataset.sourceTopicId = sourceTopicId;
         }
-        exportedMagicTopics.push({
+        const payload = {
           id: topicId,
           html: topic.innerHTML,
           sourceTopicId: sourceTopicId || null
-        });
+        };
+        const topicType = normalizeSupplementType(topic.dataset.supplementType);
+        if (topicType === SUPPLEMENT_TYPES.PILL) {
+          exportedPillTopics.push(payload);
+        } else {
+          exportedMagicTopics.push(payload);
+        }
       });
     }
 
@@ -13586,10 +13877,16 @@ ${inlineStyles}
         }
 
         const titleText = (tema.titulo || getTopicTitle(page) || '').trim() || `Tema ${exportSection.temas.length + 1}`;
-        const magicId = magicAnchorFor(page);
+        const magicId = magicAnchorFor(page, SUPPLEMENT_TYPES.MAGIC);
         const magicEl = magicId ? document.getElementById(magicId) : null;
         if (magicEl && topicId) {
           magicEl.dataset.sourceTopicId = topicId;
+        }
+
+        const pillId = magicAnchorFor(page, SUPPLEMENT_TYPES.PILL);
+        const pillEl = pillId ? document.getElementById(pillId) : null;
+        if (pillEl && topicId) {
+          pillEl.dataset.sourceTopicId = topicId;
         }
 
         const templateBlocks = serializeTemplateBlocks(page);
@@ -13601,6 +13898,8 @@ ${inlineStyles}
           sectionName: page.dataset.sectionName,
           magicId: magicId || null,
           magicHtml: magicEl ? magicEl.innerHTML : null,
+          pillId: pillId || null,
+          pillHtml: pillEl ? pillEl.innerHTML : null,
           theme: getPageTheme(page)
         };
         if (templateBlocks.length) {
@@ -13636,10 +13935,16 @@ ${inlineStyles}
         page.dataset.topicId = topicId;
       }
 
-      const magicId = magicAnchorFor(page);
+      const magicId = magicAnchorFor(page, SUPPLEMENT_TYPES.MAGIC);
       const magicEl = magicId ? document.getElementById(magicId) : null;
       if (magicEl && topicId) {
         magicEl.dataset.sourceTopicId = topicId;
+      }
+
+      const pillId = magicAnchorFor(page, SUPPLEMENT_TYPES.PILL);
+      const pillEl = pillId ? document.getElementById(pillId) : null;
+      if (pillEl && topicId) {
+        pillEl.dataset.sourceTopicId = topicId;
       }
 
       const templateBlocks = serializeTemplateBlocks(page);
@@ -13651,6 +13956,8 @@ ${inlineStyles}
         sectionName: sectionName,
         magicId: magicId || null,
         magicHtml: magicEl ? magicEl.innerHTML : null,
+        pillId: pillId || null,
+        pillHtml: pillEl ? pillEl.innerHTML : null,
         theme: getPageTheme(page)
       };
       if (templateBlocks.length) {
@@ -13773,6 +14080,7 @@ ${inlineStyles}
       sections: exportedSections,
       magicContainerHtml: magicContainer ? magicContainer.innerHTML : '',
       magicTopics: exportedMagicTopics,
+      pillTopics: exportedPillTopics,
       floatingNotes: exportedNotes,
       notesHidden: floatingNotesHidden,
       documentShift: documentHorizontalShift
@@ -13990,47 +14298,143 @@ ${inlineStyles}
     const magicContainer = document.querySelector('.magic-content-container');
     const magicTopicMap = new Map();
     const magicTopicBySource = new Map();
+    const pillTopicMap = new Map();
+    const pillTopicBySource = new Map();
+
+    const supplementMaps = {
+      [SUPPLEMENT_TYPES.MAGIC]: { byId: magicTopicMap, bySource: magicTopicBySource },
+      [SUPPLEMENT_TYPES.PILL]: { byId: pillTopicMap, bySource: pillTopicBySource }
+    };
+
+    const registerSupplementTopic = (topicElement, type) => {
+      if (!magicContainer || !topicElement) return;
+      const normalizedType = normalizeSupplementType(type);
+      const config = getSupplementConfig(normalizedType);
+      ensureSupplementTopicClasses(topicElement, normalizedType);
+      if (!magicContainer.contains(topicElement)) {
+        magicContainer.appendChild(topicElement);
+      }
+      afterContentSanitize(topicElement);
+      const topicId = (topicElement.id || '').trim();
+      if (topicId) {
+        supplementMaps[normalizedType].byId.set(topicId, topicElement);
+      }
+      const sourceTopicId = (topicElement.dataset.sourceTopicId || '').trim();
+      if (sourceTopicId) {
+        topicElement.dataset.sourceTopicId = sourceTopicId;
+        supplementMaps[normalizedType].bySource.set(sourceTopicId, topicElement);
+      }
+    };
+
+    const importSupplementTopics = (topics, type) => {
+      if (!magicContainer || !Array.isArray(topics)) return;
+      const normalizedType = normalizeSupplementType(type);
+      const config = getSupplementConfig(normalizedType);
+      topics.forEach(topicInfo => {
+        let topicId = topicInfo?.id ? String(topicInfo.id).trim() : '';
+        if (!topicId) {
+          topicId = generateUniqueId(config.topicClass);
+        }
+        const topicElement = document.createElement('div');
+        topicElement.id = topicId;
+        topicElement.innerHTML = typeof topicInfo?.html === 'string' ? topicInfo.html : '';
+        const sourceTopicId = topicInfo?.sourceTopicId ? String(topicInfo.sourceTopicId).trim() : '';
+        if (sourceTopicId) {
+          topicElement.dataset.sourceTopicId = sourceTopicId;
+        }
+        registerSupplementTopic(topicElement, normalizedType);
+      });
+    };
+
+    const resolveSupplementForTopic = (topicData, page, type) => {
+      const normalizedType = normalizeSupplementType(type);
+      const config = getSupplementConfig(normalizedType);
+      const datasetKey = config.datasetKey;
+      if (!magicContainer || !page) {
+        if (page?.dataset?.[datasetKey]) {
+          delete page.dataset[datasetKey];
+        }
+        return '';
+      }
+
+      const maps = supplementMaps[normalizedType];
+      const topicId = (page.dataset.topicId || '').trim();
+      const desiredIdRaw = topicData?.[config.topicIdField];
+      const desiredId = desiredIdRaw ? String(desiredIdRaw).trim() : '';
+      let topicElement = desiredId ? maps.byId.get(desiredId) : null;
+
+      if (!topicElement && desiredId) {
+        const existing = document.getElementById(desiredId);
+        if (existing && existing.classList.contains(config.topicClass)) {
+          registerSupplementTopic(existing, normalizedType);
+          topicElement = existing;
+        }
+      }
+
+      if (!topicElement && topicId) {
+        topicElement = maps.bySource.get(topicId);
+      }
+
+      if (!topicElement && typeof topicData?.[config.topicHtmlField] === 'string') {
+        let baseId = desiredId || `${config.topicPrefix}${topicId || ''}`;
+        baseId = (baseId || '').trim();
+        if (!baseId) {
+          baseId = generateUniqueId(config.topicClass);
+        }
+        let uniqueId = baseId;
+        while (uniqueId && (maps.byId.has(uniqueId) || document.getElementById(uniqueId))) {
+          uniqueId = `${baseId}-${Math.random().toString(36).slice(2, 6)}`;
+        }
+        topicElement = document.createElement('div');
+        topicElement.id = uniqueId;
+        topicElement.innerHTML = topicData[config.topicHtmlField];
+        registerSupplementTopic(topicElement, normalizedType);
+      }
+
+      if (topicElement) {
+        if (!topicElement.id) {
+          let baseId = desiredId || `${config.topicPrefix}${topicId || ''}`;
+          baseId = (baseId || '').trim();
+          if (!baseId) {
+            baseId = generateUniqueId(config.topicClass);
+          }
+          let finalId = baseId;
+          while (finalId && (maps.byId.has(finalId) || document.getElementById(finalId))) {
+            finalId = `${baseId}-${Math.random().toString(36).slice(2, 6)}`;
+          }
+          topicElement.id = finalId;
+        }
+        if (typeof topicData?.[config.topicHtmlField] === 'string') {
+          topicElement.innerHTML = topicData[config.topicHtmlField];
+          afterContentSanitize(topicElement);
+        }
+        registerSupplementTopic(topicElement, normalizedType);
+        if (topicId) {
+          topicElement.dataset.sourceTopicId = topicId;
+          maps.bySource.set(topicId, topicElement);
+        }
+        page.dataset[datasetKey] = topicElement.id;
+        return topicElement.id;
+      }
+
+      if (page.dataset[datasetKey]) {
+        delete page.dataset[datasetKey];
+      }
+      return '';
+    };
+
     if (magicContainer) {
       magicContainer.innerHTML = '';
-      if (Array.isArray(data.magicTopics) && data.magicTopics.length) {
-        data.magicTopics.forEach(topicInfo => {
-          let topicId = topicInfo?.id ? String(topicInfo.id).trim() : '';
-          if (!topicId) {
-            topicId = generateUniqueId('magic-topic');
-          }
-          const sourceTopicId = topicInfo?.sourceTopicId ? String(topicInfo.sourceTopicId).trim() : '';
-          const magicTopic = document.createElement('div');
-          magicTopic.id = topicId;
-          magicTopic.className = 'magic-topic';
-          magicTopic.innerHTML = typeof topicInfo?.html === 'string' ? topicInfo.html : '';
-          magicContainer.appendChild(magicTopic);
-          afterContentSanitize(magicTopic);
-          magicTopicMap.set(topicId, magicTopic);
-          if (sourceTopicId) {
-            magicTopic.dataset.sourceTopicId = sourceTopicId;
-            magicTopicBySource.set(sourceTopicId, magicTopic);
-          }
-        });
-      } else if (typeof data.magicContainerHtml === 'string') {
+      importSupplementTopics(data.magicTopics, SUPPLEMENT_TYPES.MAGIC);
+      importSupplementTopics(data.pillTopics, SUPPLEMENT_TYPES.PILL);
+
+      if (!magicContainer.children.length && typeof data.magicContainerHtml === 'string') {
         magicContainer.innerHTML = data.magicContainerHtml;
-        magicContainer.querySelectorAll('.magic-topic').forEach(topic => {
-          afterContentSanitize(topic);
-          if (topic.id) {
-            const trimmedId = topic.id.trim();
-            if (trimmedId && trimmedId !== topic.id) {
-              topic.id = trimmedId;
-            }
-            if (trimmedId) {
-              magicTopicMap.set(trimmedId, topic);
-            }
-          }
-          const sourceTopicId = (topic.dataset.sourceTopicId || '').trim();
-          if (sourceTopicId) {
-            topic.dataset.sourceTopicId = sourceTopicId;
-            magicTopicBySource.set(sourceTopicId, topic);
-          }
-        });
       }
+
+      magicContainer.querySelectorAll('.magic-topic').forEach(topic => {
+        registerSupplementTopic(topic, topic?.dataset?.supplementType || SUPPLEMENT_TYPES.MAGIC);
+      });
     }
 
     const newPages = [];
@@ -14068,67 +14472,8 @@ ${inlineStyles}
         sectionInfo.temas.push({ id: topicId, titulo: title, page });
         newPages.push(page);
 
-        let resolvedMagicId = '';
-        if (magicContainer) {
-          const desiredMagicId = topicData?.magicId ? String(topicData.magicId).trim() : '';
-          let magicTopic = desiredMagicId ? magicTopicMap.get(desiredMagicId) : null;
-
-          if (!magicTopic && desiredMagicId) {
-            const existing = document.getElementById(desiredMagicId);
-            if (existing && existing.classList.contains('magic-topic')) {
-              magicTopic = existing;
-              magicTopicMap.set(desiredMagicId, magicTopic);
-            }
-          }
-
-          if (!magicTopic) {
-            magicTopic = magicTopicBySource.get(topicId);
-          }
-
-          if (!magicTopic && typeof topicData?.magicHtml === 'string') {
-            let baseId = desiredMagicId || `magic-topic-${topicId}`;
-            baseId = baseId.trim();
-            if (!baseId) {
-              baseId = generateUniqueId('magic-topic');
-            }
-            let uniqueId = baseId;
-            while (uniqueId && (magicTopicMap.has(uniqueId) || document.getElementById(uniqueId))) {
-              uniqueId = `${baseId}-${Math.random().toString(36).slice(2, 6)}`;
-            }
-            magicTopic = document.createElement('div');
-            magicTopic.id = uniqueId;
-            magicTopic.className = 'magic-topic';
-            magicContainer.appendChild(magicTopic);
-            magicTopicMap.set(uniqueId, magicTopic);
-          }
-
-          if (magicTopic) {
-            if (!magicTopic.id) {
-              let fallbackId = desiredMagicId || `magic-topic-${topicId || generateUniqueId('magic-topic')}`;
-              fallbackId = (fallbackId || '').trim();
-              if (!fallbackId) {
-                fallbackId = generateUniqueId('magic-topic');
-              }
-              let finalId = fallbackId;
-              while (finalId && (magicTopicMap.has(finalId) || document.getElementById(finalId))) {
-                finalId = `${fallbackId}-${Math.random().toString(36).slice(2, 6)}`;
-              }
-              magicTopic.id = finalId;
-            }
-            if (typeof topicData.magicHtml === 'string') {
-              magicTopic.innerHTML = topicData.magicHtml;
-              afterContentSanitize(magicTopic);
-            }
-            if (topicId) {
-              magicTopic.dataset.sourceTopicId = topicId;
-              magicTopicBySource.set(topicId, magicTopic);
-            }
-            if (!magicTopicMap.has(magicTopic.id)) {
-              magicTopicMap.set(magicTopic.id, magicTopic);
-            }
-            resolvedMagicId = magicTopic.id;
-          }
-        }
+        const resolvedMagicId = resolveSupplementForTopic(topicData, page, SUPPLEMENT_TYPES.MAGIC);
+        const resolvedPillId = resolveSupplementForTopic(topicData, page, SUPPLEMENT_TYPES.PILL);
 
         if (resolvedMagicId) {
           page.dataset.magicAnchorId = resolvedMagicId;
@@ -14141,6 +14486,19 @@ ${inlineStyles}
           }
         } else {
           delete page.dataset.magicAnchorId;
+        }
+
+        if (resolvedPillId) {
+          page.dataset.pillAnchorId = resolvedPillId;
+        } else if (topicData?.pillId) {
+          const fallbackPillId = String(topicData.pillId).trim();
+          if (fallbackPillId) {
+            page.dataset.pillAnchorId = fallbackPillId;
+          } else {
+            delete page.dataset.pillAnchorId;
+          }
+        } else {
+          delete page.dataset.pillAnchorId;
         }
       });
 
