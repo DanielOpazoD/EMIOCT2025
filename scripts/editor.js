@@ -11556,6 +11556,53 @@ export async function initializeEditor() {
         return { source: src, anchorId: resolvedId };
       }
 
+      function getMagicTopicForPage(page, { createIfMissing = false } = {}) {
+        if (!page) {
+          return { magicId: '', magicEl: null };
+        }
+
+        let magicId = magicAnchorFor(page);
+        let magicEl = magicId ? document.getElementById(magicId) : null;
+
+        if (magicEl && !magicEl.classList.contains('magic-topic')) {
+          const topicEl = magicEl.closest('.magic-topic');
+          if (topicEl) {
+            magicEl = topicEl;
+            magicId = topicEl.id || magicId;
+          } else {
+            magicEl = null;
+          }
+        }
+
+        if ((!magicEl || !magicEl.classList.contains('magic-topic')) && createIfMissing) {
+          const { source, anchorId } = ensureMagicTopicSource(magicId, page);
+          magicEl = source || null;
+          magicId = anchorId || (magicEl?.id || '');
+        }
+
+        if (magicEl) {
+          if (!magicEl.id && magicId) {
+            magicEl.id = magicId;
+          } else if (!magicId && magicEl.id) {
+            magicId = magicEl.id;
+          }
+
+          const topicId = (page.dataset.topicId || '').trim();
+          if (topicId) {
+            magicEl.dataset.sourceTopicId = topicId;
+          }
+
+          if (magicId) {
+            page.dataset.magicAnchorId = magicId;
+          }
+        }
+
+        return {
+          magicId: magicId || '',
+          magicEl
+        };
+      }
+
       function persistMagicEdits() {
         if (!activeMagicWrapper && !activeMagicSource) {
           return;
@@ -11565,9 +11612,13 @@ export async function initializeEditor() {
           activeMagicWrapper = null;
         }
 
-        if (!activeMagicSource && activeMagicWrapper && activeMagicPage) {
-          const { source } = ensureMagicTopicSource('', activeMagicPage);
-          activeMagicSource = source || null;
+        if (activeMagicPage) {
+          const { magicEl } = getMagicTopicForPage(activeMagicPage, {
+            createIfMissing: Boolean(activeMagicWrapper)
+          });
+          if (magicEl) {
+            activeMagicSource = magicEl;
+          }
         }
 
         if (activeMagicSource && !document.contains(activeMagicSource)) {
@@ -11580,6 +11631,10 @@ export async function initializeEditor() {
 
         activeMagicSource.innerHTML = activeMagicWrapper.innerHTML;
         afterContentSanitize(activeMagicSource);
+
+        if (activeMagicPage && activeMagicSource.id) {
+          activeMagicPage.dataset.magicAnchorId = activeMagicSource.id;
+        }
       }
 
       function setMagicFloatingBackVisibility(visible, disabled = false) {
@@ -13370,8 +13425,10 @@ export async function initializeEditor() {
     const h1 = page.querySelector('h1');
     const titleSpan = h1?.querySelector('span:first-child');
     const title = (titleSpan?.textContent || h1?.textContent || 'tema').trim();
-    const magicId = magicAnchorFor(page);
-    const magicContent = document.getElementById(magicId);
+
+    persistMagicEdits();
+    const { magicEl } = getMagicTopicForPage(page);
+    const magicContentHtml = magicEl ? magicEl.outerHTML : '';
     
     const tempPage = page.cloneNode(true);
     tempPage.contentEditable = 'false';
@@ -13392,7 +13449,7 @@ ${inlineStyles}
   </style>
 </head>
 <body class="${currentTheme}">
-  ${magicContent ? '<div class="magic-content-container" style="display:none">' + magicContent.outerHTML + '</div>' : ''}
+  ${magicContentHtml ? '<div class="magic-content-container" style="display:none">' + magicContentHtml + '</div>' : ''}
   ${tempPage.outerHTML}
 </body>
 </html>`;
@@ -13586,11 +13643,8 @@ ${inlineStyles}
         }
 
         const titleText = (tema.titulo || getTopicTitle(page) || '').trim() || `Tema ${exportSection.temas.length + 1}`;
-        const magicId = magicAnchorFor(page);
-        const magicEl = magicId ? document.getElementById(magicId) : null;
-        if (magicEl && topicId) {
-          magicEl.dataset.sourceTopicId = topicId;
-        }
+        const { magicId, magicEl } = getMagicTopicForPage(page);
+
 
         const templateBlocks = serializeTemplateBlocks(page);
         const topicExport = {
@@ -13636,11 +13690,7 @@ ${inlineStyles}
         page.dataset.topicId = topicId;
       }
 
-      const magicId = magicAnchorFor(page);
-      const magicEl = magicId ? document.getElementById(magicId) : null;
-      if (magicEl && topicId) {
-        magicEl.dataset.sourceTopicId = topicId;
-      }
+      const { magicId, magicEl } = getMagicTopicForPage(page);
 
       const templateBlocks = serializeTemplateBlocks(page);
       const topicExport = {
