@@ -2707,11 +2707,51 @@ body.panel-filter-active .panel-topic-count {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
+.topic-list .topic-magic-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--theme-primary);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  padding: 0;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.topic-list .topic-magic-indicator .magic-icon-symbol {
+  font-size: 1.08rem;
+  line-height: 1;
+}
+
+.topic-list .topic-magic-indicator:hover,
+.topic-list .topic-magic-indicator:focus-visible {
+  background: rgba(15, 23, 42, 0.16);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.topic-list .topic-magic-indicator.has-content {
+  background: var(--theme-primary);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.2);
+}
+
+.topic-list .topic-magic-indicator.has-content:hover,
+.topic-list .topic-magic-indicator.has-content:focus-visible {
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.26);
+}
+
 .topic-list .topic-trailing {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .topic-list .topic-edit-actions {
@@ -2874,23 +2914,57 @@ h1 .topic-title-text {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  font-size: 1.524rem;
+  gap: 0.55rem;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.98rem;
+  font-weight: 600;
   cursor: pointer;
-  background: rgba(0, 0, 0, 0.05);
   border: none;
-  border-radius: 50%;
-  transition: all 0.3s ease;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--theme-primary);
+  transition: background 0.22s ease, color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 12px;
   margin-right: 0;
+  line-height: 1.1;
+  font-family: inherit;
 }
 
-.magic-icon:hover {
+.magic-icon .magic-icon-symbol {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.magic-icon .magic-icon-label {
+  font-size: 0.96rem;
+  letter-spacing: 0.01em;
+}
+
+.magic-icon:hover,
+.magic-icon:focus-visible {
   background: var(--theme-primary);
-  transform: scale(1.15) rotate(15deg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.22);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.magic-icon.has-content {
+  background: var(--theme-primary);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+}
+
+.magic-icon.has-content:hover,
+.magic-icon.has-content:focus-visible {
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.28);
+}
+
+.magic-icon:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .topic-note-icon {
@@ -5277,6 +5351,7 @@ body.printing-floating-notes .magic-page {
   .image-toolbar,
   .reading-mode-exit,
   .magic-icon,
+  .topic-magic-indicator,
   .topic-note-icon,
   .topic-note-indicator,
   #topicNotesPopover,
